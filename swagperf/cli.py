@@ -58,6 +58,52 @@ def _print(res, regs, metrics):
     print()
 
 
+NAMES = {"ttff_ms": "first camera frame", "slow_pct": "slow frames",
+         "janky_pct": "janky frames", "thermal_drift_pct": "thermal drift",
+         "peak_rss_mb": "peak RSS", "rss_growth_mb": "RSS growth"}
+UNITS = {"ttff_ms": "ms", "slow_pct": "%", "janky_pct": "%",
+         "thermal_drift_pct": "%", "peak_rss_mb": "MB", "rss_growth_mb": "MB"}
+MARK = {"worse": "\033[31mworse\033[0m", "better": "\033[32mbetter\033[0m",
+        "same": "\033[90msame\033[0m"}
+
+
+def _print_compare(d):
+    a, b = d["run"], d["base"]
+    print(f"\n  run {a['id']} ({a['label'] or 'no label'}{', ' + a['git_sha'] if a['git_sha'] else ''})"
+          f"  vs  run {b['id']} ({b['label'] or 'no label'}{', ' + b['git_sha'] if b['git_sha'] else ''})")
+    if not d["comparable"]:
+        print(f"  \033[33mWARNING\033[0m different startup paths "
+              f"({a['path_kind']} vs {b['path_kind']}) \u2014 these budgets are not comparable")
+    if not d["same_device"]:
+        print(f"  \033[33mWARNING\033[0m different devices "
+              f"({a['device'] or '?'} vs {b['device'] or '?'}) \u2014 variance will be inflated")
+    s = d["summary"]
+    print(f"  {s['worse']} worse \u00b7 {s['better']} better \u00b7 {s['same']} unchanged\n")
+    for m in d["metrics"]:
+        u = UNITS.get(m["metric"], "")
+        dp = "" if m["delta_pct"] is None else f"{m['delta_pct']:+}%"
+        print(f"  {NAMES.get(m['metric'], m['metric']):<20} "
+              f"{m['value']:>8}{u:<3} vs {m['base_value']:>8}{u:<3} "
+              f"{m['delta']:+8.2f}  {dp:>8}  {MARK[m['verdict']]}")
+    print("\n  steps")
+    for st in d["steps"]:
+        if st.get("only_in"):
+            where = "only in this run" if st["only_in"] == "run" else "only in base"
+            print(f"  {st['step'].replace('step:', ''):<24} \033[33m{where}\033[0m")
+            continue
+        dp = "" if st.get("delta_pct") is None else f"{st['delta_pct']:+}%"
+        print(f"  {st['step'].replace('step:', ''):<24} "
+              f"{st['dur_ms']:>8.1f}ms vs {st['base_dur_ms']:>8.1f}ms "
+              f"{st['delta_ms']:+8.2f}  {dp:>8}  {MARK.get(st.get('verdict'), '')}")
+        if st.get("verdict") == "worse":
+            for k in st["children"][:3]:
+                if k["delta_ms"] is None or abs(k["delta_ms"]) < 0.5:
+                    continue
+                kpct = "" if k["delta_pct"] is None else f"  {k['delta_pct']:+}%"
+                print(f"      {k['name']:<26} {k['delta_ms']:+8.2f}ms{kpct}")
+    print()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="swagperf", description="Swag Pay Perfetto monitor")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -90,6 +136,23 @@ def main(argv=None):
 
     sub.add_parser("list", help="list recorded runs")
     sub.add_parser("reextract", help="recompute metrics for all runs whose traces still exist")
+
+    cm = sub.add_parser("compare", help="diff two runs")
+    cm.add_argument("run", type=int, help="the run to inspect")
+    cm.add_argument("base", nargs="?", type=int,
+                    help="the run to compare against (default: the pinned benchmark)")
+    cm.add_argument("--json", action="store_true")
+
+    bm = sub.add_parser("benchmark", help="pin, show or clear the reference run")
+    bmx = bm.add_subparsers(dest="bcmd", required=True)
+    bset = bmx.add_parser("set", help="pin a run as the benchmark for its scope")
+    bset.add_argument("run", type=int)
+    bset.add_argument("--note")
+    bclr = bmx.add_parser("clear", help="unpin")
+    bclr.add_argument("--run", type=int)
+    bclr.add_argument("--path-kind", default="returning_user")
+    bclr.add_argument("--device")
+    bmx.add_parser("list", help="show pinned benchmarks")
 
     n = ap.parse_args(argv)
 
@@ -135,6 +198,48 @@ def main(argv=None):
                                app_version=f"2.{i//5}.{i%5}", device="pixel7", trace_path=p)
             res, regs = _analyse_run(rid, m, use_llm=False)
             print(f"  run {rid:>3}  {m['startup']['time_to_first_camera_frame_ms']:>7}ms  {res['verdict']}")
+        return 0
+
+    if n.cmd == "benchmark":
+        if n.bcmd == "set":
+            b = store.set_benchmark(n.run, note=n.note)
+            print(f"  pinned run {b['run_id']} ({b['label'] or 'no label'}) as benchmark "
+                  f"for {b['path_kind']} / {b['device'] or 'any device'}")
+            print("  regressions for that scope are now measured against this run")
+            return 0
+        if n.bcmd == "clear":
+            k = store.clear_benchmark(run_id=n.run, path_kind=n.path_kind, device=n.device)
+            print(f"  cleared {k} benchmark(s); regressions fall back to the trailing baseline")
+            return 0
+        rows = store.benchmarks()
+        if not rows:
+            print("  no benchmarks pinned; regressions use the trailing baseline")
+            return 0
+        for b in rows:
+            print(f"  {b['scope']:<28} run {b['run_id']:<4} {b['label'] or '':<18} "
+                  f"set {b['set_at']}" + (f"  \u2014 {b['note']}" if b["note"] else ""))
+        return 0
+
+    if n.cmd == "compare":
+        base = n.base
+        if base is None:
+            c = store.connect()
+            meta = c.execute("select path_kind, device from runs where id=?", (n.run,)).fetchone()
+            c.close()
+            if not meta:
+                print(f"  no run with id {n.run}")
+                return 2
+            b = store.get_benchmark(path_kind=meta["path_kind"], device=meta["device"])
+            if not b:
+                print("  no base run given and no benchmark pinned.")
+                print("  pass a base run id, or pin one with: swagperf benchmark set <run>")
+                return 2
+            base = b["run_id"]
+        d = store.compare(n.run, base)
+        if n.json:
+            print(json.dumps(d, indent=2))
+            return 0
+        _print_compare(d)
         return 0
 
     if n.cmd == "reextract":

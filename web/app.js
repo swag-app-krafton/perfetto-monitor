@@ -29,6 +29,7 @@ let OPEN_STEP = null;   // step drilled into, null = none
 let HIDDEN = new Set();  // runtimes toggled off in the step chart
 let MODE = 'critical';   // critical | all | grouped
 let TAB = 'overview';    // one tab per performance concern in the architecture
+let CMP = { run: null, base: null, data: null, loading: false };  // comparison view
 
 const TABS = [
   { id: 'overview', label: 'Overview',  blurb: 'Verdict, budgets and findings for the latest run.' },
@@ -36,8 +37,51 @@ const TABS = [
   { id: 'frames',   label: 'Frame pacing', blurb: 'Slow and frozen frames during sustained scanning, and thermal drift.' },
   { id: 'memory',   label: 'Memory',    blurb: 'Peak RSS with three runtimes resident, and growth suggesting orphaned RN surfaces.' },
   { id: 'steps',    label: 'Steps',     blurb: 'Per-step durations, trailing baselines and child-slice breakdown.' },
-  { id: 'history',  label: 'History',   blurb: 'Every recorded run, sortable and filterable.' },
+  { id: 'compare',  label: 'Compare',   blurb: 'Diff any two runs, or any run against the pinned benchmark.' },
+  { id: 'history',  label: 'History',   blurb: 'Every recorded run, sortable and filterable. Pin a run as the benchmark here.' },
 ];
+
+function benchOf(run) {
+  // The pinned reference for a run's scope, preferring an exact device match.
+  const bs = DATA.benchmarks || [];
+  return bs.find(b => b.path_kind === run.path_kind && b.device === run.device)
+      || bs.find(b => b.path_kind === run.path_kind && !b.device)
+      || null;
+}
+
+async function postJSON(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                               body: JSON.stringify(body) });
+  return r.json();
+}
+
+async function setBenchmark(runId, note) {
+  await postJSON('/api/benchmark/set', { run_id: runId, note: note || null });
+  await load();           // reload so every view reflects the new reference
+}
+
+async function clearBenchmark(runId) {
+  await postJSON('/api/benchmark/clear', { run_id: runId });
+  await load();
+}
+
+async function loadCompare() {
+  if (CMP.run == null || CMP.base == null || CMP.run === CMP.base) { CMP.data = null; return; }
+  CMP.loading = true;
+  try {
+    const r = await fetch(`/api/compare?run=${CMP.run}&base=${CMP.base}`);
+    CMP.data = await r.json();
+  } catch (e) {
+    CMP.data = { error: String(e) };
+  }
+  CMP.loading = false;
+}
+
+const MNAMES = { ttff_ms: 'First camera frame', slow_pct: 'Slow frames',
+  janky_pct: 'Janky frames', thermal_drift_pct: 'Thermal drift',
+  peak_rss_mb: 'Peak RSS', rss_growth_mb: 'RSS growth' };
+const MUNITS = { ttff_ms: 'ms', slow_pct: '%', janky_pct: '%',
+  thermal_drift_pct: '%', peak_rss_mb: 'MB', rss_growth_mb: 'MB' };
 const CRITICAL = {
   returning_user: ['step:bootstrap', 'step:session_read', 'step:compose_shell',
                    'step:camera_open', 'step:first_qr_decode'],
@@ -743,9 +787,108 @@ function render() {
     });
   }
 
+  /* ---------------- COMPARE ---------------- */
+  if (TAB === 'compare') {
+    const bench = benchOf(cur);
+    if (CMP.run == null) CMP.run = cur.id;
+    if (CMP.base == null) CMP.base = bench ? bench.run_id : (rs.length > 1 ? rs.at(-2).id : cur.id);
+    const opt = (rid, sel) => DATA.runs.map(r =>
+      `<option value="${r.id}"${r.id === sel ? ' selected' : ''}>run ${r.id} \u00b7 ${esc(r.label || 'no label')}${r.app_version ? ' \u00b7 ' + esc(r.app_version) : ''}${bench && bench.run_id === r.id ? '  \u2605 benchmark' : ''}</option>`).join('');
+    const d = CMP.data;
+    const verdictCell = v => `<span class="cv ${v || ''}">${v === 'worse' ? '\u25b2 worse' : v === 'better' ? '\u25bc better' : 'same'}</span>`;
+
+    app.innerHTML = head + `
+      <div class="card">
+        <div class="cmpbar">
+          <div><span class="flabel">Run</span><select id="cmprun">${opt(CMP.run, CMP.run)}</select></div>
+          <div class="vs">vs</div>
+          <div><span class="flabel">Baseline</span><select id="cmpbase">${opt(CMP.base, CMP.base)}</select></div>
+          <button id="cmpswap" title="Swap the two runs">\u21c4 Swap</button>
+          ${bench ? `<button id="cmpbench" title="Compare against the pinned benchmark">Use benchmark (run ${bench.run_id})</button>` : ''}
+        </div>
+        ${bench ? `<p class="hint" style="margin-top:10px">Benchmark for ${esc(cur.path_kind)} / ${esc(bench.device || 'any device')} is run ${bench.run_id} (${esc(bench.label || 'no label')})${bench.note ? ' \u2014 ' + esc(bench.note) : ''}.</p>`
+                : '<p class="hint" style="margin-top:10px">No benchmark pinned. Pin one from the History tab to make it the default baseline here and the reference for regression detection.</p>'}
+      </div>
+      ${CMP.loading ? '<div class="card"><p class="empty">Comparing\u2026</p></div>' : ''}
+      ${d && d.error ? `<div class="card"><p class="empty">${esc(d.error)}</p></div>` : ''}
+      ${d && !d.error ? `
+        ${!d.comparable ? `<div class="card" style="border-color:var(--crit)">
+          <h2 style="color:var(--crit)">Not comparable</h2>
+          <p class="hint">Run ${d.run.id} is a <b>${esc(d.run.path_kind)}</b> trace and run ${d.base.id} is a <b>${esc(d.base.path_kind)}</b> trace. The two startup paths have different critical paths and different budgets, so these numbers do not mean the same thing. Pick two runs on the same path.</p></div>` : ''}
+        ${d.comparable && !d.same_device ? `<div class="card" style="border-color:var(--warn)">
+          <h2 style="color:var(--warn)">Different devices</h2>
+          <p class="hint">${esc(d.run.device || 'unknown')} vs ${esc(d.base.device || 'unknown')}. Run-to-run variance across device classes is much wider than within one, so treat small deltas as noise.</p></div>` : ''}
+        <div class="card">
+          <h2>Top-line metrics</h2>
+          <p class="hint">run ${d.run.id} (${esc(d.run.label || 'no label')}) against run ${d.base.id} (${esc(d.base.label || 'no label')}) &mdash;
+            ${d.summary.worse} worse, ${d.summary.better} better, ${d.summary.same} unchanged.</p>
+          <div class="scroll"><table>
+            <thead><tr><th>Metric</th><th class="num">Run ${d.run.id}</th><th class="num">Run ${d.base.id}</th><th class="num">Delta</th><th class="num">Change</th><th></th></tr></thead>
+            <tbody>${d.metrics.map(m => `<tr>
+              <td>${esc(MNAMES[m.metric] || m.metric)}</td>
+              <td class="num">${fmt(m.value, 2)}<span class="u">${esc(MUNITS[m.metric] || '')}</span></td>
+              <td class="num" style="color:var(--text-secondary)">${fmt(m.base_value, 2)}</td>
+              <td class="num ${m.verdict === 'worse' ? 'up' : m.verdict === 'better' ? 'dn' : ''}">${m.delta > 0 ? '+' : ''}${fmt(m.delta, 2)}</td>
+              <td class="num" style="color:var(--text-secondary)">${m.delta_pct == null ? (m.signed ? 'n/a' : '\u2013') : (m.delta_pct > 0 ? '+' : '') + fmt(m.delta_pct, 1) + '%'}</td>
+              <td>${verdictCell(m.verdict)}</td></tr>`).join('')}</tbody>
+          </table></div>
+          ${d.metrics.some(m => m.signed) ? '<p class="hint" style="margin-top:9px">Thermal drift can be negative, so a percentage change across zero would be meaningless; only the absolute move is shown.</p>' : ''}
+        </div>
+        <div class="card">
+          <h2>Steps</h2>
+          <p class="hint">Sorted by duration in run ${d.run.id}. A step that got worse expands to show which child slices moved.</p>
+          <div class="scroll"><table>
+            <thead><tr><th>Step</th><th class="num">Run ${d.run.id}</th><th class="num">Run ${d.base.id}</th><th class="num">Delta</th><th class="num">Change</th><th></th></tr></thead>
+            <tbody>${d.steps.map(st => {
+              if (st.only_in) return `<tr><td>${esc(st.step.replace('step:', ''))}</td>
+                <td colspan="5" style="color:var(--warn)">only present in ${st.only_in === 'run' ? 'run ' + d.run.id : 'run ' + d.base.id}</td></tr>`;
+              const rt = RUNTIME[st.step] || 'native';
+              const kids = (st.children || []).filter(k => k.delta_ms != null && Math.abs(k.delta_ms) >= 0.5);
+              return `<tr>
+                <td><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${RC[rt]};margin-right:7px"></i>${esc(st.step.replace('step:', ''))}</td>
+                <td class="num">${fmt(st.dur_ms, 1)}<span class="u">ms</span></td>
+                <td class="num" style="color:var(--text-secondary)">${fmt(st.base_dur_ms, 1)}</td>
+                <td class="num ${st.verdict === 'worse' ? 'up' : st.verdict === 'better' ? 'dn' : ''}">${st.delta_ms > 0 ? '+' : ''}${fmt(st.delta_ms, 1)}</td>
+                <td class="num" style="color:var(--text-secondary)">${st.delta_pct == null ? '\u2013' : (st.delta_pct > 0 ? '+' : '') + fmt(st.delta_pct, 1) + '%'}</td>
+                <td>${verdictCell(st.verdict)}</td></tr>` +
+                (st.verdict === 'worse' && kids.length ? kids.slice(0, 4).map(k => `<tr class="kidrow">
+                  <td>\u21b3 ${esc(k.name)}</td>
+                  <td class="num">${k.dur_ms == null ? '\u2013' : fmt(k.dur_ms, 1)}</td>
+                  <td class="num" style="color:var(--text-secondary)">${k.base_dur_ms == null ? '\u2013' : fmt(k.base_dur_ms, 1)}</td>
+                  <td class="num ${k.delta_ms > 0 ? 'up' : 'dn'}">${k.delta_ms > 0 ? '+' : ''}${fmt(k.delta_ms, 1)}</td>
+                  <td class="num" style="color:var(--text-secondary)">${k.delta_pct == null ? '\u2013' : (k.delta_pct > 0 ? '+' : '') + fmt(k.delta_pct, 1) + '%'}</td>
+                  <td></td></tr>`).join('') : '');
+            }).join('')}</tbody>
+          </table></div>
+        </div>` : (CMP.run === CMP.base ? '<div class="card"><p class="empty">Pick two different runs.</p></div>' : '')}`;
+    post.push(() => {
+      const rsel = $('#cmprun'), bsel = $('#cmpbase');
+      if (rsel) rsel.onchange = async () => { CMP.run = +rsel.value; await loadCompare(); render(); };
+      if (bsel) bsel.onchange = async () => { CMP.base = +bsel.value; await loadCompare(); render(); };
+      const sw = $('#cmpswap');
+      if (sw) sw.onclick = async () => { [CMP.run, CMP.base] = [CMP.base, CMP.run]; await loadCompare(); render(); };
+      const cb = $('#cmpbench');
+      if (cb) cb.onclick = async () => { CMP.base = bench.run_id; await loadCompare(); render(); };
+      if (!CMP.data && !CMP.loading && CMP.run !== CMP.base) loadCompare().then(render);
+    });
+  }
+
   /* ---------------- HISTORY ---------------- */
   if (TAB === 'history') {
+    const benchRun = benchOf(cur);
     app.innerHTML = head + `
+      ${(DATA.benchmarks || []).length ? `<div class="card">
+        <h2>Pinned benchmarks</h2>
+        <p class="hint">A benchmark is the reference a run's regressions are measured against, replacing the trailing baseline for its scope. One per startup path and device.</p>
+        <div class="scroll"><table class="tight">
+          <thead><tr><th>Scope</th><th class="num">Run</th><th>Label</th><th>Pinned</th><th>Note</th><th></th></tr></thead>
+          <tbody>${DATA.benchmarks.map(b => `<tr>
+            <td>${esc(b.path_kind)} / ${esc(b.device || 'any device')}</td>
+            <td class="num">${b.run_id}</td><td>${esc(b.label || '')}</td>
+            <td style="color:var(--text-secondary)">${esc(b.set_at)}</td>
+            <td style="color:var(--text-secondary)">${esc(b.note || '')}</td>
+            <td><button class="mini-btn" data-unbench="${b.run_id}">Unpin</button></td></tr>`).join('')}</tbody>
+        </table></div></div>` : ''}
       <div class="card">
         <h2>Run history</h2>
         <p class="hint">${rs.length} run(s) in the current window. Sort by any column; filters narrow this table only.</p>
@@ -768,7 +911,7 @@ function render() {
             ${th('history', 'app_version', 'Version')}${th('history', 'device', 'Device')}
             ${th('history', 'ttff_ms', 'First frame', 'num')}${th('history', 'slow_pct', 'Slow %', 'num')}
             ${th('history', 'thermal_drift_pct', 'Drift %', 'num')}${th('history', 'peak_rss_mb', 'Peak RSS', 'num')}
-            ${th('history', 'verdict', 'Verdict')}
+            ${th('history', 'verdict', 'Verdict')}<th>Actions</th>
           </tr></thead>
           <tbody>${sortRows(fr, 'history', { verdict: r => r.analysis?.verdict || 'zzz' }).map(r => `<tr${r.id === cur.id ? ' class="cur"' : ''}>
             <td>${r.id}</td><td style="color:var(--text-secondary)">${esc(r.ts)}</td>
@@ -779,11 +922,42 @@ function render() {
             <td class="num" style="${r.thermal_drift_pct > gb.thermal_drift_pct ? 'color:var(--crit)' : ''}">${fmt(r.thermal_drift_pct, 2)}</td>
             <td class="num">${fmt(r.peak_rss_mb, 1)} MB</td>
             <td><span class="pill ${esc(r.analysis?.verdict || 'unknown')}">${esc(r.analysis?.verdict || '–')}</span></td>
-          </tr>`).join('') || '<tr><td colspan="10" class="empty">No runs match these filters.</td></tr>'}</tbody>
+            <td class="acts">
+              ${benchRun && benchRun.run_id === r.id
+                ? `<span class="bpin on" title="${esc(benchRun.note || 'Pinned benchmark')}">★ benchmark</span>
+                   <button class="mini-btn" data-unbench="${r.id}" title="Unpin this benchmark">Unpin</button>`
+                : `<button class="mini-btn" data-bench="${r.id}" title="Pin run ${r.id} as the benchmark for ${esc(r.path_kind)} / ${esc(r.device || 'any device')}">Set benchmark</button>`}
+              <button class="mini-btn" data-cmp="${r.id}" title="Compare run ${r.id} against the current baseline">Compare</button>
+            </td>
+          </tr>`).join('') || '<tr><td colspan="11" class="empty">No runs match these filters.</td></tr>'}</tbody>
         </table></div>
       </div>`;
     post.push(() => {
       wireSort();
+      document.querySelectorAll('[data-bench]').forEach(b => b.onclick = async e => {
+        e.stopPropagation();
+        b.disabled = true; b.textContent = 'Pinning\u2026';
+        await setBenchmark(+b.dataset.bench);
+      });
+      document.querySelectorAll('[data-unbench]').forEach(b => b.onclick = async e => {
+        e.stopPropagation();
+        b.disabled = true; b.textContent = 'Unpinning\u2026';
+        await clearBenchmark(+b.dataset.unbench);
+      });
+      document.querySelectorAll('[data-cmp]').forEach(b => b.onclick = async e => {
+        e.stopPropagation();
+        CMP.run = +b.dataset.cmp;
+        // Always prefer the current benchmark as the baseline; fall back to the
+        // nearest earlier run. A stale CMP.base from a previous comparison would
+        // otherwise silently win after the benchmark is re-pinned.
+        const bch = benchOf(cur);
+        CMP.base = (bch && bch.run_id !== CMP.run)
+          ? bch.run_id
+          : ([...rs].reverse().find(r => r.id < CMP.run)?.id ?? cur.id);
+        TAB = 'compare';
+        await loadCompare();
+        render();
+      });
       const vf = $('#vfilter'); if (vf) vf.onchange = () => { FILTER.verdict = vf.value; render(); };
       const df = $('#dfilter'); if (df) df.onchange = () => { FILTER.device = df.value; render(); };
       const cf = $('#clearf'); if (cf) cf.onclick = () => { FILTER.q = ''; FILTER.verdict = 'all'; FILTER.device = 'all'; render(); };
