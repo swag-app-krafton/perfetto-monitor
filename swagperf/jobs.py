@@ -130,3 +130,106 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
 
     threading.Thread(target=run, daemon=True).start()
     return jid
+
+
+def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
+                 settle_ms=1500, use_llm=False, device=None):
+    """Capture N cold-start sessions of one app back to back.
+
+    A single cold start is a noisy measurement: the same app on the same device
+    varies run to run with cache state, background work and thermal condition.
+    Repeating it is the only way to tell a real regression from that noise, so
+    this records each session as an ordinary run and groups them, reporting the
+    spread rather than a single number.
+    """
+    if not PKG_RE.match(pkg or ""):
+        raise ValueError(f"'{pkg}' does not look like an Android package name")
+    sessions = max(2, min(int(sessions), 30))
+    duration_ms = max(2000, min(int(duration_ms), 60_000))
+    jid = _new("stress", pkg=pkg, cold=bool(cold), duration_ms=duration_ms,
+               sessions=sessions)
+
+    def run():
+        if not _capture_lock.acquire(blocking=False):
+            _set(jid, state="error", error="Another capture is already running "
+                 "on this device. Wait for it to finish and try again.")
+            return
+        stress_id = None
+        try:
+            _set(jid, state="running")
+            from . import capture as cap, extract as ex, store, catalogue
+            info = cap.device_info(device)
+            if not info:
+                raise RuntimeError("No adb device connected.")
+            dev_label = info.get("model") or info.get("device")
+            if not catalogue.get(pkg):
+                catalogue.add(pkg, name=pkg, role="competitor")
+
+            stress_id = store.stress_create(
+                app_pkg=pkg, device=dev_label, label=label, sessions=sessions,
+                cold=cold, duration_ms=duration_ms)
+            _set(jid, stress_id=stress_id)
+            _log(jid, f"device: {info.get('model')} (Android {info.get('release')})")
+            _log(jid, f"stress test #{stress_id}: {sessions} "
+                      f"{'cold' if cold else 'warm'} session(s) of {pkg}")
+
+            ok = 0
+            for i in range(1, sessions + 1):
+                _log(jid, f"session {i}/{sessions}: capturing…")
+                _set(jid, progress={"current": i, "total": sessions})
+                out = f"traces/stress{stress_id}_{pkg}_{i:02d}.pftrace"
+                try:
+                    cap.capture(out, pkg=pkg, duration_ms=duration_ms, cold=cold,
+                                serial=device)
+                    m = ex.extract_any(out, app_pkg=pkg)
+                    problems = ex.capture_problems(m, requested_pkg=pkg)
+                    fatal = [p for p in problems
+                             if "own process" in p or "never came to the foreground" in p]
+                    if fatal:
+                        raise RuntimeError(fatal[0])
+                    rid = store.record(
+                        m, label=f"stress{stress_id}-s{i:02d}", device=dev_label,
+                        trace_path=out, app_pkg=m.get("app_pkg"))
+                    from .cli import _analyse_run
+                    _analyse_run(rid, m, use_llm=use_llm)
+                    ttid = m["startup"]["time_to_first_camera_frame_ms"]
+                    store.stress_session_done(stress_id, i, run_id=rid, ttid_ms=ttid)
+                    ok += 1
+                    _log(jid, f"session {i}: run {rid}, startup {ttid}ms")
+                except Exception as se:
+                    # One bad session does not end the test -- a stress test with
+                    # a couple of failures is still informative, and stopping
+                    # would discard the sessions already captured.
+                    store.stress_session_done(stress_id, i, state="error", error=str(se))
+                    _log(jid, f"session {i} FAILED: {se}")
+                if i < sessions:
+                    time.sleep(settle_ms / 1000)
+
+            if ok == 0:
+                store.stress_finish(stress_id, state="error",
+                                    error="every session failed to observe the app")
+                raise RuntimeError(
+                    f"all {sessions} sessions failed to observe {pkg}. The app may "
+                    "show a lock or biometric prompt that an adb launch cannot "
+                    "dismiss, or block automated launches.")
+
+            store.stress_finish(stress_id, state="done")
+            st = store.stress_get(stress_id)
+            s = (st.get("stats") or {}).get("ttid_ms") or {}
+            if s:
+                _log(jid, f"startup across {s['n']} session(s): median {s['median']}ms, "
+                          f"min {s['min']}ms, max {s['max']}ms, spread {s.get('spread_pct')}%")
+            _set(jid, state="done",
+                 result={"stress_id": stress_id, "app_pkg": pkg,
+                         "completed": ok, "failed": sessions - ok,
+                         "stats": st.get("stats")})
+        except Exception as e:
+            _log(jid, f"ERROR: {e}")
+            if stress_id:
+                store.stress_finish(stress_id, state="error", error=str(e))
+            _set(jid, state="error", error=str(e))
+        finally:
+            _capture_lock.release()
+
+    threading.Thread(target=run, daemon=True).start()
+    return jid

@@ -50,7 +50,7 @@ def _print(res, regs, metrics):
     print(f"  frames  {f['total']} total · {f['slow_pct']}% slow · {f['janky_pct']}% janky · drift {f['thermal_drift_pct']}%")
     if metrics.get("memory", {}).get("rss"):
         m = metrics["memory"]["rss"]
-        print(f"  memory  peak {m['peak_mb']}MB · growth {m['growth_mb']}MB")
+        print(f"  RAM  peak {m['peak_mb']}MB · growth {m['growth_mb']}MB")
     for fd in res.get("findings", []):
         print(f"\n  [{fd.get('severity','?').upper()}] {fd.get('title')}  ({fd.get('runtime')})")
         print(f"      {fd.get('evidence')}")
@@ -64,7 +64,7 @@ def _print(res, regs, metrics):
 
 NAMES = {"ttff_ms": "first camera frame", "slow_pct": "slow frames",
          "janky_pct": "janky frames", "thermal_drift_pct": "thermal drift",
-         "peak_rss_mb": "peak RSS", "rss_growth_mb": "RSS growth"}
+         "peak_rss_mb": "peak RAM usage", "rss_growth_mb": "RAM growth"}
 UNITS = {"ttff_ms": "ms", "slow_pct": "%", "janky_pct": "%",
          "thermal_drift_pct": "%", "peak_rss_mb": "MB", "rss_growth_mb": "MB"}
 MARK = {"worse": "\033[31mworse\033[0m", "better": "\033[32mbetter\033[0m",
@@ -108,6 +108,28 @@ def _print_compare(d):
     print()
 
 
+def _print_stress(t):
+    st = (t.get("stats") or {}).get("ttid_ms")
+    print(f"\n  stress test #{t['id']}  {t.get('app_pkg')}  "
+          f"{t['completed']}/{t['sessions_requested']} session(s)"
+          + (f", {t['failed']} failed" if t.get("failed") else ""))
+    if st:
+        print(f"  startup  median {st['median']}ms  min {st['min']}  max {st['max']}  "
+              f"p90 {st['p90']}  \u03c3 {st['stdev']}  spread {st['spread_pct']}%")
+        # The spread is the point of the exercise: it says whether a single
+        # capture could be trusted at all.
+        if st["spread_pct"] and st["spread_pct"] > 25:
+            print(f"  \033[33mnote\033[0m spread is wide -- a single capture of this app "
+                  "would not be reproducible; compare medians, not one-off runs.")
+    print("\n  session   startup      run")
+    for x in t.get("sessions", []):
+        mark = "ok " if x["state"] == "done" else ("ERR" if x["state"] == "error" else "...")
+        val = f"{x['ttid_ms']:.1f}ms" if x.get("ttid_ms") else "-"
+        extra = f"  {x['error'][:60]}" if x.get("error") else ""
+        print(f"  {x['seq']:>5}  {mark}  {val:>10}   {x.get('run_id') or '-'}{extra}")
+    print()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="swagperf", description="Swag Pay Perfetto monitor")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -144,6 +166,18 @@ def main(argv=None):
                    help="capture N times; cold-start numbers are noisy, so several runs matter")
     c.add_argument("--analyse", action="store_true")
     c.add_argument("--label")
+
+    stp = sub.add_parser("stress", help="repeat cold starts and report the spread")
+    stx = stp.add_subparsers(dest="scmd", required=True)
+    sr = stx.add_parser("run", help="capture N sessions of one app")
+    sr.add_argument("--pkg", required=True)
+    sr.add_argument("-n", "--sessions", type=int, default=5)
+    sr.add_argument("--warm", action="store_true", help="warm starts instead of cold")
+    sr.add_argument("--duration-ms", type=int, default=8000)
+    sr.add_argument("--label")
+    stx.add_parser("list", help="list stress tests")
+    sh = stx.add_parser("show", help="show one stress test")
+    sh.add_argument("id", type=int)
 
     s = sub.add_parser("seed", help="generate synthetic history for development")
     s.add_argument("-n", type=int, default=15)
@@ -268,6 +302,44 @@ def main(argv=None):
                                app_version=f"2.{i//5}.{i%5}", device="pixel7", trace_path=p)
             res, regs = _analyse_run(rid, m, use_llm=False)
             print(f"  run {rid:>3}  {m['startup']['time_to_first_camera_frame_ms']:>7}ms  {res['verdict']}")
+        return 0
+
+    if n.cmd == "stress":
+        if n.scmd == "run":
+            from . import jobs
+            import time as _t
+            jid = jobs.start_stress(n.pkg, sessions=n.sessions, cold=not n.warm,
+                                    duration_ms=n.duration_ms, label=n.label)
+            seen = 0
+            while True:
+                j = jobs.get(jid)
+                for l in (j.get("log") or [])[seen:]:
+                    print(f"  [{l['t']}s] {l['text']}")
+                seen = len(j.get("log") or [])
+                if j["state"] in ("done", "error"):
+                    break
+                _t.sleep(1)
+            if j["state"] == "error":
+                print(f"\n  \033[31mFAILED\033[0m {j.get('error')}")
+                return 1
+            _print_stress(store.stress_get(j["result"]["stress_id"]))
+            return 0
+        if n.scmd == "list":
+            rows = store.stress_list()
+            if not rows:
+                print("  no stress tests recorded")
+                return 0
+            for t in rows:
+                st = (t.get("stats") or {}).get("ttid_ms")
+                print(f"  #{t['id']:<4} {t['ts']}  {(t['app_pkg'] or ''):<38} "
+                      f"{t['completed']}/{t['sessions_requested']} sessions  "
+                      + (f"median {st['median']}ms spread {st['spread_pct']}%" if st else "no data"))
+            return 0
+        t = store.stress_get(n.id)
+        if not t:
+            print(f"  no stress test #{n.id}")
+            return 2
+        _print_stress(t)
         return 0
 
     if n.cmd == "apps":

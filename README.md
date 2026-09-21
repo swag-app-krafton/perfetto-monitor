@@ -345,3 +345,34 @@ others. Three things surfaced that are worth knowing:
 
 Apps with a lock or biometric prompt (payment apps especially) may still gate
 their UI, but their startup phases remain measurable — PhonePe profiles fine.
+
+## Stress tests
+
+One cold start is a noisy measurement. Cache state, background work and thermal
+condition all move it, so a single capture cannot tell a real regression from
+ordinary variance. A stress test captures N cold starts back to back and reports
+the **spread**, not an average:
+
+```bash
+./.venv/bin/python -m swagperf.cli stress run --pkg com.phonepe.app -n 10
+./.venv/bin/python -m swagperf.cli stress list
+./.venv/bin/python -m swagperf.cli stress show 3
+```
+
+Or from the dashboard's **Stress** tab: pick an app, choose a session count, run.
+
+Three deliberate choices:
+
+- **Each session is also an ordinary run.** Sessions are recorded in `runs` like
+  any other capture, so the Steps, Memory and Compare tabs work on them
+  unchanged; `stress_tests` only groups them. The per-session table links
+  straight through to each run.
+- **A failed session does not end the test.** Stopping would discard the
+  sessions already captured, and a test with two failures out of ten is still
+  informative. Failures are counted and shown; only an all-failed test errors.
+- **Spread leads the summary.** `spread_pct` is max-over-min relative to the
+  median. A wide spread means a single capture of that app is not reproducible
+  and medians should be compared instead — the CLI says so explicitly above 25%.
+
+Stress history is kept separate from run history, since a row there is a whole
+test rather than one capture.

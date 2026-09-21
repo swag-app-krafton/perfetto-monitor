@@ -53,7 +53,7 @@ RISK_MAP = {
     "deferred_leak": "startup-routing — deferred work ran on the critical path",
     "slow_frame_pct": "Frame pacing at interop (CMP x RN seam)",
     "janky_frame_pct": "Frame pacing at interop (CMP x RN seam)",
-    "peak_rss_mb": "Peak memory — three runtimes resident",
+    "peak_rss_mb": "Peak RAM usage — three runtimes resident",
     "rss_growth_mb": "Surface teardown / orphaned RN surfaces",
     "thermal_drift_pct": "Sustained-scan thermal throttling",
 }
