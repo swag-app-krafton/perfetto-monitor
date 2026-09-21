@@ -383,16 +383,31 @@ def reextract(db=None, extractor=None):
     """
     import os
     if extractor is None:
-        from .extract import extract as extractor
+        # extract_any, not extract: a derived (competitor) run has no step:
+        # markers, so re-extracting it with the instrumented-only extractor
+        # silently zeroes its metrics. app_pkg decides which path each run takes.
+        from .extract import extract_any as extractor
     c = connect(db)
     rows = list(c.execute(
-        "select id, trace_path, path_kind from runs where trace_path is not null order by id"))
+        """select id, trace_path, path_kind, app_pkg, derived from runs
+           where trace_path is not null order by id"""))
     done, missing = 0, []
     for r in rows:
         if not r["trace_path"] or not os.path.exists(r["trace_path"]):
             missing.append(r["id"])
             continue
-        m = extractor(r["trace_path"], path_kind=r["path_kind"] or "returning_user")
+        # The stored `derived` flag, not re-detection, decides which extractor
+        # runs. Re-detecting would flip an instrumented run whose app_pkg was
+        # never recorded over to the derived path, silently replacing its
+        # step: metrics with generic ones.
+        if r["derived"]:
+            m = extractor(r["trace_path"], app_pkg=r["app_pkg"], path_kind=None)
+        else:
+            from .extract import extract as _extract_instrumented
+            m = _extract_instrumented(r["trace_path"],
+                                      path_kind=r["path_kind"] or "returning_user")
+            m.setdefault("app_pkg", r["app_pkg"])
+            m.setdefault("derived", False)
         c.execute("delete from step_metrics where run_id=?", (r["id"],))
         for s in m["steps"]:
             c.execute("""insert into step_metrics

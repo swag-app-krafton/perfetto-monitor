@@ -1,11 +1,36 @@
 """Local dashboard server: static page + JSON history API."""
 import json, os
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from . import store
 from .budgets import STEP_BUDGETS_MS, GLOBAL_BUDGETS, RISK_MAP
 
 WEB = os.path.join(os.path.dirname(__file__), "..", "web")
+
+
+def _device_payload():
+    """Device status merged with the catalogue, for the Capture tab's picker."""
+    from . import capture as cap, catalogue
+    info = cap.device_info()
+    if not info:
+        return {"connected": False}
+    installed = set(cap.installed_packages())
+    known = catalogue.load()
+    seen = {a["pkg"] for a in known}
+    rows = [{**a, "installed": a["pkg"] in installed} for a in known]
+    for pkg in sorted(installed - seen):
+        rows.append({"pkg": pkg, "name": pkg, "role": "competitor",
+                    "instrumented": False, "verified": True, "installed": True,
+                    "in_catalogue": False})
+    for r in rows:
+        r.setdefault("in_catalogue", True)
+    # Installed first, then own > catalogued competitor/reference > anything
+    # else on the device, so the apps this tool actually knows about surface
+    # above the long tail of unrelated installed packages.
+    rows.sort(key=lambda a: (not a["installed"], a["role"] != "own",
+                             not a.get("in_catalogue", True),
+                             a["role"] != "competitor", a["name"].lower()))
+    return {"connected": True, **info, "packages": rows}
 
 
 def _payload(limit=100):
@@ -79,6 +104,15 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(store.compare(run, base))
             except ValueError as e:
                 return self._json({"error": str(e)}, 404)
+        if u.path.startswith("/api/device"):
+            return self._json(_device_payload())
+        if u.path.startswith("/api/jobs"):
+            from . import jobs
+            jid = q.get("id", [None])[0]
+            if jid:
+                job = jobs.get(jid)
+                return self._json(job) if job else self._json({"error": "unknown job"}, 404)
+            return self._json({"jobs": jobs.recent()})
         return super().do_GET()
 
     def do_POST(self):
@@ -100,8 +134,21 @@ class H(SimpleHTTPRequestHandler):
         if u.path == "/api/benchmark/clear":
             k = store.clear_benchmark(run_id=payload.get("run_id"),
                                       path_kind=payload.get("path_kind"),
-                                      device=payload.get("device"))
+                                      device=payload.get("device"),
+                                      app_pkg=payload.get("app_pkg"))
             return self._json({"ok": True, "cleared": k})
+        if u.path == "/api/capture/start":
+            from . import jobs
+            try:
+                jid = jobs.start_capture(
+                    payload.get("pkg", "").strip(),
+                    cold=payload.get("cold", True),
+                    duration_ms=payload.get("duration_ms", 10000),
+                    label=payload.get("label"),
+                    use_llm=payload.get("use_llm", False))
+            except ValueError as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"ok": True, "job_id": jid})
         return self._json({"error": "unknown endpoint"}, 404)
 
     def log_message(self, *a):
@@ -110,4 +157,6 @@ class H(SimpleHTTPRequestHandler):
 
 def serve(port=8787):
     print(f"  swagperf dashboard -> http://127.0.0.1:{port}   (ctrl-c to stop)")
-    HTTPServer(("127.0.0.1", port), H).serve_forever()
+    # Threading server: a capture job can run for tens of seconds, and the
+    # dashboard must keep polling /api/jobs and serving the page while it does.
+    ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()

@@ -91,8 +91,9 @@ td.num{text-align:right}
 .find .e{color:var(--text-secondary);font-size:12.5px}
 .find .r{color:var(--text-secondary);font-size:12.5px;margin-top:5px}
 .find .rk{font-size:11.5px;color:var(--text-muted);margin-top:4px;font-style:italic}
-.tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);
-  border:1px solid var(--border);border-radius:4px;padding:1px 6px;margin-left:7px;font-weight:600}
+.tag{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-primary);
+  background:var(--surface-2);border:1px solid var(--border-strong);border-radius:4px;
+  padding:2px 7px;margin-left:7px;font-weight:600;white-space:nowrap}
 .empty{color:var(--text-muted);font-size:13px;padding:16px 0}
 .scroll{overflow-x:auto}
 details{margin-top:12px} summary{cursor:pointer;font-size:12.5px;color:var(--text-secondary);font-weight:600}
@@ -157,6 +158,15 @@ td.acts{white-space:nowrap}
 .mini-btn{font-size:11.5px;padding:2.5px 8px;border-radius:6px;margin-right:5px}
 .mini-btn:disabled{opacity:.6;cursor:default}
 .bpin{font-size:11px;font-weight:650;color:var(--warn);margin-right:7px;white-space:nowrap}
+/* capture job log */
+.joblog{background:var(--surface-0);border:1px solid var(--border);border-radius:8px;
+  padding:9px 11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  max-height:300px;overflow-y:auto}
+.jl{padding:1px 0;line-height:1.45;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word}
+.jl.warn{color:var(--warn)} .jl.bad{color:var(--crit);font-weight:600}
+.jt{display:inline-block;min-width:44px;color:var(--text-muted);
+  font-variant-numeric:tabular-nums}
+.seg:disabled,.mini-btn:disabled,input:disabled,select:disabled{opacity:.55;cursor:default}
 /* sortable headers */
 th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
 th.sortable:hover{color:var(--text-primary)}
@@ -203,6 +213,7 @@ table.tight td,table.tight th{padding:5px 9px}
       <p class="sub">Perfetto trace regression monitor &middot; three runtimes, one process</p>
     </div>
     <div class="ctl">
+      <select id="appsel" aria-label="App under test"></select>
       <select id="pathsel" aria-label="Startup path"></select>
       <button id="rangebtn" data-r="30">Last 30</button>
       <button id="themebtn" aria-label="Toggle theme">Theme</button>
