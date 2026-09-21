@@ -36,7 +36,22 @@ create table if not exists analyses (
 );
 create index if not exists idx_step on step_metrics(step);
 create index if not exists idx_run on step_metrics(run_id);
+-- A pinned reference run, one per (path_kind, device). Scoping it this way keeps
+-- a returning-user benchmark from being compared against a first-run trace, and
+-- keeps device classes apart, which is the same reason baselines filter on device.
+create table if not exists benchmarks (
+  scope text primary key,
+  run_id integer not null references runs(id) on delete cascade,
+  note text,
+  set_at text not null
+);
 """
+
+BENCH_ANY = "*"
+
+
+def _scope(path_kind, device):
+    return f"{path_kind or BENCH_ANY}|{device or BENCH_ANY}"
 
 
 def connect(db=None):
@@ -96,16 +111,67 @@ def baseline(step, *, exclude_run=None, window=20, device=None, db=None):
     return {"median_ms": round(med, 2), "stdev_ms": round(sd, 2), "n": len(vals)}
 
 
-def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None):
-    """Steps in `run_id` that are slow relative to their own trailing baseline.
+# A benchmark comparison has no variance to reason about, so it needs a wider
+# relative gate than the trailing baseline to avoid firing on run-to-run noise.
+# Measured against this project's own seeded history, a clean run sits within
+# ~15% of any single other clean run on the smaller steps.
+BENCH_MIN_DELTA_PCT = 20.0
 
-    Requires BOTH a z-score breach and a minimum relative delta, so a step with
-    a very tight historical variance does not fire on sub-millisecond noise.
+
+def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True,
+                bench_min_delta_pct=None):
+    """Steps in `run_id` that are slow relative to their reference.
+
+    Two reference modes:
+
+    * **trailing baseline** (default): median of the last runs for that step.
+      Requires BOTH a z-score breach and a minimum relative delta, so a step with
+      very tight historical variance does not fire on sub-millisecond noise.
+    * **pinned benchmark**: if a benchmark run is pinned for this run's scope, the
+      comparison is against that single run instead. A single run has no variance,
+      so the z-score gate cannot apply and only the relative delta is used. The
+      returned rows say which mode produced them via `reference`.
     """
     c = connect(db)
+    meta = c.execute("select path_kind, device from runs where id=?", (run_id,)).fetchone()
     rows = list(c.execute(
         "select step,dur_ms,budget_ms from step_metrics where run_id=?", (run_id,)))
     c.close()
+
+    bench = None
+    if use_benchmark and meta:
+        bench = get_benchmark(path_kind=meta["path_kind"], device=meta["device"], db=db)
+        if bench and bench["run_id"] == run_id:
+            # This run IS the reference for its scope. Pinning it declares it the
+            # definition of acceptable, so it cannot regress. Returning [] here
+            # rather than falling through to the trailing baseline keeps the
+            # benchmark's own verdict stable as later runs shift that baseline.
+            return []
+
+    if bench:
+        gate = bench_min_delta_pct if bench_min_delta_pct is not None else BENCH_MIN_DELTA_PCT
+        c = connect(db)
+        bsteps = {r["step"]: r["dur_ms"] for r in c.execute(
+            "select step, dur_ms from step_metrics where run_id=?", (bench["run_id"],))}
+        c.close()
+        out = []
+        for r in rows:
+            bv = bsteps.get(r["step"])
+            if bv is None or not bv:
+                continue
+            delta = r["dur_ms"] - bv
+            pct = delta / bv * 100
+            if pct >= gate:
+                out.append({"step": r["step"], "dur_ms": r["dur_ms"],
+                            "baseline_ms": round(bv, 2), "stdev_ms": None,
+                            "n_baseline": 1, "delta_ms": round(delta, 2),
+                            "delta_pct": round(pct, 1), "z": None,
+                            "budget_ms": r["budget_ms"],
+                            "reference": "benchmark", "gate_pct": gate,
+                            "benchmark_run_id": bench["run_id"],
+                            "benchmark_label": bench.get("label")})
+        return sorted(out, key=lambda x: -x["delta_pct"])
+
     out = []
     for r in rows:
         b = baseline(r["step"], exclude_run=run_id, db=db)
@@ -119,8 +185,162 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None):
                         "baseline_ms": b["median_ms"], "stdev_ms": b["stdev_ms"],
                         "n_baseline": b["n"], "delta_ms": round(delta, 2),
                         "delta_pct": round(pct, 1), "z": round(zs, 2),
-                        "budget_ms": r["budget_ms"]})
+                        "budget_ms": r["budget_ms"], "reference": "trailing_baseline"})
     return sorted(out, key=lambda x: -x["delta_pct"])
+
+
+def set_benchmark(run_id, *, note=None, db=None):
+    """Pin a run as the reference for its own (path_kind, device) scope."""
+    c = connect(db)
+    r = c.execute("select id, path_kind, device, label from runs where id=?",
+                  (run_id,)).fetchone()
+    if not r:
+        c.close()
+        raise ValueError(f"no run with id {run_id}")
+    sc = _scope(r["path_kind"], r["device"])
+    c.execute("""insert into benchmarks (scope, run_id, note, set_at)
+                 values (?,?,?,?)
+                 on conflict(scope) do update set
+                   run_id=excluded.run_id, note=excluded.note, set_at=excluded.set_at""",
+              (sc, run_id, note, datetime.now(timezone.utc).isoformat(timespec="seconds")))
+    c.commit(); c.close()
+    return {"scope": sc, "run_id": run_id, "label": r["label"],
+            "path_kind": r["path_kind"], "device": r["device"]}
+
+
+def clear_benchmark(*, path_kind=None, device=None, run_id=None, db=None):
+    """Unpin by scope, or by the run that is pinned."""
+    c = connect(db)
+    if run_id is not None:
+        n = c.execute("delete from benchmarks where run_id=?", (run_id,)).rowcount
+    else:
+        n = c.execute("delete from benchmarks where scope=?",
+                      (_scope(path_kind, device),)).rowcount
+    c.commit(); c.close()
+    return n
+
+
+def get_benchmark(*, path_kind=None, device=None, db=None):
+    """The pinned run for this scope, falling back to a path-only pin."""
+    c = connect(db)
+    row = None
+    for sc in (_scope(path_kind, device), _scope(path_kind, None)):
+        row = c.execute("""select b.*, r.label, r.ts, r.git_sha, r.app_version,
+                                  r.device, r.path_kind
+                           from benchmarks b join runs r on b.run_id = r.id
+                           where b.scope=?""", (sc,)).fetchone()
+        if row:
+            break
+    c.close()
+    return dict(row) if row else None
+
+
+def benchmarks(db=None):
+    c = connect(db)
+    rows = [dict(r) for r in c.execute(
+        """select b.*, r.label, r.ts, r.device, r.path_kind, r.app_version
+           from benchmarks b join runs r on b.run_id = r.id order by b.scope""")]
+    c.close()
+    return rows
+
+
+# Metrics where a LOWER value is better, with how to read each off a run row.
+METRIC_DIRECTION = {
+    "ttff_ms": "lower", "slow_pct": "lower", "janky_pct": "lower",
+    "thermal_drift_pct": "lower", "peak_rss_mb": "lower", "rss_growth_mb": "lower",
+}
+
+# Metrics that can legitimately be negative. A percentage change across zero is
+# meaningless (-10% -> +24% is not "-330%"), so these report absolute deltas only
+# and are judged on the absolute move instead of a ratio.
+SIGNED_METRICS = {"thermal_drift_pct"}
+SIGNED_SAME_BAND = {"thermal_drift_pct": 3.0}   # absolute units considered unchanged
+
+
+def compare(run_id, base_id, *, db=None, min_delta_pct=5.0):
+    """Diff two runs: top-line metrics, per-step durations and child slices.
+
+    Symmetric and purely descriptive -- it reports what changed between two
+    specific runs. It does not decide whether a change is a regression; that
+    stays with `regressions`, which reasons about variance across many runs.
+    A two-run delta has no variance to reason about, so it is labelled a
+    difference, not a verdict.
+    """
+    c = connect(db)
+    a = c.execute("select * from runs where id=?", (run_id,)).fetchone()
+    b = c.execute("select * from runs where id=?", (base_id,)).fetchone()
+    if not a or not b:
+        c.close()
+        raise ValueError(f"run {run_id if not a else base_id} not found")
+    a, b = dict(a), dict(b)
+
+    metrics = []
+    for k, direction in METRIC_DIRECTION.items():
+        av, bv = a.get(k), b.get(k)
+        if av is None or bv is None:
+            continue
+        delta = av - bv
+        signed = k in SIGNED_METRICS
+        # A ratio is only meaningful when the base is non-zero and same-signed.
+        pct = None if (signed or not bv or (av < 0) != (bv < 0)) else delta / bv * 100
+        worse = (delta > 0) if direction == "lower" else (delta < 0)
+        if signed:
+            same = abs(delta) < SIGNED_SAME_BAND.get(k, 1.0)
+        elif pct is not None:
+            same = abs(pct) < min_delta_pct
+        else:
+            same = abs(delta) < 1e-9
+        metrics.append({
+            "metric": k, "value": av, "base_value": bv,
+            "delta": round(delta, 3),
+            "delta_pct": None if pct is None else round(pct, 1),
+            "direction": direction, "signed": signed,
+            "verdict": "same" if same else ("worse" if worse else "better"),
+        })
+
+    def steps_of(rid):
+        return {r["step"]: dict(r) for r in c.execute(
+            "select step, dur_ms, budget_ms, children_json from step_metrics where run_id=?",
+            (rid,))}
+    sa, sb = steps_of(run_id), steps_of(base_id)
+    c.close()
+
+    steps = []
+    for name in sorted(set(sa) | set(sb), key=lambda n: -(sa.get(n, {}).get("dur_ms") or 0)):
+        x, y = sa.get(name), sb.get(name)
+        av = x["dur_ms"] if x else None
+        bv = y["dur_ms"] if y else None
+        row = {"step": name, "dur_ms": av, "base_dur_ms": bv,
+               "budget_ms": (x or y).get("budget_ms"),
+               "only_in": None if (x and y) else ("run" if x else "base")}
+        if av is not None and bv is not None:
+            row["delta_ms"] = round(av - bv, 2)
+            row["delta_pct"] = round((av - bv) / bv * 100, 1) if bv else None
+            row["verdict"] = ("same" if row["delta_pct"] is not None and abs(row["delta_pct"]) < min_delta_pct
+                              else ("worse" if av > bv else "better"))
+        # Child-level diff, so a step delta can be attributed rather than just reported.
+        ca = {k["name"]: k["dur_ms"] for k in json.loads((x or {}).get("children_json") or "[]")}
+        cb = {k["name"]: k["dur_ms"] for k in json.loads((y or {}).get("children_json") or "[]")}
+        kids = []
+        for kn in sorted(set(ca) | set(cb), key=lambda n: -(ca.get(n) or 0)):
+            kav, kbv = ca.get(kn), cb.get(kn)
+            kids.append({"name": kn, "dur_ms": kav, "base_dur_ms": kbv,
+                         "delta_ms": None if (kav is None or kbv is None) else round(kav - kbv, 2),
+                         "delta_pct": None if (kav is None or not kbv) else round((kav - kbv) / kbv * 100, 1)})
+        row["children"] = kids
+        steps.append(row)
+
+    worse = [m for m in metrics if m["verdict"] == "worse"]
+    better = [m for m in metrics if m["verdict"] == "better"]
+    return {
+        "run": {k: a.get(k) for k in ("id", "ts", "label", "git_sha", "app_version", "device", "path_kind")},
+        "base": {k: b.get(k) for k in ("id", "ts", "label", "git_sha", "app_version", "device", "path_kind")},
+        "comparable": a.get("path_kind") == b.get("path_kind"),
+        "same_device": a.get("device") == b.get("device"),
+        "metrics": metrics, "steps": steps,
+        "summary": {"worse": len(worse), "better": len(better),
+                    "same": len(metrics) - len(worse) - len(better)},
+    }
 
 
 def reextract(db=None, extractor=None):

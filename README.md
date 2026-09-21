@@ -74,6 +74,15 @@ python3 -m venv .venv && ./.venv/bin/pip install perfetto anthropic
 # dashboard
 ./.venv/bin/python -m swagperf.cli dashboard      # http://127.0.0.1:8787
 
+# compare two runs (base defaults to the pinned benchmark)
+./.venv/bin/python -m swagperf.cli compare 19 11
+./.venv/bin/python -m swagperf.cli compare 19            # vs benchmark
+
+# pin a known-good run as the benchmark for its path + device
+./.venv/bin/python -m swagperf.cli benchmark set 11 --note "known-good 2.2.0"
+./.venv/bin/python -m swagperf.cli benchmark list
+./.venv/bin/python -m swagperf.cli benchmark clear --run 11
+
 # recompute metrics for all runs whose traces still exist
 # (run this after changing extract.py, or historical rows mix two formats)
 ./.venv/bin/python -m swagperf.cli reextract
@@ -96,6 +105,40 @@ Tried in order, first one that works wins:
    rather than breaks.
 
 Force one with `--backend cli|api|heuristic`.
+
+## Benchmark and compare
+
+These are deliberately different things:
+
+**Compare** is a view. It diffs any two runs — top-line metrics, per-step durations,
+and child slices under any step that got worse — and is purely descriptive. It does
+not decide whether a change is a regression, because two runs have no variance to
+reason about.
+
+**Benchmark** is a pinned reference that changes what "regressed" means. Pin a
+known-good run and every regression check for its scope compares against that run
+instead of the trailing baseline, including the CLI exit code. One benchmark per
+`(path_kind, device)` scope, so a returning-user benchmark is never applied to a
+first-run trace and device classes stay apart.
+
+Two consequences worth knowing:
+
+- **A benchmark comparison has no variance**, so the z-score gate cannot apply and
+  only a relative delta is used. That gate is therefore wider — `BENCH_MIN_DELTA_PCT`
+  is 20% versus 8% for the trailing baseline — because a single clean run sits within
+  roughly 15% of another clean run on the smaller steps. Without the wider gate,
+  ordinary noise reads as a regression.
+- **The benchmark run itself never regresses.** Pinning a run declares it the
+  definition of acceptable for its scope, so its own regression list is empty and
+  stays stable as later runs shift the trailing baseline.
+
+Metrics that can legitimately be negative — thermal drift — report an absolute delta
+only. A percentage change across zero is meaningless: −10.6% to +24.4% is not
+"−330%", and the tool used to print exactly that.
+
+A cross-path comparison is not blocked, but it is flagged prominently in both the CLI
+and the dashboard, because the two startup paths have different critical paths and
+different budgets so the numbers do not mean the same thing.
 
 ## Regression detection
 
@@ -124,7 +167,8 @@ Six tabs, one per concern the architecture names:
 | **Frame pacing** | Slow/janky frames and thermal drift — kept apart because progressive drift means throttling while scattered spikes mean the interop seam |
 | **Memory** | Peak RSS and Hermes heap on one axis, session growth, JS share of growth |
 | **Steps** | Per-step table with trailing-baseline deltas; click a step for its history and child breakdown |
-| **History** | Every run, sortable on any column, filterable by verdict/device/text |
+| **Compare** | Diff any two runs, defaulting to the pinned benchmark; child slices expand under any step that got worse |
+| **History** | Every run, sortable on any column, filterable by verdict/device/text; pin a benchmark or jump to a comparison per row |
 
 The step chart has three views. **Critical path** is the default and sums only the
 steps a user waits through on the selected path — the bar height is a number they
@@ -152,10 +196,10 @@ swagperf/
   store.py      SQLite history, trailing baselines, regression detection
   analyst.py    model backends + deterministic fallback
   capture.py    optional adb capture
-  server.py     dashboard server + /api/history
+  server.py     dashboard server + /api/history, /api/compare, /api/benchmark/*
   synth.py      synthetic trace generator for development
 web/            dashboard (no build step, no dependencies)
-tests/          12 tests over the deterministic pipeline
+tests/          24 tests over the deterministic pipeline
 ```
 
 ## Adapting it
@@ -185,6 +229,9 @@ inside a step are attributed automatically and give the model what it needs to s
   click/sort/filter/keyboard behaviour and console errors were checked against a live
   page, but if you have the DevTools MCP configured it is worth a second pass for
   performance-panel and network profiling that Playwright assertions do not cover.
+- **The dashboard server has no auth and mutates local history** (pinning a benchmark
+  is a POST). It binds to loopback only, which is fine for a dev/CI tool — but do not
+  expose it on a routable interface.
 - All development used synthetic traces. The SQL is written against the real
   TraceProcessor schema, but validate step extraction against one real capture before
   trusting it in CI.

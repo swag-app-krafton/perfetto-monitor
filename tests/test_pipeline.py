@@ -142,6 +142,81 @@ class TestChildBreakdown(unittest.TestCase):
         self.assertTrue(any(k["name"] == "CameraX.bindToLifecycle" for k in kids))
 
 
+class TestBenchmarkAndCompare(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "b.db")
+        self.ids = []
+        for i in range(8):
+            p, _ = _trace(self.tmp, 400 + i)
+            self.ids.append(store.record(extract(p), label=f"b{i}", device="pixel7",
+                                         trace_path=p, db=self.db))
+
+    def test_set_get_clear_benchmark(self):
+        store.set_benchmark(self.ids[0], note="golden", db=self.db)
+        b = store.get_benchmark(path_kind="returning_user", device="pixel7", db=self.db)
+        self.assertEqual(b["run_id"], self.ids[0])
+        self.assertEqual(b["note"], "golden")
+        store.clear_benchmark(run_id=self.ids[0], db=self.db)
+        self.assertIsNone(store.get_benchmark(path_kind="returning_user",
+                                              device="pixel7", db=self.db))
+
+    def test_benchmark_is_scoped_by_path_kind(self):
+        """A returning_user benchmark must not be used for a first_run trace."""
+        store.set_benchmark(self.ids[0], db=self.db)
+        self.assertIsNone(store.get_benchmark(path_kind="first_run",
+                                              device="pixel7", db=self.db))
+
+    def test_benchmark_changes_regression_reference(self):
+        p, _ = _trace(self.tmp, 500, regress={"step:camera_open": 2.0})
+        rid = store.record(extract(p), label="bad", device="pixel7", db=self.db)
+        store.set_benchmark(self.ids[0], db=self.db)
+        regs = store.regressions(rid, db=self.db)
+        self.assertTrue(regs)
+        self.assertEqual(regs[0]["reference"], "benchmark")
+        self.assertEqual(regs[0]["benchmark_run_id"], self.ids[0])
+
+    def test_run_is_never_a_regression_against_itself(self):
+        store.set_benchmark(self.ids[3], db=self.db)
+        self.assertEqual(store.regressions(self.ids[3], db=self.db), [])
+
+    def test_clean_run_quiet_against_benchmark(self):
+        store.set_benchmark(self.ids[0], db=self.db)
+        self.assertEqual(store.regressions(self.ids[5], db=self.db), [])
+
+    def test_compare_is_symmetric_in_sign(self):
+        a, b = self.ids[1], self.ids[2]
+        d1 = store.compare(a, b, db=self.db)
+        d2 = store.compare(b, a, db=self.db)
+        m1 = {m["metric"]: m["delta"] for m in d1["metrics"]}
+        m2 = {m["metric"]: m["delta"] for m in d2["metrics"]}
+        for k in m1:
+            self.assertAlmostEqual(m1[k], -m2[k], places=2)
+
+    def test_compare_flags_incomparable_paths(self):
+        p, _ = _trace(self.tmp, 510, path="first_run")
+        fid = store.record(extract(p, path_kind="first_run"), label="fr",
+                           device="pixel7", db=self.db)
+        d = store.compare(fid, self.ids[0], db=self.db)
+        self.assertFalse(d["comparable"])
+
+    def test_signed_metric_has_no_percentage(self):
+        """Thermal drift crosses zero, so a ratio would be nonsense."""
+        d = store.compare(self.ids[1], self.ids[2], db=self.db)
+        drift = next(m for m in d["metrics"] if m["metric"] == "thermal_drift_pct")
+        self.assertTrue(drift["signed"])
+        self.assertIsNone(drift["delta_pct"])
+
+    def test_compare_attributes_to_child_slices(self):
+        p, _ = _trace(self.tmp, 520, regress={"CameraX.bindToLifecycle": 2.5})
+        rid = store.record(extract(p), label="kid", device="pixel7", db=self.db)
+        d = store.compare(rid, self.ids[0], db=self.db)
+        cam = next(s for s in d["steps"] if s["step"] == "step:camera_open")
+        worst = max((k for k in cam["children"] if k["delta_ms"] is not None),
+                    key=lambda k: k["delta_ms"])
+        self.assertEqual(worst["name"], "CameraX.bindToLifecycle")
+
+
 class TestHeuristic(unittest.TestCase):
     def test_heuristic_runs_without_network(self):
         tmp = tempfile.mkdtemp()

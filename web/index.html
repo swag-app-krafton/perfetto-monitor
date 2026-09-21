@@ -135,6 +135,23 @@ button.lgi em{font-style:normal;font-size:10.5px;color:var(--text-muted);margin-
 .ro .rok{font-size:10.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;font-weight:600;display:block}
 .ro b{font-size:18px;font-weight:660;font-variant-numeric:tabular-nums;display:block;margin:2px 0 1px}
 .ro em{font-size:11.5px;color:var(--text-muted);font-style:normal}
+/* compare */
+.cmpbar{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.cmpbar > div{display:flex;flex-direction:column;gap:4px}
+.cmpbar .vs{align-self:center;color:var(--text-muted);font-size:12px;text-transform:uppercase;
+  letter-spacing:.06em;font-weight:650;padding-bottom:6px}
+.cmpbar select{min-width:260px;max-width:100%}
+.cv{font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:.04em}
+.cv.worse{color:var(--crit)} .cv.better{color:var(--good)} .cv.same{color:var(--text-muted)}
+tr.kidrow td{color:var(--text-secondary);font-size:12px;padding-top:3px;padding-bottom:3px;
+  border-bottom-color:transparent}
+tr.kidrow td:first-child{padding-left:22px}
+td .u{font-size:10.5px;color:var(--text-muted);margin-left:2px}
+/* row actions */
+td.acts{white-space:nowrap}
+.mini-btn{font-size:11.5px;padding:2.5px 8px;border-radius:6px;margin-right:5px}
+.mini-btn:disabled{opacity:.6;cursor:default}
+.bpin{font-size:11px;font-weight:650;color:var(--warn);margin-right:7px;white-space:nowrap}
 /* sortable headers */
 th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
 th.sortable:hover{color:var(--text-primary)}
