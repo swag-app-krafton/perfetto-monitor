@@ -41,7 +41,11 @@ def _print(res, regs, metrics):
          "fail": "\033[31mFAIL\033[0m"}
     print(f"\n  {V.get(res.get('verdict'), res.get('verdict','?').upper())}  {res.get('headline','')}\n")
     st = metrics["startup"]
-    print(f"  time to first camera frame  {st['time_to_first_camera_frame_ms']}ms / {st['budget_ms']}ms budget")
+    label = metrics.get("startup_metric", "time to first camera frame")
+    budget_txt = f" / {st['budget_ms']}ms budget" if st.get("budget_ms") else " (no budget set for this app)"
+    print(f"  {label}  {st['time_to_first_camera_frame_ms']}ms{budget_txt}")
+    if metrics.get("derived"):
+        print(f"  app  {metrics.get('app_pkg') or 'unknown'}  (derived steps -- not instrumented)")
     f = metrics["frames"]
     print(f"  frames  {f['total']} total · {f['slow_pct']}% slow · {f['janky_pct']}% janky · drift {f['thermal_drift_pct']}%")
     if metrics.get("memory", {}).get("rss"):
@@ -110,10 +114,20 @@ def main(argv=None):
 
     a = sub.add_parser("analyse", help="analyse a trace file and record it")
     a.add_argument("trace")
-    a.add_argument("--path-kind", default="returning_user",
-                   choices=["returning_user", "first_run"])
+    # No default here. "returning_user" is only a sensible default for Swag
+    # Pay's own instrumented runs; a derived (competitor) run must infer its
+    # own cold/warm classification from what was actually derived, and a
+    # hardcoded default would silently overwrite that -- which is exactly how
+    # a competitor's trace once ended up mislabeled "returning_user" and
+    # mixed into Swag Pay's own bucket.
+    a.add_argument("--path-kind", default=None,
+                   help="returning_user | first_run for Swag Pay; omit for a "
+                        "derived app to auto-classify cold/warm")
     a.add_argument("--label"); a.add_argument("--git-sha")
     a.add_argument("--app-version"); a.add_argument("--device")
+    a.add_argument("--app", help="package under test (default: auto-detect from the trace)")
+    a.add_argument("--derive", action="store_true",
+                   help="force step derivation even for an instrumented app")
     a.add_argument("--no-llm", action="store_true", help="skip the model, use rules only")
     a.add_argument("--backend", choices=["auto", "cli", "api", "heuristic"],
                    help="auto (default): claude CLI, then API key, then rules")
@@ -121,10 +135,15 @@ def main(argv=None):
     a.add_argument("--fail-on", default="fail", choices=["never", "fail", "warn"])
 
     c = sub.add_parser("capture", help="capture a trace from a connected device")
-    c.add_argument("-o", "--out", default="traces/capture.pftrace")
+    c.add_argument("-o", "--out", default=None)
     c.add_argument("--pkg", default="com.swagpay")
     c.add_argument("--duration-ms", type=int, default=10000)
+    c.add_argument("--cold", action="store_true",
+                   help="force-stop then launch inside the trace window (real cold start)")
+    c.add_argument("--repeat", type=int, default=1,
+                   help="capture N times; cold-start numbers are noisy, so several runs matter")
     c.add_argument("--analyse", action="store_true")
+    c.add_argument("--label")
 
     s = sub.add_parser("seed", help="generate synthetic history for development")
     s.add_argument("-n", type=int, default=15)
@@ -136,6 +155,24 @@ def main(argv=None):
 
     sub.add_parser("list", help="list recorded runs")
     sub.add_parser("reextract", help="recompute metrics for all runs whose traces still exist")
+
+    appsp = sub.add_parser("apps", help="the catalogue of apps under test")
+    apx = appsp.add_subparsers(dest="acmd", required=True)
+    apl = apx.add_parser("list", help="show the catalogue")
+    apl.add_argument("--role", choices=["own", "competitor", "reference"])
+    apa = apx.add_parser("add", help="add or update an app")
+    apa.add_argument("pkg")
+    apa.add_argument("--name"); apa.add_argument("--vendor")
+    apa.add_argument("--role", default="competitor",
+                     choices=["own", "competitor", "reference"])
+    apa.add_argument("--category"); apa.add_argument("--region")
+    apa.add_argument("--instrumented", action="store_true")
+    apa.add_argument("--ttid-budget", type=float,
+                     help="startup budget in ms; only meaningful for your own app")
+    apa.add_argument("--notes")
+    apr = apx.add_parser("remove", help="remove an app")
+    apr.add_argument("pkg")
+    apx.add_parser("discover", help="match the catalogue against a connected device")
 
     cm = sub.add_parser("compare", help="diff two runs")
     cm.add_argument("run", type=int, help="the run to inspect")
@@ -150,16 +187,34 @@ def main(argv=None):
     bset.add_argument("--note")
     bclr = bmx.add_parser("clear", help="unpin")
     bclr.add_argument("--run", type=int)
-    bclr.add_argument("--path-kind", default="returning_user")
+    bclr.add_argument("--app", help="package the scope belongs to")
+    bclr.add_argument("--path-kind")
     bclr.add_argument("--device")
     bmx.add_parser("list", help="show pinned benchmarks")
 
     n = ap.parse_args(argv)
 
     if n.cmd == "analyse":
-        m = ex.extract(n.trace, path_kind=n.path_kind)
+        from . import catalogue
+        # path_kind is now None unless the caller explicitly asked for one, so
+        # extract_any's own defaulting applies: "returning_user" for an
+        # instrumented app, auto cold/warm classification for a derived one.
+        m = ex.extract_any(n.trace, app_pkg=n.app, path_kind=n.path_kind, force_derive=n.derive)
+
+        # An "instrumented" app that produced zero step: markers is a silent
+        # failure waiting to happen -- everything downstream would report a
+        # clean PASS off empty data. Fail loudly instead, and point at the
+        # escape hatch (--derive) rather than recording a misleading run.
+        if not m.get("derived") and not m.get("steps"):
+            print(f"  \033[31mERROR\033[0m {m.get('app_pkg') or n.app or 'this app'} is marked "
+                  "instrumented in the catalogue, but no step: markers were found in this trace.")
+            print("  Re-run with --derive to fall back to generic Android step derivation, "
+                  "or check that this build still emits step: markers.")
+            return 2
+
         rid = store.record(m, label=n.label, git_sha=n.git_sha,
-                           app_version=n.app_version, device=n.device, trace_path=n.trace)
+                           app_version=n.app_version, device=n.device,
+                           trace_path=n.trace, app_pkg=m.get("app_pkg"))
         if n.backend:
             analyst.BACKEND = n.backend
         res, regs = _analyse_run(rid, m, use_llm=not n.no_llm and n.backend != "heuristic")
@@ -175,12 +230,27 @@ def main(argv=None):
         return 0
 
     if n.cmd == "capture":
-        from .capture import capture
-        p = capture(n.out, pkg=n.pkg, duration_ms=n.duration_ms)
-        print(f"captured -> {p}")
-        if n.analyse:
-            return main(["analyse", p])
-        return 0
+        from .capture import capture, device_info
+        from . import catalogue
+        info = device_info()
+        dev = info.get("model") or info.get("device")
+        app = catalogue.get(n.pkg)
+        if not app:
+            print(f"  note: {n.pkg} is not in the catalogue; add it with "
+                  f"`swagperf apps add {n.pkg}` to label it in reports.")
+        rc = 0
+        for i in range(max(n.repeat, 1)):
+            out = n.out or f"traces/{n.pkg}_{'cold' if n.cold else 'warm'}_{i:02d}.pftrace"
+            p = capture(out, pkg=n.pkg, duration_ms=n.duration_ms, cold=n.cold)
+            print(f"  captured -> {p}")
+            if n.analyse:
+                args = ["analyse", p, "--app", n.pkg]
+                if dev:
+                    args += ["--device", dev]
+                lbl = n.label or f"{'cold' if n.cold else 'warm'}-{i:02d}"
+                args += ["--label", lbl]
+                rc = main(args) or rc
+        return rc
 
     if n.cmd == "seed":
         import random
@@ -200,6 +270,67 @@ def main(argv=None):
             print(f"  run {rid:>3}  {m['startup']['time_to_first_camera_frame_ms']:>7}ms  {res['verdict']}")
         return 0
 
+    if n.cmd == "apps":
+        from . import catalogue
+        if n.acmd == "list":
+            rows = [a for a in catalogue.load()
+                    if not n.role or a.get("role") == n.role]
+            for a in rows:
+                flags = []
+                if a.get("instrumented"):
+                    flags.append("instrumented")
+                if not a.get("verified"):
+                    flags.append("unverified pkg")
+                if a.get("budgets"):
+                    flags.append("has budgets")
+                print(f"  {a.get('role',''):<11} {a['pkg']:<42} {a.get('name',''):<20}"
+                      + (f"  [{', '.join(flags)}]" if flags else ""))
+            print(f"\n  {len(rows)} app(s). Unverified package names should be confirmed "
+                  "with: swagperf apps discover")
+            return 0
+        if n.acmd == "add":
+            e = catalogue.add(n.pkg, name=n.name, role=n.role, category=n.category,
+                              vendor=n.vendor, region=n.region,
+                              instrumented=n.instrumented, notes=n.notes,
+                              budgets={"ttid_ms": n.ttid_budget} if n.ttid_budget else None)
+            print(f"  added {e['pkg']} ({e['name']}) as {e['role']}")
+            return 0
+        if n.acmd == "remove":
+            catalogue.remove(n.pkg)
+            print(f"  removed {n.pkg}")
+            return 0
+        if n.acmd == "discover":
+            from .capture import installed_packages, device_info
+            info = device_info()
+            if not info:
+                print("  no adb device connected. Connect one and enable USB debugging.")
+                return 2
+            print(f"  device: {info.get('model')} ({info.get('device')}) "
+                  f"Android {info.get('release')} / API {info.get('sdk')}\n")
+            inst = set(installed_packages())
+            known = {a["pkg"]: a for a in catalogue.load()}
+            present = sorted(inst & set(known))
+            missing = sorted(set(known) - inst)
+            if present:
+                catalogue.mark_verified(present)
+                print("  in the catalogue and installed:")
+                for p in present:
+                    print(f"    \u2713 {p:<42} {known[p].get('name','')}")
+            if missing:
+                print("\n  in the catalogue but NOT installed:")
+                for p in missing:
+                    print(f"    \u2717 {p:<42} {known[p].get('name','')}")
+            extra = sorted(inst - set(known))
+            if extra:
+                print(f"\n  {len(extra)} other third-party package(s) installed. "
+                      "Add any you want to track:")
+                for p in extra[:25]:
+                    print(f"      {p}")
+                if len(extra) > 25:
+                    print(f"      \u2026 and {len(extra) - 25} more")
+            print("\n  verified flags updated for installed catalogue apps.")
+            return 0
+
     if n.cmd == "benchmark":
         if n.bcmd == "set":
             b = store.set_benchmark(n.run, note=n.note)
@@ -208,7 +339,8 @@ def main(argv=None):
             print("  regressions for that scope are now measured against this run")
             return 0
         if n.bcmd == "clear":
-            k = store.clear_benchmark(run_id=n.run, path_kind=n.path_kind, device=n.device)
+            k = store.clear_benchmark(run_id=n.run, path_kind=n.path_kind,
+                                      device=n.device, app_pkg=n.app)
             print(f"  cleared {k} benchmark(s); regressions fall back to the trailing baseline")
             return 0
         rows = store.benchmarks()

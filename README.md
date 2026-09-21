@@ -235,3 +235,67 @@ inside a step are attributed automatically and give the model what it needs to s
 - All development used synthetic traces. The SQL is written against the real
   TraceProcessor schema, but validate step extraction against one real capture before
   trusting it in CI.
+
+## Analysing any app, and the competitor catalogue
+
+Not every app can be instrumented. A competitor's binary cannot emit `step:`
+markers, so this tool reads a second way: **derivation** from the slice names
+every Android app produces regardless of instrumentation (`bindApplication`,
+`activityStart`, `inflate`, `Choreographer#doFrame`, ...). Perfetto's own
+`android.startup.startups` stdlib module identifies the package and cold/warm
+classification; explicit phase matching over slice names produces attributable
+step durations, because a derived number that cannot be traced back to the
+slices that produced it is not trustworthy.
+
+```bash
+# analyse any app -- instrumented or not, auto-detected from the catalogue
+./.venv/bin/python -m swagperf.cli analyse trace.pftrace --app com.phonepe.app --device pixel7
+
+# force derivation even for an app the catalogue marks instrumented
+./.venv/bin/python -m swagperf.cli analyse trace.pftrace --app com.swagpay --derive
+
+# capture a real cold start (force-stops the app, launches it just after
+# tracing begins so the launch itself falls inside the trace window)
+./.venv/bin/python -m swagperf.cli capture --pkg com.phonepe.app --cold --repeat 5 --analyse
+
+# the app catalogue
+./.venv/bin/python -m swagperf.cli apps list
+./.venv/bin/python -m swagperf.cli apps add com.rival.app --name "Rival" --role competitor
+./.venv/bin/python -m swagperf.cli apps discover     # verify package names against a connected device
+```
+
+**A derived run never gets an invented budget.** `budgets.py`'s numbers are Swag
+Pay's own stated targets; asserting them against a competitor's app would be
+making up a number for a product whose architecture is undocumented here. A
+derived run's `budget_ms` is `None` unless the catalogue's `apps.json` (or a
+local `apps.local.json` override) explicitly states one for that package, and
+the dashboard does not draw a budget line or colour a breach when none exists.
+This was a real bug during development, twice over: the dashboard first drew
+Swag Pay's 420ms line against a competitor's trace, and separately the CLI's
+`--path-kind` flag defaulted to `"returning_user"` and was silently applied to
+a derived run regardless of app, mixing a competitor's trace into Swag Pay's
+own bucket. Both are covered by regression tests now
+(`TestGenericAppDerivation`, `TestCLIPathKindDefaulting`).
+
+Regression detection, baselines and benchmarks are all scoped by
+`(app_pkg, path_kind, device)`, so a PhonePe cold-start trend is compared
+against its own history, never against Swag Pay's.
+
+Steps derived this way carry no runtime attribution beyond "native" (the
+`RUNTIME` map in the dashboard only knows Swag Pay's own step names), so the
+step chart's colour-by-runtime legend is uninformative for a derived run --
+the duration and child-slice numbers are still fully attributable, only the
+colour coding is not meaningful.
+
+## Theme
+
+Typography follows [krafton.com](https://www.krafton.com/en/)'s own stack --
+Zalando Sans Expanded for display numbers and headings, Poppins for UI text,
+Noto Sans KR as the CJK fallback their stylesheet declares -- loaded from
+Google Fonts. Their proprietary "KRAFTON" display face is not licensable here;
+Zalando Sans Expanded stands in for it on hero numbers, matching its bold,
+geometric, wide-set shape. Surfaces follow their stark black/white/grey
+editorial treatment in both themes. The categorical and status colors
+(`--s1`..`--s4`, `--good`/`--warn`/`--crit`) are untouched -- they are
+validated against the dataviz skill's CVD-safety and contrast gates, and
+swapping them for brand colors would need re-validation against those gates.

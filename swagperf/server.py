@@ -3,11 +3,13 @@ import json, os
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from . import store
+from .budgets import STEP_BUDGETS_MS, GLOBAL_BUDGETS, RISK_MAP
 
 WEB = os.path.join(os.path.dirname(__file__), "..", "web")
 
 
 def _payload(limit=100):
+    from . import catalogue
     runs = store.history(limit)
     c = store.connect()
     an = {}
@@ -30,8 +32,18 @@ def _payload(limit=100):
         d["steps"] = [{**s, "children": json.loads(s.pop("children_json") or "[]")}
                       for s in d["steps"]]
         d["analysis"] = an.get(r["id"])
+        # Resolve this run's own startup budget from the catalogue rather than
+        # letting the client assume Swag Pay's global budget applies to every
+        # app. A derived (competitor) run only gets a budget if one was
+        # explicitly entered for that package; otherwise it is None, and the
+        # dashboard must not draw a budget line or colour a breach for it.
+        app = catalogue.get(d.get("app_pkg")) if d.get("app_pkg") else None
+        d["app_name"] = (app or {}).get("name") or d.get("app_pkg")
+        d["app_role"] = (app or {}).get("role")
+        d["ttid_budget_ms"] = (
+            GLOBAL_BUDGETS["time_to_first_camera_frame_ms"] if not d.get("derived")
+            else (app or {}).get("budgets", {}).get("ttid_ms"))
         out.append(d)
-    from .budgets import STEP_BUDGETS_MS, GLOBAL_BUDGETS, RISK_MAP
     return {"runs": out, "step_budgets": STEP_BUDGETS_MS,
             "global_budgets": GLOBAL_BUDGETS, "risk_map": RISK_MAP,
             "benchmarks": store.benchmarks(),

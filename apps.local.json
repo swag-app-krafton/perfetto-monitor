@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "apps": [
+    {
+      "pkg": "com.phonepe.app",
+      "name": "PhonePe",
+      "role": "competitor",
+      "instrumented": false,
+      "verified": false
+    }
+  ]
+}

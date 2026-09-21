@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "_note": "Package names marked verified:false were seeded from memory and should be confirmed against a real device with `swagperf apps discover`. Play Store listings and package names drift.",
+  "apps": [
+    {
+      "pkg": "com.swagpay", "name": "Swag Pay", "role": "own",
+      "category": "upi_payments", "vendor": "KRAFTON", "region": "IN",
+      "instrumented": true, "verified": true,
+      "budgets": {"ttid_ms": 420},
+      "notes": "Emits step: markers, so extract.py reads them directly. Budgets come from the shell architecture."
+    },
+    {
+      "pkg": "com.phonepe.app", "name": "PhonePe", "role": "competitor",
+      "category": "upi_payments", "vendor": "PhonePe", "region": "IN",
+      "instrumented": false, "verified": false,
+      "notes": "Market leader by UPI volume. React Native in parts, useful comparison for the Hermes surface."
+    },
+    {
+      "pkg": "com.google.android.apps.nbu.paisa.user", "name": "Google Pay (India)",
+      "role": "competitor", "category": "upi_payments", "vendor": "Google", "region": "IN",
+      "instrumented": false, "verified": false,
+      "notes": "Formerly Tez. Heavily optimised native; a realistic performance ceiling."
+    },
+    {
+      "pkg": "net.one97.paytm", "name": "Paytm", "role": "competitor",
+      "category": "upi_payments", "vendor": "One97", "region": "IN",
+      "instrumented": false, "verified": false,
+      "notes": "Large superapp. Expect slow cold start and high RSS; useful as an upper bound."
+    },
+    {
+      "pkg": "in.org.npci.upiapp", "name": "BHIM", "role": "competitor",
+      "category": "upi_payments", "vendor": "NPCI", "region": "IN",
+      "instrumented": false, "verified": false,
+      "notes": "Reference UPI implementation from NPCI."
+    },
+    {
+      "pkg": "com.dreamplug.androidapp", "name": "CRED", "role": "competitor",
+      "category": "fintech", "vendor": "Dreamplug", "region": "IN",
+      "instrumented": false, "verified": false,
+      "notes": "Known for heavy animation; a good frame-pacing comparison."
+    },
+    {
+      "pkg": "com.mobikwik_new", "name": "MobiKwik", "role": "competitor",
+      "category": "fintech", "vendor": "MobiKwik", "region": "IN",
+      "instrumented": false, "verified": false
+    },
+    {
+      "pkg": "com.whatsapp", "name": "WhatsApp", "role": "competitor",
+      "category": "messaging_upi", "vendor": "Meta", "region": "IN",
+      "instrumented": false, "verified": false,
+      "notes": "Carries UPI payments in India. Extremely well optimised startup."
+    },
+    {
+      "pkg": "com.android.chrome", "name": "Chrome", "role": "reference",
+      "category": "browser", "vendor": "Google", "region": "*",
+      "instrumented": false, "verified": true,
+      "notes": "Not a competitor. Present on every device, so it is a good smoke test that capture and derivation work."
+    },
+    {
+      "pkg": "com.google.android.deskclock", "name": "Clock", "role": "reference",
+      "category": "utility", "vendor": "Google", "region": "*",
+      "instrumented": false, "verified": false,
+      "notes": "Tiny app, near-floor cold start. Useful to sanity-check that measured TTID is not dominated by capture overhead."
+    }
+  ]
+}

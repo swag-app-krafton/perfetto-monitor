@@ -34,6 +34,162 @@ def extract(trace_path, *, path_kind="returning_user"):
         tp.close()
 
 
+def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False):
+    """Extract from any trace, instrumented or not.
+
+    An app in the catalogue marked `instrumented` is read through the `step:`
+    markers it emits. Everything else -- notably a competitor's binary, where
+    instrumentation is impossible -- is read through `derive.py`, which builds
+    the same shape from ordinary Android slice names.
+
+    The returned dict has the same keys either way, so the store, the analyst
+    and the dashboard do not need to care which path produced it. Derived runs
+    are flagged `derived: True` and carry no per-step budgets.
+    """
+    from . import catalogue
+    from .derive import derive_steps, detect_app
+
+    tp = TraceProcessor(trace=trace_path)
+    try:
+        detected = detect_app(tp)
+        pkg = app_pkg or detected.get("pkg")
+        instrumented = (catalogue.is_instrumented(pkg) if pkg else False) and not force_derive
+
+        if instrumented:
+            m = _extract(tp, path_kind or "returning_user")
+            m["app_pkg"] = pkg
+            m["derived"] = False
+            m["startup_metric"] = "time to first camera frame"
+            m["detected_app"] = detected
+            return m
+
+        d = derive_steps(tp, pkg=pkg)
+        frames = _frames(tp)
+        mem = _memory(tp)
+        # Cold vs warm is classified from what was actually derived rather than
+        # from the stdlib's label, which can misfire: a process_start phase only
+        # exists when the process was genuinely created for this launch.
+        names = {s["step"] for s in d["steps"]}
+        kind = path_kind or ("cold" if "step:process_start" in names else "warm")
+        bud = catalogue.budgets_for(pkg)
+        ttid = d["ttid_ms"] or 0.0
+        ttid_budget = bud.get("ttid_ms")
+
+        breaches = []
+        checks = {"time_to_first_camera_frame_ms": ttid,
+                  "slow_frame_pct": frames["slow_pct"],
+                  "janky_frame_pct": frames["janky_pct"],
+                  "peak_rss_mb": mem.get("rss", {}).get("peak_mb", 0),
+                  "rss_growth_mb": mem.get("rss", {}).get("growth_mb", 0),
+                  "thermal_drift_pct": frames["thermal_drift_pct"]}
+        # Only budgets the catalogue actually states are asserted. Inventing a
+        # startup budget for someone else's app would be making up a number.
+        if ttid_budget and ttid > ttid_budget:
+            breaches.append({"metric": "time_to_first_camera_frame_ms", "value": ttid,
+                             "budget": ttid_budget,
+                             "over_by_pct": round((ttid - ttid_budget) / ttid_budget * 100, 1)})
+        for k in ("slow_frame_pct", "janky_frame_pct"):
+            b = GLOBAL_BUDGETS[k]
+            if checks[k] > b:
+                breaches.append({"metric": k, "value": checks[k], "budget": b,
+                                 "over_by_pct": round((checks[k] - b) / b * 100, 1)})
+
+        return {
+            "path_kind": kind,
+            "app_pkg": pkg,
+            "derived": True,
+            "startup_metric": "time to initial display",
+            "detected_app": detected,
+            "steps": d["steps"],
+            "startup": {"time_to_first_camera_frame_ms": ttid,
+                        "budget_ms": ttid_budget,
+                        "critical_path": [s["step"] for s in d["steps"]]},
+            "ordering_violations": [],
+            "frames": frames,
+            "memory": mem,
+            "budget_checks": checks,
+            "breaches": breaches,
+            "derive_window": d["window"],
+        }
+    finally:
+        tp.close()
+
+
+def _frames(tp):
+    """Frame-pacing metrics. Shared by the instrumented and derived paths."""
+    fr = _rows(tp, f"""
+        select count(*) total,
+               sum(case when dur > {FRAME_NS} then 1 else 0 end) slow,
+               sum(case when dur > {3 * FRAME_NS} then 1 else 0 end) janky,
+               cast(avg(dur) as int) avg_dur,
+               cast(max(dur) as int) max_dur
+        from slice where name = 'Choreographer#doFrame'
+    """)
+    f = fr[0] if fr else {}
+    total = f.get("total") or 0
+    frames = {
+        "total": total,
+        "slow": f.get("slow") or 0,
+        "janky": f.get("janky") or 0,
+        "slow_pct": round((f.get("slow") or 0) / total * 100, 2) if total else 0.0,
+        "janky_pct": round((f.get("janky") or 0) / total * 100, 2) if total else 0.0,
+        "avg_ms": round((f.get("avg_dur") or 0) / 1e6, 2),
+        "max_ms": round((f.get("max_dur") or 0) / 1e6, 2),
+    }
+    # Thermal drift: second-half mean frame time against the first half. A rising
+    # value means the device is throttling, which is a different problem from
+    # scattered jank and needs a different fix.
+    halves = _rows(tp, """
+        with f as (
+          select dur, row_number() over (order by ts) rn, count(*) over () n
+          from slice where name = 'Choreographer#doFrame')
+        select avg(case when rn <= n/2 then dur end) first_half,
+               avg(case when rn >  n/2 then dur end) second_half from f
+    """)
+    drift = 0.0
+    if halves and halves[0].get("first_half"):
+        a, b = halves[0]["first_half"], halves[0]["second_half"]
+        drift = round((b - a) / a * 100, 2)
+    frames["thermal_drift_pct"] = drift
+    return frames
+
+
+def _memory(tp):
+    """RSS and, where present, the Hermes heap.
+
+    `mem.rss` is the counter this project's own captures emit. A trace from
+    `process_stats` instead exposes per-process RSS, so that is used as a
+    fallback -- otherwise memory would silently read as zero on any trace not
+    produced by our own capture config.
+    """
+    mem = {}
+    mb = 1024 * 1024
+    for key, track in (("rss", "mem.rss"), ("hermes_heap", "mem.hermes_heap")):
+        r = _rows(tp, f"""
+            select max(c.value) mx, min(c.value) mn
+            from counter c join counter_track t on c.track_id=t.id
+            where t.name = '{track}'
+        """)
+        if r and r[0].get("mx") is not None:
+            mem[key] = {"peak_mb": round(r[0]["mx"] / mb, 1),
+                        "min_mb": round(r[0]["mn"] / mb, 1),
+                        "growth_mb": round((r[0]["mx"] - r[0]["mn"]) / mb, 1)}
+    if "rss" not in mem:
+        try:
+            tp.query("INCLUDE PERFETTO MODULE android.memory.process;")
+            r = _rows(tp, """
+                select max(rss_and_swap) mx, min(rss_and_swap) mn
+                from memory_rss_and_swap_per_process""")
+            if r and r[0].get("mx") is not None:
+                mem["rss"] = {"peak_mb": round(r[0]["mx"] / mb, 1),
+                              "min_mb": round(r[0]["mn"] / mb, 1),
+                              "growth_mb": round((r[0]["mx"] - r[0]["mn"]) / mb, 1),
+                              "source": "process_stats"}
+        except Exception:
+            pass
+    return mem
+
+
 def _extract(tp, path_kind):
     # --- steps: top-level automation markers -------------------------------
     steps = _rows(tp, f"""
@@ -105,59 +261,8 @@ def _extract(tp, path_kind):
                               "before first usable camera frame",
                 })
 
-    # --- frame pacing ------------------------------------------------------
-    fr = _rows(tp, f"""
-        select count(*) total,
-               sum(case when dur > {FRAME_NS} then 1 else 0 end) slow,
-               sum(case when dur > {3 * FRAME_NS} then 1 else 0 end) janky,
-               cast(avg(dur) as int) avg_dur,
-               cast(max(dur) as int) max_dur
-        from slice where name = 'Choreographer#doFrame'
-    """)
-    f = fr[0] if fr else {}
-    total = f.get("total") or 0
-    frames = {
-        "total": total,
-        "slow": f.get("slow") or 0,
-        "janky": f.get("janky") or 0,
-        "slow_pct": round((f.get("slow") or 0) / total * 100, 2) if total else 0.0,
-        "janky_pct": round((f.get("janky") or 0) / total * 100, 2) if total else 0.0,
-        "avg_ms": round((f.get("avg_dur") or 0) / 1e6, 2),
-        "max_ms": round((f.get("max_dur") or 0) / 1e6, 2),
-    }
-
-    # --- thermal drift: does frame time degrade over sustained scanning? ----
-    halves = _rows(tp, """
-        with f as (
-          select dur, row_number() over (order by ts) rn, count(*) over () n
-          from slice where name = 'Choreographer#doFrame')
-        select avg(case when rn <= n/2 then dur end) first_half,
-               avg(case when rn >  n/2 then dur end) second_half from f
-    """)
-    drift = 0.0
-    if halves and halves[0].get("first_half"):
-        a, b = halves[0]["first_half"], halves[0]["second_half"]
-        drift = round((b - a) / a * 100, 2)
-    frames["thermal_drift_pct"] = drift
-
-    # --- memory ------------------------------------------------------------
-    mem = {}
-    for key, track in (("rss", "mem.rss"), ("hermes_heap", "mem.hermes_heap")):
-        r = _rows(tp, f"""
-            select max(c.value) mx, min(c.value) mn,
-                   (select value from counter c2 join counter_track t2
-                     on c2.track_id=t2.id where t2.name='{track}'
-                     order by c2.ts desc limit 1) last
-            from counter c join counter_track t on c.track_id=t.id
-            where t.name = '{track}'
-        """)
-        if r and r[0].get("mx") is not None:
-            mb = 1024 * 1024
-            mem[key] = {
-                "peak_mb": round(r[0]["mx"] / mb, 1),
-                "min_mb": round(r[0]["mn"] / mb, 1),
-                "growth_mb": round((r[0]["mx"] - r[0]["mn"]) / mb, 1),
-            }
+    frames = _frames(tp)
+    mem = _memory(tp)
 
     # --- breaches against architecture budgets -----------------------------
     checks = {
@@ -166,7 +271,7 @@ def _extract(tp, path_kind):
         "janky_frame_pct": frames["janky_pct"],
         "peak_rss_mb": mem.get("rss", {}).get("peak_mb", 0),
         "rss_growth_mb": mem.get("rss", {}).get("growth_mb", 0),
-        "thermal_drift_pct": drift,
+        "thermal_drift_pct": frames["thermal_drift_pct"],
     }
     breaches = [
         {"metric": k, "value": v, "budget": GLOBAL_BUDGETS[k],
@@ -176,6 +281,8 @@ def _extract(tp, path_kind):
 
     return {
         "path_kind": path_kind,
+        "derived": False,
+        "startup_metric": "time to first camera frame",
         "steps": step_metrics,
         "startup": {"time_to_first_camera_frame_ms": ttff,
                     "budget_ms": GLOBAL_BUDGETS["time_to_first_camera_frame_ms"],
