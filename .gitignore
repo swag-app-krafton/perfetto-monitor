@@ -4,3 +4,4 @@ traces/
 .env
 __pycache__/
 *.pyc
+apps.local.json
