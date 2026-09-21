@@ -35,14 +35,17 @@ let TAB = 'overview';    // one tab per performance concern in the architecture
 let CMP = { run: null, base: null, data: null, loading: false };  // comparison view
 let CAP = { device: null, loading: false, pkg: '', cold: true, duration: 8000,
             q: '', job: null, polling: false };
+let STR = { list: null, open: null, detail: null, job: null, polling: false,
+            pkg: '', sessions: 5, cold: true, duration: 8000, q: '' };
 
 const TABS = [
   { id: 'overview', label: 'Overview',  blurb: 'Verdict, budgets and findings for the latest run.' },
   { id: 'startup',  label: 'Startup',   blurb: 'Time to first usable camera frame, and the deferred-work ordering constraint.' },
   { id: 'frames',   label: 'Frame pacing', blurb: 'Slow and frozen frames during sustained scanning, and thermal drift.' },
-  { id: 'memory',   label: 'Memory',    blurb: 'Peak RSS with three runtimes resident, and growth suggesting orphaned RN surfaces.' },
+  { id: 'memory',   label: 'Memory',    blurb: 'Peak RAM usage with three runtimes resident, and growth suggesting orphaned RN surfaces.' },
   { id: 'steps',    label: 'Steps',     blurb: 'Per-step durations, trailing baselines and child-slice breakdown.' },
   { id: 'capture',  label: 'Capture',   blurb: 'Pick an app installed on the connected device and profile it.' },
+  { id: 'stress',   label: 'Stress',    blurb: 'Repeat cold starts to separate a real regression from run-to-run noise.' },
   { id: 'compare',  label: 'Compare',   blurb: 'Diff any two runs, or any run against the pinned benchmark.' },
   { id: 'history',  label: 'History',   blurb: 'Every recorded run, sortable and filterable. Pin a run as the benchmark here.' },
 ];
@@ -85,7 +88,7 @@ async function loadCompare() {
 
 const MNAMES = { ttff_ms: 'First camera frame', slow_pct: 'Slow frames',
   janky_pct: 'Janky frames', thermal_drift_pct: 'Thermal drift',
-  peak_rss_mb: 'Peak RSS', rss_growth_mb: 'RSS growth' };
+  peak_rss_mb: 'Peak RAM usage', rss_growth_mb: 'RAM growth' };
 const MUNITS = { ttff_ms: 'ms', slow_pct: '%', janky_pct: '%',
   thermal_drift_pct: '%', peak_rss_mb: 'MB', rss_growth_mb: 'MB' };
 const CRITICAL = {
@@ -559,6 +562,108 @@ async function pollCapture(jid) {
   }
 }
 
+/* ---------- stress tests ---------- */
+async function loadStress(force) {
+  if (STR.list && !force) return;
+  try { STR.list = (await (await fetch('/api/stress')).json()).stress_tests || []; }
+  catch (e) { STR.list = []; }
+}
+
+async function loadStressDetail(id) {
+  try { STR.detail = await (await fetch(`/api/stress?id=${id}`)).json(); }
+  catch (e) { STR.detail = { error: String(e) }; }
+}
+
+async function startStress() {
+  const r = await postJSON('/api/stress/start', {
+    pkg: STR.pkg, sessions: STR.sessions, cold: STR.cold, duration_ms: STR.duration });
+  if (r.error) { STR.job = { state: 'error', error: r.error, log: [] }; render(); return; }
+  STR.job = { id: r.job_id, state: 'queued', log: [] };
+  render();
+  pollStress(r.job_id);
+}
+
+async function pollStress(jid) {
+  if (STR.polling) return;
+  STR.polling = true;
+  while (true) {
+    await new Promise(r => setTimeout(r, 1200));
+    let j;
+    try { j = await (await fetch(`/api/jobs?id=${encodeURIComponent(jid)}`)).json(); }
+    catch (e) { break; }
+    STR.job = j;
+    // A stress test writes rows as it goes, so the live table fills in.
+    if (j.stress_id) { STR.open = j.stress_id; await loadStressDetail(j.stress_id); }
+    render();
+    if (j.state === 'done' || j.state === 'error') break;
+  }
+  STR.polling = false;
+  await loadStress(true);
+  if (STR.job && STR.job.result && STR.job.result.stress_id) {
+    STR.open = STR.job.result.stress_id;
+    await loadStressDetail(STR.open);
+  }
+  await load();
+}
+
+/* Sparkline-style dot plot of session values, so spread is visible at a glance
+   rather than hidden behind a mean. */
+function sessionPlot(sessions, key, budget, label, color) {
+  const W = 1180, H = 200, L = 54, R = 20, T = 16, B = 40;
+  const iw = W - L - R, ih = H - T - B;
+  const vals = sessions.map(s => s[key]).filter(v => v != null && v > 0);
+  if (!vals.length) return el('svg');
+  let hi = Math.max(...vals, budget || 0) * 1.12, lo = Math.min(...vals) * 0.85;
+  if (!(hi > lo)) { hi = (hi || 1) * 1.2 + 1; lo = 0; }
+  const dec = (hi - lo) / 3 < 5 ? 1 : 0;
+  const x = i => L + (sessions.length === 1 ? iw / 2 : (i * iw) / (sessions.length - 1));
+  const y = v => T + ih - ((v - lo) / (hi - lo || 1)) * ih;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': label });
+  const g = el('g');
+  for (let i = 0; i <= 3; i++) {
+    const v = lo + (hi - lo) * i / 3;
+    g.appendChild(el('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: 'gl' }));
+    g.appendChild(el('text', { x: L - 9, y: y(v) + 4, class: 'ax', 'text-anchor': 'end' },
+      [document.createTextNode(fmt(v, dec))]));
+  }
+  const med = [...vals].sort((a, b) => a - b)[Math.floor(vals.length / 2)];
+  g.appendChild(el('line', { x1: L, x2: W - R, y1: y(med), y2: y(med),
+    stroke: 'var(--text-muted)', 'stroke-width': 1.5, 'stroke-dasharray': '5 4' }));
+  g.appendChild(el('text', { x: W - R, y: y(med) - 6, class: 'ax', 'text-anchor': 'end' },
+    [document.createTextNode(`median ${fmt(med, dec)}`)]));
+  if (budget) {
+    g.appendChild(el('line', { x1: L, x2: W - R, y1: y(budget), y2: y(budget), class: 'bl' }));
+  }
+  const pts = sessions.map((s, i) => s[key] != null && s[key] > 0 ? [x(i), y(s[key])] : null);
+  const seq = pts.filter(Boolean);
+  if (seq.length > 1)
+    g.appendChild(el('path', { d: 'M' + seq.map(p => p.join(',')).join(' L'), fill: 'none',
+      stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round', opacity: .55 }));
+  sessions.forEach((s, i) => {
+    if (!pts[i]) {
+      // A failed session is drawn as a gap marker rather than omitted, so the
+      // reader can see it was attempted.
+      g.appendChild(el('text', { x: x(i), y: T + ih + 16, class: 'ax',
+        'text-anchor': 'middle', fill: 'var(--crit)' }, [document.createTextNode('✗')]));
+      return;
+    }
+    g.appendChild(el('circle', { cx: pts[i][0], cy: pts[i][1], r: 5, fill: color,
+      stroke: 'var(--surface-1)', 'stroke-width': 2 }));
+    const hit = el('rect', { x: x(i) - 13, y: T, width: 26, height: ih, class: 'hit' });
+    hit.addEventListener('mousemove', e => showTip(
+      `<b>session ${s.seq}</b><div class="r"><span>${esc(label)}</span><b>${fmt(s[key], 1)}</b></div>`
+      + (s.run_id ? `<div class="r"><span>run</span><b>${s.run_id}</b></div>` : ''), e));
+    hit.addEventListener('mouseleave', hideTip);
+    g.appendChild(hit);
+  });
+  sessions.forEach((s, i) => g.appendChild(el('text', { x: x(i), y: H - B + 17,
+    class: 'ax', 'text-anchor': 'middle' }, [document.createTextNode(String(s.seq))])));
+  g.appendChild(el('text', { x: L + iw / 2, y: H - 5, class: 'ax', 'text-anchor': 'middle' },
+    [document.createTextNode('session')]));
+  svg.appendChild(g);
+  return svg;
+}
+
 /* ---------- render ---------- */
 function tabBar() {
   return `<nav class="tabs" role="tablist">${TABS.map(t => `
@@ -660,8 +765,8 @@ function render() {
         ${tileHTML('Slow frames', cur.slow_pct, '%', gb.slow_frame_pct, prev?.slow_pct, 2)}
         ${tileHTML('Janky frames', cur.janky_pct, '%', gb.janky_frame_pct, prev?.janky_pct, 2)}
         ${tileHTML('Thermal drift', cur.thermal_drift_pct, '%', gb.thermal_drift_pct, prev?.thermal_drift_pct, 2)}
-        ${tileHTML('Peak RSS', cur.peak_rss_mb, 'MB', memBudget('peak_rss_mb'), prev?.peak_rss_mb, 1)}
-        ${tileHTML('RSS growth', cur.rss_growth_mb, 'MB', memBudget('rss_growth_mb'), prev?.rss_growth_mb, 1)}
+        ${tileHTML('Peak RAM usage', cur.peak_rss_mb, 'MB', memBudget('peak_rss_mb'), prev?.peak_rss_mb, 1)}
+        ${tileHTML('RAM growth', cur.rss_growth_mb, 'MB', memBudget('rss_growth_mb'), prev?.rss_growth_mb, 1)}
       </div>
       <div class="card"><h2>All findings</h2>
         <p class="hint">Attributed to a runtime and, where it applies, to a named architectural risk.</p>
@@ -769,8 +874,8 @@ function render() {
     const hh = cur.memory?.hermes_heap;
     app.innerHTML = head + `
       <div class="tiles">
-        ${tileHTML('Peak RSS', cur.peak_rss_mb, 'MB', memBudget('peak_rss_mb'), prev?.peak_rss_mb, 1)}
-        ${tileHTML('RSS growth', cur.rss_growth_mb, 'MB', memBudget('rss_growth_mb'), prev?.rss_growth_mb, 1)}
+        ${tileHTML('Peak RAM usage', cur.peak_rss_mb, 'MB', memBudget('peak_rss_mb'), prev?.peak_rss_mb, 1)}
+        ${tileHTML('RAM growth', cur.rss_growth_mb, 'MB', memBudget('rss_growth_mb'), prev?.rss_growth_mb, 1)}
         ${hh ? tileHTML('Hermes heap peak', hh.peak_mb, 'MB', null, prev?.memory?.hermes_heap?.peak_mb, 1) : ''}
         ${hh ? tileHTML('Hermes heap growth', hh.growth_mb, 'MB', null, prev?.memory?.hermes_heap?.growth_mb, 1) : ''}
       </div>
@@ -780,12 +885,12 @@ function render() {
           <b>${fmt(hh.growth_mb / cur.rss_growth_mb * 100, 0)}%</b>
           <em>${fmt(hh.growth_mb, 1)}MB of ${fmt(cur.rss_growth_mb, 1)}MB total</em></div></div>` : ''}
       </div>
-      <div class="card"><h2>Peak RSS and Hermes heap</h2>
-        <p class="hint">Both in MB on one axis. Dashed line is the ${gb.peak_rss_mb}MB RSS ceiling.</p>
-        <div class="legend"><span><i style="background:var(--s1)"></i>Peak RSS</span><span><i style="background:var(--s2)"></i>Hermes heap peak</span></div>
+      <div class="card"><h2>Peak RAM usage and Hermes heap</h2>
+        <p class="hint">Both in MB on one axis. RAM usage is the app's resident set: the physical memory it actually occupies, which is what Android's low-memory killer acts on.${memBudget('peak_rss_mb') ? ` Dashed line is the ${gb.peak_rss_mb}MB ceiling.` : ''}</p>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Peak RAM usage</span><span><i style="background:var(--s2)"></i>Hermes heap peak</span></div>
         <div id="c6"></div></div>
       <div class="card"><h2>Session growth</h2>
-        <p class="hint">Min-to-peak within each run. Dashed line is the ${gb.rss_growth_mb}MB budget.</p>
+        <p class="hint">Min-to-peak RAM within each run. Growth that never returns to baseline is the leak signature.${memBudget('rss_growth_mb') ? ` Dashed line is the ${gb.rss_growth_mb}MB budget.` : ''}</p>
         <div id="c7"></div></div>
       <div class="card"><h2>Memory findings</h2>
         <div>${findingsHTML(an, { kinds: ['memory', 'budget_breach'],
@@ -793,10 +898,10 @@ function render() {
           emptyMsg: 'No memory findings for the latest run.' })}</div></div>`;
     post.push(() => {
       $('#c6').appendChild(multiLine(rs, [
-        { name: 'Peak RSS', color: 'var(--s1)', get: r => r.peak_rss_mb },
+        { name: 'Peak RAM usage', color: 'var(--s1)', get: r => r.peak_rss_mb },
         { name: 'Hermes heap peak', color: 'var(--s2)', get: r => r.memory?.hermes_heap?.peak_mb },
-      ], gb.peak_rss_mb, 'peak RSS and Hermes heap (MB)'));
-      $('#c7').appendChild(lineChart(rs, 'rss_growth_mb', gb.rss_growth_mb, 'RSS growth (MB)', 'var(--s3)'));
+      ], memBudget('peak_rss_mb'), 'peak RAM usage and Hermes heap (MB)'));
+      $('#c7').appendChild(lineChart(rs, 'rss_growth_mb', memBudget('rss_growth_mb'), 'RAM growth (MB)', 'var(--s3)'));
     });
   }
 
@@ -988,6 +1093,165 @@ function render() {
     }
   }
 
+  /* ---------------- STRESS ---------------- */
+  if (TAB === 'stress') {
+    const job = STR.job;
+    const busy = job && (job.state === 'running' || job.state === 'queued');
+    const dev = CAP.device;
+    const det = STR.detail;
+
+    if (STR.list === null) {
+      app.innerHTML = head + '<div class="card"><p class="empty">Loading stress tests…</p></div>';
+      post.push(() => Promise.all([loadStress(), loadDevice()]).then(render));
+    } else {
+      const installed = ((dev && dev.packages) || []).filter(p => p.installed);
+      const q = STR.q.trim().toLowerCase();
+      const pkgs = installed.filter(p => !q || p.pkg.toLowerCase().includes(q)
+                                      || (p.name || '').toLowerCase().includes(q));
+      const stat = (s, unit, d = 1) => s
+        ? `<div class="ro"><span class="rok">${esc(unit)}</span><b>${fmt(s.median, d)}</b>
+             <em>median · ${fmt(s.min, d)}–${fmt(s.max, d)} · σ ${fmt(s.stdev, d)}</em></div>`
+        : '';
+
+      app.innerHTML = head + `
+        <div class="card">
+          <h2>Run a stress test</h2>
+          <p class="hint">One cold start is a noisy measurement — cache state, background work
+            and thermal condition all move it. Repeating it is the only way to tell a real
+            regression from that noise, so a stress test reports the <b>spread</b>, not an average.
+            Each session is also recorded as an ordinary run, so every other tab can see it.</p>
+          ${!dev ? '<p class="empty">Checking for a device…</p>'
+            : !dev.connected ? '<p class="empty">No device connected. Connect one over USB with USB debugging enabled.</p>'
+            : `<div class="ctl" style="margin-bottom:12px">
+              <input id="strsearch" type="search" placeholder="Search installed apps…"
+                     value="${esc(STR.q)}" ${busy ? 'disabled' : ''} aria-label="Search apps">
+              <span class="flabel">Sessions</span>
+              <select id="strn" ${busy ? 'disabled' : ''} aria-label="Session count">
+                ${[3, 5, 10, 15, 20].map(v => `<option value="${v}"${STR.sessions === v ? ' selected' : ''}>${v}</option>`).join('')}
+              </select>
+              <span class="flabel">Start</span><div id="strcold"></div>
+              <span class="flabel">Each</span>
+              <select id="strdur" ${busy ? 'disabled' : ''} aria-label="Duration per session">
+                ${[5000, 8000, 10000, 15000].map(v => `<option value="${v}"${STR.duration === v ? ' selected' : ''}>${v / 1000}s</option>`).join('')}
+              </select>
+              <span class="count">~${Math.round(STR.sessions * (STR.duration + 4000) / 1000)}s total</span>
+            </div>
+            <div class="scroll" style="max-height:230px"><table><tbody>
+              ${pkgs.slice(0, 40).map(p => `<tr>
+                <td>${esc(p.name || p.pkg)}</td>
+                <td style="color:var(--text-secondary);font-size:12px">${esc(p.pkg)}</td>
+                <td><button class="mini-btn" data-strpkg="${esc(p.pkg)}" ${busy ? 'disabled' : ''}>${busy && STR.pkg === p.pkg ? 'Running…' : 'Stress test'}</button></td>
+              </tr>`).join('') || '<tr><td class="empty">No installed apps match that search.</td></tr>'}
+            </tbody></table></div>`}
+        </div>
+
+        ${job ? `<div class="card" style="${job.state === 'error' ? 'border-color:var(--crit)' : job.state === 'done' ? 'border-color:var(--good)' : ''}">
+          <h2>${busy ? `Running… session ${(job.progress || {}).current || 0} of ${(job.progress || {}).total || job.sessions || '?'}`
+                : job.state === 'done' ? 'Stress test complete' : 'Stress test failed'}</h2>
+          <div class="joblog">${(job.log || []).map(l => `<div class="jl ${/FAILED|^ERROR/.test(l.text) ? 'bad' : ''}">
+            <span class="jt">${l.t}s</span>${esc(l.text)}</div>`).join('') || '<div class="jl">starting</div>'}</div>
+          ${job.error ? `<div class="find high" style="margin-top:10px"><div class="t">Failed</div><div class="e">${esc(job.error)}</div></div>` : ''}
+        </div>` : ''}
+
+        ${det && !det.error ? `<div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+            <h2 style="margin:0">Stress test #${det.id} · ${esc(det.app_pkg || '')}</h2>
+            <button class="mini-btn" id="closestress">Close</button>
+          </div>
+          <p class="hint">${det.completed} of ${det.sessions_requested} session(s) captured${det.failed ? `, ${det.failed} failed` : ''}
+            · ${det.cold ? 'cold' : 'warm'} · ${esc(det.device || '')} · ${esc(det.ts || '')}</p>
+          ${det.stats && det.stats.ttid_ms ? `<div class="readout">
+            ${stat(det.stats.ttid_ms, 'startup ms')}
+            <div class="ro"><span class="rok">spread</span><b>${fmt(det.stats.ttid_ms.spread_pct, 1)}%</b>
+              <em>max over min, relative to median</em></div>
+            ${stat(det.stats.peak_rss_mb, 'peak RAM MB')}
+            ${stat(det.stats.slow_pct, 'slow frames %', 2)}
+          </div>` : '<p class="empty">No completed sessions yet.</p>'}
+          ${(det.sessions || []).some(x => x.ttid_ms) ? `<h3 style="font-size:13px;margin:18px 0 2px">Startup per session</h3>
+            <p class="hint">Dashed line is the median. A wide spread means the number is not repeatable, and a single capture would have been misleading.</p>
+            <div id="sp1"></div>` : ''}
+          <h3 style="font-size:13px;margin:18px 0 6px">Sessions</h3>
+          <div class="scroll"><table>
+            <thead><tr><th>#</th><th>State</th><th class="num">Startup</th><th class="num">vs median</th>
+              <th class="num">Slow %</th><th class="num">Peak RAM</th><th>Run</th></tr></thead>
+            <tbody>${(det.sessions || []).map(x => {
+              const med = det.stats && det.stats.ttid_ms ? det.stats.ttid_ms.median : null;
+              const dv = (x.ttid_ms && med) ? x.ttid_ms - med : null;
+              return `<tr>
+                <td>${x.seq}</td>
+                <td>${x.state === 'done' ? '<span class="cv better">ok</span>'
+                     : x.state === 'error' ? '<span class="cv worse">failed</span>'
+                     : '<span class="cv same">pending</span>'}</td>
+                <td class="num">${x.ttid_ms ? fmt(x.ttid_ms, 1) + ' ms' : '–'}</td>
+                <td class="num ${dv > 0.5 ? 'up' : dv < -0.5 ? 'dn' : ''}">${dv == null ? '–' : (dv > 0 ? '+' : '') + fmt(dv, 1)}</td>
+                <td class="num">${x.slow_pct != null ? fmt(x.slow_pct, 2) : '–'}</td>
+                <td class="num">${x.peak_rss_mb != null ? fmt(x.peak_rss_mb, 1) + ' MB' : '–'}</td>
+                <td>${x.run_id ? `<button class="mini-btn" data-strrun="${x.run_id}" data-strpath="${esc(x.path_kind || '')}" data-strapp="${esc(det.app_pkg || '')}">View run ${x.run_id}</button>`
+                     : x.error ? `<span style="color:var(--crit);font-size:12px">${esc(x.error.slice(0, 90))}</span>` : '–'}</td>
+              </tr>`; }).join('')}</tbody>
+          </table></div>
+        </div>` : ''}
+
+        <div class="card">
+          <h2>Stress test history</h2>
+          <p class="hint">Separate from the run history: each row is a whole test, not one capture.</p>
+          <div class="scroll"><table>
+            <thead><tr><th>#</th><th>When</th><th>App</th><th>Label</th><th class="num">Sessions</th>
+              <th class="num">Median</th><th class="num">Spread</th><th>State</th><th></th></tr></thead>
+            <tbody>${(STR.list || []).map(t => {
+              const st = (t.stats || {}).ttid_ms;
+              return `<tr${STR.open === t.id ? ' class="cur"' : ''}>
+                <td>${t.id}</td><td style="color:var(--text-secondary)">${esc(t.ts || '')}</td>
+                <td>${esc(t.app_pkg || '')}</td><td>${esc(t.label || '')}</td>
+                <td class="num">${t.completed}/${t.sessions_requested}${t.failed ? ` <span style="color:var(--crit)">(${t.failed}✗)</span>` : ''}</td>
+                <td class="num">${st ? fmt(st.median, 1) + ' ms' : '–'}</td>
+                <td class="num ${st && st.spread_pct > 25 ? 'up' : ''}">${st && st.spread_pct != null ? fmt(st.spread_pct, 1) + '%' : '–'}</td>
+                <td><span class="pill ${t.state === 'done' ? 'pass' : t.state === 'error' ? 'fail' : 'warn'}">${esc(t.state)}</span></td>
+                <td><button class="mini-btn" data-stropen="${t.id}">Open</button></td>
+              </tr>`; }).join('') || '<tr><td colspan="9" class="empty">No stress tests yet.</td></tr>'}</tbody>
+          </table></div>
+        </div>`;
+
+      post.push(() => {
+        if (det && !det.error && (det.sessions || []).some(x => x.ttid_ms)) {
+          const w = $('#sp1');
+          if (w) w.appendChild(sessionPlot(det.sessions, 'ttid_ms', null,
+                                           'startup (ms)', 'var(--s1)'));
+        }
+        const ss = $('#strsearch');
+        if (ss) ss.oninput = () => {
+          STR.q = ss.value; clearTimeout(ss._t);
+          ss._t = setTimeout(() => { render(); const n = $('#strsearch');
+            if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 200);
+        };
+        const sn = $('#strn'); if (sn) sn.onchange = () => { STR.sessions = +sn.value; render(); };
+        const sd = $('#strdur'); if (sd) sd.onchange = () => { STR.duration = +sd.value; render(); };
+        const sc = $('#strcold');
+        if (sc) {
+          sc.innerHTML = [[true, 'Cold'], [false, 'Warm']].map(([v, l]) =>
+            `<button class="seg${STR.cold === v ? ' on' : ''}" data-sc="${v}" ${busy ? 'disabled' : ''}>${l}</button>`).join('');
+          sc.querySelectorAll('.seg').forEach(b => b.onclick = () => { STR.cold = b.dataset.sc === 'true'; render(); });
+        }
+        document.querySelectorAll('[data-strpkg]').forEach(b => b.onclick = () => {
+          STR.pkg = b.dataset.strpkg; startStress();
+        });
+        document.querySelectorAll('[data-stropen]').forEach(b => b.onclick = async () => {
+          STR.open = +b.dataset.stropen; await loadStressDetail(STR.open); render();
+          $('#sp1')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        });
+        const cs = $('#closestress');
+        if (cs) cs.onclick = () => { STR.open = null; STR.detail = null; render(); };
+        document.querySelectorAll('[data-strrun]').forEach(b => b.onclick = () => {
+          // Jump to that session's run in the normal views.
+          APP = b.dataset.strapp || APP;
+          PATH = b.dataset.strpath || PATH;
+          TAB = 'steps';
+          load();
+        });
+      });
+    }
+  }
+
   /* ---------------- COMPARE ---------------- */
   if (TAB === 'compare') {
     const bench = benchOf(cur);
@@ -1111,7 +1375,7 @@ function render() {
             ${th('history', 'id', 'Run')}${th('history', 'ts', 'When')}${th('history', 'app_name', 'App')}${th('history', 'label', 'Label')}
             ${th('history', 'app_version', 'Version')}${th('history', 'device', 'Device')}
             ${th('history', 'ttff_ms', 'First frame', 'num')}${th('history', 'slow_pct', 'Slow %', 'num')}
-            ${th('history', 'thermal_drift_pct', 'Drift %', 'num')}${th('history', 'peak_rss_mb', 'Peak RSS', 'num')}
+            ${th('history', 'thermal_drift_pct', 'Drift %', 'num')}${th('history', 'peak_rss_mb', 'Peak RAM', 'num')}
             ${th('history', 'verdict', 'Verdict')}<th>Actions</th>
           </tr></thead>
           <tbody>${sortRows(fr, 'history', { verdict: r => r.analysis?.verdict || 'zzz', app_name: r => r.app_name || '' }).map(r => `<tr${r.id === cur.id ? ' class="cur"' : ''}>

@@ -335,6 +335,70 @@ class TestCLIPathKindDefaulting(unittest.TestCase):
         self.assertNotEqual(row["path_kind"], "returning_user")
 
 
+class TestStressTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "s.db")
+
+    def _seed(self, values, requested=None):
+        sid = store.stress_create(app_pkg="com.rival.app", device="pixel7",
+                                  sessions=requested or len(values), db=self.db)
+        for i, v in enumerate(values, start=1):
+            if v is None:
+                store.stress_session_done(sid, i, state="error",
+                                          error="did not observe app", db=self.db)
+            else:
+                store.stress_session_done(sid, i, ttid_ms=v, db=self.db)
+        store.stress_finish(sid, db=self.db)
+        return sid
+
+    def test_stats_report_spread_not_just_mean(self):
+        sid = self._seed([100.0, 120.0, 110.0, 180.0, 105.0])
+        t = store.stress_get(sid, db=self.db)
+        st = t["stats"]["ttid_ms"]
+        self.assertEqual(st["n"], 5)
+        self.assertEqual(st["min"], 100.0)
+        self.assertEqual(st["max"], 180.0)
+        self.assertEqual(st["median"], 110.0)
+        # The spread is the headline: 80ms of range on a 110ms median.
+        self.assertAlmostEqual(st["spread_pct"], 72.7, places=1)
+        self.assertGreater(st["stdev"], 0)
+
+    def test_failed_sessions_do_not_sink_the_test(self):
+        """A stress test with some failures is still informative."""
+        sid = self._seed([100.0, None, 120.0, None, 110.0])
+        t = store.stress_get(sid, db=self.db)
+        self.assertEqual(t["completed"], 3)
+        self.assertEqual(t["failed"], 2)
+        self.assertEqual(t["stats"]["ttid_ms"]["n"], 3)
+
+    def test_all_sessions_failed_yields_no_stats(self):
+        sid = self._seed([None, None])
+        t = store.stress_get(sid, db=self.db)
+        self.assertEqual(t["completed"], 0)
+        self.assertIsNone(t["stats"]["ttid_ms"])
+
+    def test_single_session_has_zero_stdev_not_a_crash(self):
+        sid = self._seed([150.0])
+        st = store.stress_get(sid, db=self.db)["stats"]["ttid_ms"]
+        self.assertEqual(st["n"], 1)
+        self.assertEqual(st["stdev"], 0.0)
+        self.assertEqual(st["median"], 150.0)
+
+    def test_sessions_are_ordered_and_listed(self):
+        sid = self._seed([100.0, 200.0, 150.0])
+        t = store.stress_get(sid, db=self.db)
+        self.assertEqual([x["seq"] for x in t["sessions"]], [1, 2, 3])
+        self.assertIn(sid, [x["id"] for x in store.stress_list(db=self.db)])
+
+    def test_pending_sessions_counted_before_completion(self):
+        sid = store.stress_create(app_pkg="com.rival.app", sessions=4, db=self.db)
+        t = store.stress_get(sid, db=self.db)
+        self.assertEqual(t["state"], "running")
+        self.assertEqual(t["completed"], 0)
+        self.assertEqual(len(t["sessions"]), 4)
+
+
 class TestHeuristic(unittest.TestCase):
     def test_heuristic_runs_without_network(self):
         tmp = tempfile.mkdtemp()

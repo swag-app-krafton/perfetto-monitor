@@ -41,6 +41,34 @@ create index if not exists idx_run on step_metrics(run_id);
 -- A pinned reference run, one per (path_kind, device). Scoping it this way keeps
 -- a returning-user benchmark from being compared against a first-run trace, and
 -- keeps device classes apart, which is the same reason baselines filter on device.
+-- A stress test is N cold-start sessions of one app captured back to back.
+-- Sessions are ordinary runs (so every existing chart and analysis works on
+-- them unchanged); this table just groups them and holds the run-to-run
+-- variance, which is the actual point of a stress test.
+create table if not exists stress_tests (
+  id integer primary key autoincrement,
+  ts text not null,
+  app_pkg text,
+  device text,
+  label text,
+  sessions_requested integer not null,
+  cold int default 1,
+  duration_ms integer,
+  state text not null default 'running',
+  error text,
+  finished text
+);
+create table if not exists stress_sessions (
+  id integer primary key autoincrement,
+  stress_id integer not null references stress_tests(id) on delete cascade,
+  seq integer not null,
+  run_id integer references runs(id) on delete set null,
+  state text not null default 'pending',
+  error text,
+  ttid_ms real
+);
+create index if not exists idx_stress on stress_sessions(stress_id);
+
 create table if not exists benchmarks (
   scope text primary key,
   run_id integer not null references runs(id) on delete cascade,
@@ -428,6 +456,96 @@ def reextract(db=None, extractor=None):
         done += 1
     c.commit(); c.close()
     return {"reextracted": done, "missing_trace": missing}
+
+
+# ---------------------------------------------------------------- stress tests
+
+def stress_create(*, app_pkg, device=None, label=None, sessions=5, cold=True,
+                  duration_ms=8000, db=None):
+    c = connect(db)
+    cur = c.execute("""insert into stress_tests
+        (ts, app_pkg, device, label, sessions_requested, cold, duration_ms, state)
+        values (?,?,?,?,?,?,?,'running')""",
+        (datetime.now(timezone.utc).isoformat(timespec="seconds"), app_pkg, device,
+         label, int(sessions), int(bool(cold)), int(duration_ms)))
+    sid = cur.lastrowid
+    for i in range(int(sessions)):
+        c.execute("insert into stress_sessions (stress_id, seq, state) values (?,?,'pending')",
+                  (sid, i + 1))
+    c.commit(); c.close()
+    return sid
+
+
+def stress_session_done(stress_id, seq, *, run_id=None, ttid_ms=None,
+                        state="done", error=None, db=None):
+    c = connect(db)
+    c.execute("""update stress_sessions set run_id=?, ttid_ms=?, state=?, error=?
+                 where stress_id=? and seq=?""",
+              (run_id, ttid_ms, state, error, stress_id, seq))
+    c.commit(); c.close()
+
+
+def stress_finish(stress_id, *, state="done", error=None, db=None):
+    c = connect(db)
+    c.execute("update stress_tests set state=?, error=?, finished=? where id=?",
+              (state, error, datetime.now(timezone.utc).isoformat(timespec="seconds"),
+               stress_id))
+    c.commit(); c.close()
+
+
+def stress_stats(values):
+    """Spread across sessions. A stress test exists to expose variance, so the
+    summary leads with spread rather than a single average that hides it."""
+    vals = sorted(v for v in values if v is not None and v > 0)
+    if not vals:
+        return None
+    n = len(vals)
+    def pct(p):
+        if n == 1:
+            return vals[0]
+        k = (n - 1) * p
+        lo, hi = int(k), min(int(k) + 1, n - 1)
+        return vals[lo] + (vals[hi] - vals[lo]) * (k - lo)
+    mean = sum(vals) / n
+    return {
+        "n": n, "min": round(vals[0], 1), "max": round(vals[-1], 1),
+        "mean": round(mean, 1), "median": round(pct(0.5), 1),
+        "p90": round(pct(0.9), 1),
+        "stdev": round(statistics.pstdev(vals), 1) if n > 1 else 0.0,
+        # Spread as a share of the median: the honest headline for "how
+        # repeatable is this app's cold start".
+        "spread_pct": round((vals[-1] - vals[0]) / pct(0.5) * 100, 1) if pct(0.5) else None,
+    }
+
+
+def stress_get(stress_id, db=None):
+    c = connect(db)
+    t = c.execute("select * from stress_tests where id=?", (stress_id,)).fetchone()
+    if not t:
+        c.close()
+        return None
+    t = dict(t)
+    rows = [dict(r) for r in c.execute(
+        """select ss.*, r.label as run_label, r.ts as run_ts, r.slow_pct,
+                  r.peak_rss_mb, r.rss_growth_mb, r.path_kind
+           from stress_sessions ss left join runs r on ss.run_id = r.id
+           where ss.stress_id=? order by ss.seq""", (stress_id,))]
+    c.close()
+    t["sessions"] = rows
+    t["stats"] = {"ttid_ms": stress_stats([r["ttid_ms"] for r in rows]),
+                  "peak_rss_mb": stress_stats([r["peak_rss_mb"] for r in rows]),
+                  "slow_pct": stress_stats([r["slow_pct"] for r in rows])}
+    t["completed"] = sum(1 for r in rows if r["state"] == "done")
+    t["failed"] = sum(1 for r in rows if r["state"] == "error")
+    return t
+
+
+def stress_list(limit=50, db=None):
+    c = connect(db)
+    ids = [r["id"] for r in c.execute(
+        "select id from stress_tests order by id desc limit ?", (limit,))]
+    c.close()
+    return [stress_get(i, db=db) for i in ids]
 
 
 def history(limit=100, db=None):

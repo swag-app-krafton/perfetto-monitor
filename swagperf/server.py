@@ -106,6 +106,12 @@ class H(SimpleHTTPRequestHandler):
                 return self._json({"error": str(e)}, 404)
         if u.path.startswith("/api/device"):
             return self._json(_device_payload())
+        if u.path.startswith("/api/stress"):
+            sid = q.get("id", [None])[0]
+            if sid:
+                st = store.stress_get(int(sid))
+                return self._json(st) if st else self._json({"error": "unknown stress test"}, 404)
+            return self._json({"stress_tests": store.stress_list()})
         if u.path.startswith("/api/jobs"):
             from . import jobs
             jid = q.get("id", [None])[0]
@@ -137,6 +143,19 @@ class H(SimpleHTTPRequestHandler):
                                       device=payload.get("device"),
                                       app_pkg=payload.get("app_pkg"))
             return self._json({"ok": True, "cleared": k})
+        if u.path == "/api/stress/start":
+            from . import jobs
+            try:
+                jid = jobs.start_stress(
+                    payload.get("pkg", "").strip(),
+                    sessions=payload.get("sessions", 5),
+                    cold=payload.get("cold", True),
+                    duration_ms=payload.get("duration_ms", 8000),
+                    label=payload.get("label"),
+                    use_llm=payload.get("use_llm", False))
+            except ValueError as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"ok": True, "job_id": jid})
         if u.path == "/api/capture/start":
             from . import jobs
             try:

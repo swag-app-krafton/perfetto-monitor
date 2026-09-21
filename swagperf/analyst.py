@@ -39,7 +39,8 @@ ARCHITECTURAL CONSTRAINTS THAT MATTER FOR PERFORMANCE:
   devices over minutes. Progressive frame-time drift means thermal, NOT a code change.
   Random scattered jank does NOT mean thermal.
 * Peak memory: Hermes + Fabric + Cronet's Chromium stack + CameraX/ML Kit buffers +
-  Skia + SQLite are all resident simultaneously. RSS growth across a session that does
+  Skia + SQLite are all resident simultaneously. RAM usage (resident set size) growth
+  across a session that does
   not return to baseline suggests orphaned RN surfaces -- a Surface started and never
   stopped keeps its whole JS component tree alive for the life of the process.
 * Baseline Profiles are known to be ABSENT. Compose startup regressions may reflect
