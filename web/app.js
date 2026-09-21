@@ -25,7 +25,7 @@ const PATH_LABEL = { returning_user: 'Returning user', first_run: 'First run',
   cold: 'Cold start', warm: 'Warm start' };
 const pathLabel = k => PATH_LABEL[k] || (k ? k[0].toUpperCase() + k.slice(1) : k);
 
-let DATA = null, RANGE = 30, PATH = 'returning_user';
+let DATA = null, RANGE = 30, PATH = 'returning_user', APP = 'all';
 let SORT = { history: { k: 'id', dir: -1 }, steps: { k: 'start_ms', dir: 1 } };
 let FILTER = { verdict: 'all', device: 'all', runtime: 'all', q: '' };
 let OPEN_STEP = null;   // step drilled into, null = none
@@ -33,6 +33,8 @@ let HIDDEN = new Set();  // runtimes toggled off in the step chart
 let MODE = 'critical';   // critical | all | grouped
 let TAB = 'overview';    // one tab per performance concern in the architecture
 let CMP = { run: null, base: null, data: null, loading: false };  // comparison view
+let CAP = { device: null, loading: false, pkg: '', cold: true, duration: 8000,
+            q: '', job: null, polling: false };
 
 const TABS = [
   { id: 'overview', label: 'Overview',  blurb: 'Verdict, budgets and findings for the latest run.' },
@@ -40,6 +42,7 @@ const TABS = [
   { id: 'frames',   label: 'Frame pacing', blurb: 'Slow and frozen frames during sustained scanning, and thermal drift.' },
   { id: 'memory',   label: 'Memory',    blurb: 'Peak RSS with three runtimes resident, and growth suggesting orphaned RN surfaces.' },
   { id: 'steps',    label: 'Steps',     blurb: 'Per-step durations, trailing baselines and child-slice breakdown.' },
+  { id: 'capture',  label: 'Capture',   blurb: 'Pick an app installed on the connected device and profile it.' },
   { id: 'compare',  label: 'Compare',   blurb: 'Diff any two runs, or any run against the pinned benchmark.' },
   { id: 'history',  label: 'History',   blurb: 'Every recorded run, sortable and filterable. Pin a run as the benchmark here.' },
 ];
@@ -103,9 +106,25 @@ function showTip(html, ev) {
 const hideTip = () => tip.classList.remove('on');
 
 function runs() {
-  // Path and range define the charted window; the history filters narrow the table
-  // only, so the trend charts keep a stable baseline to read against.
-  return DATA.runs.filter(r => r.path_kind === PATH).slice(-RANGE);
+  // App scope comes first: runs from different applications are different
+  // series, not one trend. Plotting PhonePe, CRED and Google Pay as a single
+  // line because they share a path_kind would be meaningless. Path and range
+  // then define the charted window; the history filters narrow the table only,
+  // so the trend charts keep a stable baseline to read against.
+  return DATA.runs
+    .filter(r => APP === 'all' || (r.app_pkg || '') === APP)
+    .filter(r => r.path_kind === PATH)
+    .slice(-RANGE);
+}
+
+function appsInHistory() {
+  const seen = new Map();
+  DATA.runs.forEach(r => {
+    if (!r.app_pkg) return;
+    if (!seen.has(r.app_pkg)) seen.set(r.app_pkg, { pkg: r.app_pkg, name: r.app_name || r.app_pkg, role: r.app_role, n: 0 });
+    seen.get(r.app_pkg).n++;
+  });
+  return [...seen.values()].sort((a, b) => (a.role !== 'own') - (b.role !== 'own') || a.name.localeCompare(b.name));
 }
 
 function filteredRuns(rs) {
@@ -493,11 +512,66 @@ function sparkline(vals, w = 110, h = 22) {
   return svg;
 }
 
+/* ---------- capture ---------- */
+async function loadDevice(force) {
+  if (CAP.device && !force) return;
+  CAP.loading = true;
+  try {
+    CAP.device = await (await fetch('/api/device')).json();
+  } catch (e) {
+    CAP.device = { connected: false, error: String(e) };
+  }
+  CAP.loading = false;
+}
+
+async function startCapture() {
+  const body = { pkg: CAP.pkg, cold: CAP.cold, duration_ms: CAP.duration };
+  const r = await postJSON('/api/capture/start', body);
+  if (r.error) { CAP.job = { state: 'error', error: r.error, log: [] }; render(); return; }
+  CAP.job = { id: r.job_id, state: 'queued', log: [] };
+  render();
+  pollCapture(r.job_id);
+}
+
+async function pollCapture(jid) {
+  if (CAP.polling) return;
+  CAP.polling = true;
+  // The capture runs on the server; poll until it settles. A capture is
+  // seconds-to-a-minute of work, so 1s is frequent enough to feel live without
+  // hammering the endpoint.
+  while (true) {
+    await new Promise(r => setTimeout(r, 1000));
+    let j;
+    try {
+      j = await (await fetch(`/api/jobs?id=${encodeURIComponent(jid)}`)).json();
+    } catch (e) { break; }
+    CAP.job = j;
+    render();
+    if (j.state === 'done' || j.state === 'error') break;
+  }
+  CAP.polling = false;
+  // A finished capture adds a run, so refresh history and jump to it.
+  if (CAP.job && CAP.job.state === 'done' && CAP.job.result) {
+    const res = CAP.job.result;
+    await load();
+    PATH = res.path_kind || PATH;
+    render();
+  }
+}
+
 /* ---------- render ---------- */
 function tabBar() {
   return `<nav class="tabs" role="tablist">${TABS.map(t => `
     <button role="tab" class="tab${TAB === t.id ? ' on' : ''}" data-tab="${t.id}"
       aria-selected="${TAB === t.id}">${esc(t.label)}</button>`).join('')}</nav>`;
+}
+
+function memBudget(key) {
+  // Memory ceilings are our own product decisions, not universal facts, so they
+  // are not asserted against a derived (competitor) run.
+  const cur = runs().at(-1);
+  if (!cur || cur.derived) return null;
+  return DATA.global_budgets[key];
 }
 
 function tileHTML(k, v, unit, budget, prevV, d) {
@@ -586,8 +660,8 @@ function render() {
         ${tileHTML('Slow frames', cur.slow_pct, '%', gb.slow_frame_pct, prev?.slow_pct, 2)}
         ${tileHTML('Janky frames', cur.janky_pct, '%', gb.janky_frame_pct, prev?.janky_pct, 2)}
         ${tileHTML('Thermal drift', cur.thermal_drift_pct, '%', gb.thermal_drift_pct, prev?.thermal_drift_pct, 2)}
-        ${tileHTML('Peak RSS', cur.peak_rss_mb, 'MB', gb.peak_rss_mb, prev?.peak_rss_mb, 1)}
-        ${tileHTML('RSS growth', cur.rss_growth_mb, 'MB', gb.rss_growth_mb, prev?.rss_growth_mb, 1)}
+        ${tileHTML('Peak RSS', cur.peak_rss_mb, 'MB', memBudget('peak_rss_mb'), prev?.peak_rss_mb, 1)}
+        ${tileHTML('RSS growth', cur.rss_growth_mb, 'MB', memBudget('rss_growth_mb'), prev?.rss_growth_mb, 1)}
       </div>
       <div class="card"><h2>All findings</h2>
         <p class="hint">Attributed to a runtime and, where it applies, to a named architectural risk.</p>
@@ -695,8 +769,8 @@ function render() {
     const hh = cur.memory?.hermes_heap;
     app.innerHTML = head + `
       <div class="tiles">
-        ${tileHTML('Peak RSS', cur.peak_rss_mb, 'MB', gb.peak_rss_mb, prev?.peak_rss_mb, 1)}
-        ${tileHTML('RSS growth', cur.rss_growth_mb, 'MB', gb.rss_growth_mb, prev?.rss_growth_mb, 1)}
+        ${tileHTML('Peak RSS', cur.peak_rss_mb, 'MB', memBudget('peak_rss_mb'), prev?.peak_rss_mb, 1)}
+        ${tileHTML('RSS growth', cur.rss_growth_mb, 'MB', memBudget('rss_growth_mb'), prev?.rss_growth_mb, 1)}
         ${hh ? tileHTML('Hermes heap peak', hh.peak_mb, 'MB', null, prev?.memory?.hermes_heap?.peak_mb, 1) : ''}
         ${hh ? tileHTML('Hermes heap growth', hh.growth_mb, 'MB', null, prev?.memory?.hermes_heap?.growth_mb, 1) : ''}
       </div>
@@ -795,6 +869,123 @@ function render() {
         render();
       };
     });
+  }
+
+  /* ---------------- CAPTURE ---------------- */
+  if (TAB === 'capture') {
+    const d = CAP.device;
+    const job = CAP.job;
+    const busy = job && (job.state === 'running' || job.state === 'queued');
+
+    if (!d) {
+      app.innerHTML = head + '<div class="card"><p class="empty">Checking for a connected device…</p></div>';
+      post.push(() => loadDevice().then(render));
+    } else if (!d.connected) {
+      app.innerHTML = head + `<div class="card">
+        <h2>No device connected</h2>
+        <p class="hint">Connect an Android device over USB and enable <b>USB debugging</b>
+        (Settings → About phone → tap Build number seven times → Developer options).
+        Then accept the "Allow USB debugging?" prompt on the device.</p>
+        <div class="ctl"><button id="recheck">Check again</button></div></div>`;
+      post.push(() => { const b = $('#recheck'); if (b) b.onclick = () => loadDevice(true).then(render); });
+    } else {
+      const q = CAP.q.trim().toLowerCase();
+      const pkgs = (d.packages || []).filter(p => p.installed &&
+        (!q || p.pkg.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q)));
+      const roleLabel = { own: 'your app', competitor: 'competitor', reference: 'reference' };
+
+      app.innerHTML = head + `
+        <div class="card">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px">
+            <span class="pill pass">device connected</span>
+            <span style="font-size:13px"><b>${esc(d.model || d.device || 'unknown')}</b>
+              <span style="color:var(--text-muted)">· Android ${esc(d.release || '?')} (API ${esc(d.sdk || '?')})
+              · ${esc(d.serial || '')}</span></span>
+            <button id="recheck" class="mini-btn">Refresh</button>
+          </div>
+          <p class="hint" style="margin:6px 0 0">${(d.packages || []).filter(p => p.installed).length} app(s) installed${q ? `, ${pkgs.length} matching "${esc(CAP.q)}"` : ''}.
+            Apps already in the catalogue are listed first.</p>
+        </div>
+
+        <div class="card">
+          <h2>Profile an app</h2>
+          <p class="hint">A cold start force-stops the app and launches it inside the trace
+            window — the only way to measure a real cold start. Some apps (payment apps
+            especially) show a lock or biometric prompt that an adb launch cannot dismiss;
+            if the capture never observes the app it is reported as a failure, not a pass.</p>
+
+          <div class="ctl" style="margin-bottom:12px">
+            <input id="pkgsearch" type="search" placeholder="Search installed apps…"
+                   value="${esc(CAP.q)}" aria-label="Search installed apps" ${busy ? 'disabled' : ''}>
+            <span class="flabel">Start</span>
+            <div id="coldbtns"></div>
+            <span class="flabel">Duration</span>
+            <select id="capdur" aria-label="Trace duration" ${busy ? 'disabled' : ''}>
+              ${[5000, 8000, 10000, 15000, 20000, 30000].map(v =>
+                `<option value="${v}"${CAP.duration === v ? ' selected' : ''}>${v / 1000}s</option>`).join('')}
+            </select>
+          </div>
+
+          <div class="scroll" style="max-height:330px">
+            <table>
+              <thead><tr><th>App</th><th>Package</th><th>Role</th><th></th></tr></thead>
+              <tbody>${pkgs.slice(0, 60).map(p => `<tr class="${CAP.pkg === p.pkg ? 'cur' : ''}">
+                <td>${esc(p.name || p.pkg)}${p.instrumented ? ' <span class="tag">instrumented</span>' : ''}${!p.in_catalogue ? ' <span class="tag">new</span>' : ''}</td>
+                <td style="color:var(--text-secondary);font-size:12px">${esc(p.pkg)}</td>
+                <td style="color:var(--text-secondary)">${esc(roleLabel[p.role] || p.role || '')}</td>
+                <td><button class="mini-btn" data-cappkg="${esc(p.pkg)}" ${busy ? 'disabled' : ''}>${busy && CAP.pkg === p.pkg ? 'Running…' : 'Profile'}</button></td>
+              </tr>`).join('') || '<tr><td colspan="4" class="empty">No installed apps match that search.</td></tr>'}</tbody>
+            </table>
+          </div>
+          ${pkgs.length > 60 ? `<p class="hint" style="margin-top:9px">Showing 60 of ${pkgs.length}. Narrow the search to see the rest.</p>` : ''}
+        </div>
+
+        ${job ? `<div class="card" style="${job.state === 'error' ? 'border-color:var(--crit)' : job.state === 'done' ? 'border-color:var(--good)' : ''}">
+          <h2>${job.state === 'running' || job.state === 'queued' ? 'Capturing…'
+                : job.state === 'done' ? 'Capture complete' : 'Capture failed'}</h2>
+          ${job.pkg ? `<p class="hint">${esc(job.pkg)} · ${job.cold ? 'cold start' : 'warm'} · ${(job.duration_ms || 0) / 1000}s</p>` : ''}
+          <div class="joblog">${(job.log || []).map(l => `<div class="jl ${/^FATAL|^ERROR/.test(l.text) ? 'bad' : /^warning/.test(l.text) ? 'warn' : ''}">
+            <span class="jt">${l.t}s</span>${esc(l.text)}</div>`).join('')
+            || '<div class="jl"><span class="jt">…</span>starting</div>'}</div>
+          ${job.error ? `<div class="find high" style="margin-top:10px"><div class="t">Capture failed</div>
+            <div class="e">${esc(job.error)}</div></div>` : ''}
+          ${job.state === 'done' && job.result ? `<div class="readout" style="margin-top:12px">
+            <div class="ro"><span class="rok">Run</span><b>${job.result.run_id}</b><em>${esc(job.result.path_kind || '')}</em></div>
+            <div class="ro"><span class="rok">Verdict</span><b>${esc(job.result.verdict || '?')}</b><em>${esc(job.result.headline || '')}</em></div>
+          </div>
+          <div class="ctl" style="margin-top:12px"><button id="gotorun">View this run</button></div>` : ''}
+        </div>` : ''}`;
+
+      post.push(() => {
+        const rb = $('#recheck');
+        if (rb) rb.onclick = () => loadDevice(true).then(render);
+        const sw = $('#pkgsearch');
+        if (sw) sw.oninput = () => {
+          CAP.q = sw.value; clearTimeout(sw._t);
+          sw._t = setTimeout(() => { render(); const n = $('#pkgsearch');
+            if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 200);
+        };
+        const dd = $('#capdur');
+        if (dd) dd.onchange = () => { CAP.duration = +dd.value; render(); };
+        const cb = $('#coldbtns');
+        if (cb) {
+          cb.innerHTML = [[true, 'Cold'], [false, 'Warm']].map(([v, l]) =>
+            `<button class="seg${CAP.cold === v ? ' on' : ''}" data-cold="${v}" ${busy ? 'disabled' : ''}>${l}</button>`).join('');
+          cb.querySelectorAll('.seg').forEach(b => b.onclick = () => {
+            CAP.cold = b.dataset.cold === 'true'; render();
+          });
+        }
+        document.querySelectorAll('[data-cappkg]').forEach(b => b.onclick = () => {
+          CAP.pkg = b.dataset.cappkg;
+          startCapture();
+        });
+        const gr = $('#gotorun');
+        if (gr) gr.onclick = () => {
+          PATH = CAP.job.result.path_kind || PATH;
+          TAB = 'overview'; render();
+        };
+      });
+    }
   }
 
   /* ---------------- COMPARE ---------------- */
@@ -1067,7 +1258,25 @@ function wireStepRows(rs, cur) {
 /* ---------- boot ---------- */
 async function load() {
   DATA = await (await fetch('/api/history')).json();
-  const kinds = [...new Set(DATA.runs.map(r => r.path_kind))];
+
+  // App scope first, since it constrains which path kinds are even meaningful.
+  const apps = appsInHistory();
+  if (APP !== 'all' && !apps.some(a => a.pkg === APP)) APP = 'all';
+  const asel = $('#appsel');
+  asel.innerHTML = `<option value="all"${APP === 'all' ? ' selected' : ''}>All apps</option>`
+    + apps.map(a => `<option value="${esc(a.pkg)}"${a.pkg === APP ? ' selected' : ''}>`
+        + `${esc(a.name)}${a.role === 'own' ? ' (ours)' : ''} \u00b7 ${a.n}</option>`).join('');
+  asel.onchange = () => {
+    APP = asel.value;
+    // The selected path may not exist for the newly scoped app.
+    const ks = [...new Set(DATA.runs.filter(r => APP === 'all' || r.app_pkg === APP)
+                                    .map(r => r.path_kind))];
+    if (!ks.includes(PATH) && ks.length) PATH = ks[0];
+    load();
+  };
+
+  const scoped = DATA.runs.filter(r => APP === 'all' || (r.app_pkg || '') === APP);
+  const kinds = [...new Set(scoped.map(r => r.path_kind))];
   if (!kinds.includes(PATH) && kinds.length) PATH = kinds[0];
   const sel = $('#pathsel');
   sel.innerHTML = kinds.map(k => `<option value="${esc(k)}"${k === PATH ? ' selected' : ''}>${esc(pathLabel(k))}</option>`).join('');

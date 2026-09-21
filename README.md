@@ -299,3 +299,49 @@ editorial treatment in both themes. The categorical and status colors
 (`--s1`..`--s4`, `--good`/`--warn`/`--crit`) are untouched -- they are
 validated against the dataviz skill's CVD-safety and contrast gates, and
 swapping them for brand colors would need re-validation against those gates.
+
+## Profiling from the dashboard
+
+The **Capture** tab lists the apps installed on the connected device, merged with
+the catalogue (known apps first). Pick one, choose cold or warm and a duration,
+and press Profile. The capture runs server-side on a background thread; the page
+polls and streams the log, then records the run and offers a link to it.
+
+Two things this does not do, deliberately:
+
+- **It does not assert Swag Pay's budgets against another app.** Startup and
+  memory ceilings are our own product decisions. A derived run shows no budget
+  line and no red breach unless the catalogue states a budget for that package.
+  Frame budgets (16.67ms) are kept, since 60fps is an OS-level fact rather than
+  a product target.
+- **It does not report an empty capture as a pass.** A trace can pull and parse
+  cleanly while containing nothing about the target app. `capture_problems()`
+  checks whether the target package's own process contributed any slices at all;
+  if not, the job fails loudly instead of recording a flawless-looking run of
+  zero findings.
+
+Runs are scoped by app throughout: the header's app selector filters every tab,
+because plotting several different applications as one trend line is meaningless.
+
+### Known limits, found against a real device
+
+Validated on a vivo V2514 (Android 16) against PhonePe, Google Pay, CRED and
+others. Three things surfaced that are worth knowing:
+
+- **The launch must not race the trace.** Perfetto is started with
+  `--background-wait` so the trace is confirmed active before the app is
+  force-stopped and launched. An earlier version ran both as concurrent `adb
+  shell` sessions and consistently produced traces with zero slices for the
+  target app, despite the app being confirmed in the foreground seconds later.
+- **`launching:` slice width is not startup time.** For an app that never calls
+  `reportFullyDrawn()`, that slice runs to a platform timeout — two captures
+  both landed at almost exactly 3000ms. Startup is measured to the end of the
+  last observed phase instead, which put the same app at 290ms.
+- **Phase slices must be scoped to the target process.** On a busy device
+  several apps launch at once; one real capture had `bindApplication` present
+  simultaneously for the target app (255ms), another app (984ms) and a Google
+  process (243ms). Matching on slice name alone would have measured whichever
+  was slowest.
+
+Apps with a lock or biometric prompt (payment apps especially) may still gate
+their UI, but their startup phases remain measurable — PhonePe profiles fine.

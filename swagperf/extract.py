@@ -34,6 +34,42 @@ def extract(trace_path, *, path_kind="returning_user"):
         tp.close()
 
 
+def capture_problems(metrics, *, requested_pkg=None):
+    """Signals that a capture did not actually observe the app under test.
+
+    A trace can be pulled successfully and parse cleanly while containing
+    nothing about the target app -- the launch was intercepted by a lock
+    screen, the app never reached the foreground, or the trace window missed
+    it. Left unchecked that reads as a flawless run: zero steps, zero
+    findings, verdict "pass". These checks exist so an empty capture is
+    reported as a failure instead of a clean bill of health.
+    """
+    problems = []
+    # The decisive check: if the target package's own process contributed no
+    # slices, the capture never saw the app, and anything derived came from
+    # other processes on a busy device.
+    if requested_pkg and metrics.get("derived") and metrics.get("target_slices") == 0:
+        problems.append(
+            f"no slices at all were recorded for {requested_pkg}'s own process -- "
+            "the capture did not observe this app, so every number here came from "
+            "unrelated processes and none of it describes the app under test")
+    detected = (metrics.get("detected_app") or {}).get("pkg")
+    if requested_pkg and detected and detected != requested_pkg:
+        problems.append(
+            f"the trace's launch belongs to {detected}, not {requested_pkg} -- the "
+            "target app probably never came to the foreground (a lock screen, "
+            "biometric prompt or permission dialog can intercept an adb launch)")
+    if not metrics.get("steps"):
+        problems.append("no startup phases could be derived from this trace")
+    if metrics["startup"].get("time_to_first_camera_frame_ms") in (None, 0, 0.0):
+        problems.append("startup time could not be measured")
+    if (metrics.get("frames") or {}).get("total", 0) == 0:
+        problems.append(
+            "no frame slices were recorded, so frame pacing and thermal drift "
+            "are unavailable for this run")
+    return problems
+
+
 def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False):
     """Extract from any trace, instrumented or not.
 
@@ -64,6 +100,7 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
             return m
 
         d = derive_steps(tp, pkg=pkg)
+        target_slices = d.get("target_slices", 0)
         frames = _frames(tp)
         mem = _memory(tp)
         # Cold vs warm is classified from what was actually derived rather than
@@ -110,6 +147,7 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
             "budget_checks": checks,
             "breaches": breaches,
             "derive_window": d["window"],
+            "target_slices": target_slices,
         }
     finally:
         tp.close()

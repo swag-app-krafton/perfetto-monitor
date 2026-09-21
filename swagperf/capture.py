@@ -31,14 +31,22 @@ def devices():
 
 
 def installed_packages(serial=None):
-    """Third-party packages on the device, for catalogue verification."""
+    """Third-party packages on the device, for catalogue verification.
+
+    On a multi-user device (a work profile or private space) `pm list packages`
+    can print a permission error line for a user the shell can't see, mixed in
+    with the real output on stdout rather than stderr. Only lines carrying
+    adb's own `package:` marker are accepted, so that error text is never
+    mistaken for a package name.
+    """
     devs = devices()
     if not devs:
         return []
     serial = serial or devs[0]
     out = subprocess.run(["adb", "-s", serial, "shell", "pm", "list", "packages", "-3"],
                          capture_output=True, text=True).stdout
-    return sorted(l.strip().replace("package:", "") for l in out.splitlines() if l.strip())
+    return sorted(l.strip()[len("package:"):].strip()
+                 for l in out.splitlines() if l.strip().startswith("package:"))
 
 
 def device_info(serial=None):
@@ -74,7 +82,17 @@ def launch(pkg, serial=None):
 def capture(out_path, *, pkg="com.swagpay", duration_ms=10000, serial=None,
             cold=False, launch_after_ms=600):
     """Record a trace. With cold=True the app is force-stopped first and launched
-    just after tracing starts, which is the only way to measure a real cold start."""
+    just after tracing starts, which is the only way to measure a real cold start.
+
+    Perfetto is started with `--background-wait` (`-D`): it detaches immediately
+    but the adb call blocks until the trace config is actually active on-device,
+    so force-stop and launch happen with no concurrent `adb shell` session racing
+    perfetto's own startup. An earlier version ran `perfetto` and the delayed
+    launch as two independent concurrent adb shell invocations; on at least one
+    real device that produced traces with zero slices for the target app at all
+    even though the app was confirmed in the foreground moments later -- the
+    capture and the launch were racing each other, not sequenced.
+    """
     devs = devices()
     if not devs:
         raise RuntimeError("No adb device connected. Connect a device or analyse an existing trace file.")
@@ -83,11 +101,23 @@ def capture(out_path, *, pkg="com.swagpay", duration_ms=10000, serial=None,
     remote = "/data/misc/perfetto-traces/swagperf.pftrace"
     cfg = CONFIG.format(pkg=pkg, dur=duration_ms)
     subprocess.run(base + ["shell", "rm", "-f", remote], capture_output=True)
-    p = subprocess.run(base + ["shell", f"perfetto --txt -c - -o {remote}"],
-                       input=cfg, text=True, capture_output=True,
-                       timeout=duration_ms / 1000 + 60)
-    if p.returncode != 0:
-        raise RuntimeError(f"perfetto failed: {p.stderr[:500]}")
+
+    if cold:
+        force_stop(pkg, serial)
+
+    start = subprocess.run(base + ["shell", f"perfetto --txt -c - -o {remote} --background-wait"],
+                           input=cfg, text=True, capture_output=True, timeout=35)
+    if start.returncode != 0 or not start.stdout.strip():
+        raise RuntimeError(f"perfetto failed to start: {(start.stderr or start.stdout)[:500]}")
+
+    if cold:
+        time.sleep(launch_after_ms / 1000)
+        launch(pkg, serial)
+
+    # The trace is now actively recording on-device; wait out its configured
+    # duration before it self-stops and the file becomes pullable.
+    time.sleep(duration_ms / 1000 + 1.0)
+
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     subprocess.run(base + ["pull", remote, out_path], check=True, capture_output=True)
     return out_path
