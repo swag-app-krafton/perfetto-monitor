@@ -21,6 +21,9 @@ const RUNTIME = {
 };
 const RC = { compose: 'var(--s1)', rn: 'var(--s2)', camera: 'var(--s3)', native: 'var(--s4)' };
 const RLABEL = { compose: 'Compose shell', rn: 'Hermes / RN', camera: 'Native camera', native: 'Native / other' };
+const PATH_LABEL = { returning_user: 'Returning user', first_run: 'First run',
+  cold: 'Cold start', warm: 'Warm start' };
+const pathLabel = k => PATH_LABEL[k] || (k ? k[0].toUpperCase() + k.slice(1) : k);
 
 let DATA = null, RANGE = 30, PATH = 'returning_user';
 let SORT = { history: { k: 'id', dir: -1 }, steps: { k: 'start_ms', dir: 1 } };
@@ -87,7 +90,7 @@ const CRITICAL = {
                    'step:camera_open', 'step:first_qr_decode'],
   first_run: ['step:bootstrap', 'step:hermes_boot', 'step:rn_onboarding_surface'],
 };
-const onCritical = st => (CRITICAL[PATH] || []).includes(st);
+const onCritical = st => (PATH in CRITICAL) ? CRITICAL[PATH].includes(st) : true;
 
 function showTip(html, ev) {
   tip.innerHTML = html; tip.classList.add('on');
@@ -136,7 +139,10 @@ function stepChart(rs) {
   if (MODE === 'grouped') return groupedChart(rs, order, W, L, R, T, iw);
 
   const totals = rs.map(r => r.steps.filter(x => keep(x.step)).reduce((a, x) => a + x.dur_ms, 0));
-  const budget = MODE === 'critical' ? DATA.global_budgets.time_to_first_camera_frame_ms : null;
+  // The budget line belongs to the app under test, not a hardcoded Swag Pay
+  // constant -- a derived (competitor) run only gets one if the catalogue states
+  // one for that package, which most do not.
+  const budget = MODE === 'critical' ? rs.at(-1)?.ttid_budget_ms : null;
   const max = Math.max(...totals, budget || 0, 1) * 1.12;
   const bw = Math.min(30, iw / Math.max(rs.length, 1) * 0.66);
   const x = i => L + (i + 0.5) * (iw / Math.max(rs.length, 1));
@@ -541,6 +547,7 @@ function verdictBar(cur, an) {
     <div style="flex:1;min-width:260px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap">
         <span class="pill ${esc(an.verdict || 'unknown')}">${esc(an.verdict || 'no analysis')}</span>
+        ${cur.app_name ? `<span class="tag" style="${cur.app_role === 'own' ? 'border-color:var(--s1);color:var(--s1)' : ''}">${esc(cur.app_name)}${cur.derived ? ' \u00b7 derived' : ''}</span>` : ''}
         <span style="font-size:12.5px;color:var(--text-muted)">run ${cur.id} &middot; ${esc(cur.ts)}${cur.git_sha ? ' &middot; ' + esc(cur.git_sha) : ''}${cur.device ? ' &middot; ' + esc(cur.device) : ''}</span>
         ${an._heuristic ? '<span class="tag">rules only</span>' : an._model ? `<span class="tag">${esc(an._model)}</span>` : ''}
       </div>
@@ -575,7 +582,7 @@ function render() {
   if (TAB === 'overview') {
     app.innerHTML = head + verdictBar(cur, an) + `
       <div class="tiles">
-        ${tileHTML('First camera frame', cur.ttff_ms, 'ms', gb.time_to_first_camera_frame_ms, prev?.ttff_ms, 1)}
+        ${tileHTML(cur.derived ? 'Time to initial display' : 'First camera frame', cur.ttff_ms, 'ms', cur.ttid_budget_ms, prev?.ttff_ms, 1)}
         ${tileHTML('Slow frames', cur.slow_pct, '%', gb.slow_frame_pct, prev?.slow_pct, 2)}
         ${tileHTML('Janky frames', cur.janky_pct, '%', gb.janky_frame_pct, prev?.janky_pct, 2)}
         ${tileHTML('Thermal drift', cur.thermal_drift_pct, '%', gb.thermal_drift_pct, prev?.thermal_drift_pct, 2)}
@@ -603,13 +610,16 @@ function render() {
   /* ---------------- STARTUP ---------------- */
   if (TAB === 'startup') {
     const viol = cur.violations || [];
+    const critCount = (PATH in CRITICAL) ? CRITICAL[PATH].length : cur.steps.length;
     app.innerHTML = head + `
       <div class="tiles">
-        ${tileHTML('First camera frame', cur.ttff_ms, 'ms', gb.time_to_first_camera_frame_ms, prev?.ttff_ms, 1)}
-        ${tileHTML('Critical-path steps', (CRITICAL[PATH] || []).length, '', null, null, 0)}
-        ${tileHTML('Ordering violations', viol.length, '', 0, prev ? (prev.violations || []).length : null, 0)}
+        ${tileHTML(cur.derived ? 'Time to initial display' : 'First camera frame', cur.ttff_ms, 'ms', cur.ttid_budget_ms, prev?.ttff_ms, 1)}
+        ${tileHTML('Critical-path steps', critCount, '', null, null, 0)}
+        ${!cur.derived ? tileHTML('Ordering violations', viol.length, '', 0, prev ? (prev.violations || []).length : null, 0) : ''}
       </div>
-      ${viol.length ? `<div class="card" style="border-color:var(--crit)">
+      ${cur.derived ? `<div class="card"><h2>No stated architecture for this app</h2>
+        <p class="hint">${esc(cur.app_name || cur.app_pkg || 'This app')} is not instrumented, so its steps are derived from ordinary Android launch slices rather than read from declared markers. There is no known deferred-work ordering constraint to check for an app whose architecture is not documented here — only Swag Pay's own runs are checked against that rule.</p></div>`
+      : viol.length ? `<div class="card" style="border-color:var(--crit)">
         <h2 style="color:var(--crit)">Ordering violations</h2>
         <p class="hint">The architecture's strongest decision: no RN, Cronet, analytics or remote config before the camera is usable.</p>
         ${viol.map(v => `<div class="find high"><div class="t">${esc(v.step)}</div><div class="e">${esc(v.detail)}</div></div>`).join('')}
@@ -617,7 +627,7 @@ function render() {
         <p class="hint">No deferred work ran before the first usable camera frame. The constraint holds for this run.</p></div>`}
       <div class="card">
         <h2>Time to first usable camera frame</h2>
-        <p class="hint">Dashed line is the ${gb.time_to_first_camera_frame_ms}ms budget. Path: ${PATH === 'returning_user' ? 'returning user — camera on the critical path' : 'first run — onboarding is an RN surface, camera is not'}.</p>
+        <p class="hint">${cur.ttid_budget_ms ? `Dashed line is the ${cur.ttid_budget_ms}ms budget.` : 'No budget is set for this app — none is asserted for a competitor unless one is explicitly entered in the catalogue.'} ${cur.derived ? `App: ${esc(cur.app_name || cur.app_pkg || 'unknown')} (${esc(pathLabel(PATH))}).` : `Path: ${PATH === 'returning_user' ? 'returning user — camera on the critical path' : 'first run — onboarding is an RN surface, camera is not'}.`}</p>
         <div id="c2"></div>
       </div>
       <div class="card">
@@ -633,7 +643,7 @@ function render() {
                   'deferred', 'critical path', 'step:'],
           emptyMsg: 'No startup findings for the latest run.' })}</div></div>`;
     post.push(() => {
-      $('#c2').appendChild(lineChart(rs, 'ttff_ms', gb.time_to_first_camera_frame_ms, 'first camera frame (ms)', 'var(--s1)'));
+      $('#c2').appendChild(lineChart(rs, 'ttff_ms', cur.ttid_budget_ms, cur.derived ? 'time to initial display (ms)' : 'first camera frame (ms)', 'var(--s1)'));
       $('#c1').appendChild(stepChart(rs));
       renderLegend(seen, rs); renderModes();
     });
@@ -907,17 +917,18 @@ function render() {
         </div>
         <div class="scroll"><table>
           <thead><tr>
-            ${th('history', 'id', 'Run')}${th('history', 'ts', 'When')}${th('history', 'label', 'Label')}
+            ${th('history', 'id', 'Run')}${th('history', 'ts', 'When')}${th('history', 'app_name', 'App')}${th('history', 'label', 'Label')}
             ${th('history', 'app_version', 'Version')}${th('history', 'device', 'Device')}
             ${th('history', 'ttff_ms', 'First frame', 'num')}${th('history', 'slow_pct', 'Slow %', 'num')}
             ${th('history', 'thermal_drift_pct', 'Drift %', 'num')}${th('history', 'peak_rss_mb', 'Peak RSS', 'num')}
             ${th('history', 'verdict', 'Verdict')}<th>Actions</th>
           </tr></thead>
-          <tbody>${sortRows(fr, 'history', { verdict: r => r.analysis?.verdict || 'zzz' }).map(r => `<tr${r.id === cur.id ? ' class="cur"' : ''}>
+          <tbody>${sortRows(fr, 'history', { verdict: r => r.analysis?.verdict || 'zzz', app_name: r => r.app_name || '' }).map(r => `<tr${r.id === cur.id ? ' class="cur"' : ''}>
             <td>${r.id}</td><td style="color:var(--text-secondary)">${esc(r.ts)}</td>
+            <td>${esc(r.app_name || '')}${r.derived ? ' <span class="tag">derived</span>' : ''}</td>
             <td>${esc(r.label || '')}</td><td style="color:var(--text-secondary)">${esc(r.app_version || '')}</td>
             <td style="color:var(--text-secondary)">${esc(r.device || '')}</td>
-            <td class="num" style="${r.ttff_ms > gb.time_to_first_camera_frame_ms ? 'color:var(--crit);font-weight:650' : ''}">${fmt(r.ttff_ms, 1)} ms</td>
+            <td class="num" style="${r.ttid_budget_ms && r.ttff_ms > r.ttid_budget_ms ? 'color:var(--crit);font-weight:650' : ''}">${fmt(r.ttff_ms, 1)} ms</td>
             <td class="num">${fmt(r.slow_pct, 2)}</td>
             <td class="num" style="${r.thermal_drift_pct > gb.thermal_drift_pct ? 'color:var(--crit)' : ''}">${fmt(r.thermal_drift_pct, 2)}</td>
             <td class="num">${fmt(r.peak_rss_mb, 1)} MB</td>
@@ -929,7 +940,7 @@ function render() {
                 : `<button class="mini-btn" data-bench="${r.id}" title="Pin run ${r.id} as the benchmark for ${esc(r.path_kind)} / ${esc(r.device || 'any device')}">Set benchmark</button>`}
               <button class="mini-btn" data-cmp="${r.id}" title="Compare run ${r.id} against the current baseline">Compare</button>
             </td>
-          </tr>`).join('') || '<tr><td colspan="11" class="empty">No runs match these filters.</td></tr>'}</tbody>
+          </tr>`).join('') || '<tr><td colspan="12" class="empty">No runs match these filters.</td></tr>'}</tbody>
         </table></div>
       </div>`;
     post.push(() => {
@@ -1059,7 +1070,7 @@ async function load() {
   const kinds = [...new Set(DATA.runs.map(r => r.path_kind))];
   if (!kinds.includes(PATH) && kinds.length) PATH = kinds[0];
   const sel = $('#pathsel');
-  sel.innerHTML = kinds.map(k => `<option value="${esc(k)}"${k === PATH ? ' selected' : ''}>${k === 'returning_user' ? 'Returning user' : 'First run'}</option>`).join('');
+  sel.innerHTML = kinds.map(k => `<option value="${esc(k)}"${k === PATH ? ' selected' : ''}>${esc(pathLabel(k))}</option>`).join('');
   sel.onchange = () => { PATH = sel.value; render(); };
   render();
 }

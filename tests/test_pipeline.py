@@ -8,8 +8,8 @@ import os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from swagperf.synth import gen_trace
-from swagperf.extract import extract
-from swagperf import store, analyst
+from swagperf.extract import extract, extract_any
+from swagperf import store, analyst, catalogue
 
 
 def _trace(tmp, seed, **kw):
@@ -215,6 +215,124 @@ class TestBenchmarkAndCompare(unittest.TestCase):
         worst = max((k for k in cam["children"] if k["delta_ms"] is not None),
                     key=lambda k: k["delta_ms"])
         self.assertEqual(worst["name"], "CameraX.bindToLifecycle")
+
+
+class TestGenericAppDerivation(unittest.TestCase):
+    """Coverage for the uninstrumented-app path (competitor binaries)."""
+
+    def test_cold_start_derives_process_start_phase(self):
+        from swagperf.synth_android import gen_android_trace
+        tmp = tempfile.mkdtemp()
+        b, _ = gen_android_trace(1, pkg="com.example.app", cold=True)
+        p = os.path.join(tmp, "cold.pftrace")
+        with open(p, "wb") as fh:
+            fh.write(b)
+        m = extract_any(p, app_pkg="com.example.app")
+        self.assertTrue(m["derived"])
+        names = [s["step"] for s in m["steps"]]
+        self.assertIn("step:process_start", names)
+        self.assertIn("step:bind_application", names)
+        self.assertGreater(m["startup"]["time_to_first_camera_frame_ms"], 0)
+
+    def test_warm_start_has_no_process_start_phase(self):
+        from swagperf.synth_android import gen_android_trace
+        tmp = tempfile.mkdtemp()
+        b, _ = gen_android_trace(2, pkg="com.example.app", cold=False)
+        p = os.path.join(tmp, "warm.pftrace")
+        with open(p, "wb") as fh:
+            fh.write(b)
+        m = extract_any(p, app_pkg="com.example.app")
+        names = [s["step"] for s in m["steps"]]
+        self.assertNotIn("step:process_start", names)
+
+    def test_derived_run_has_no_invented_budgets(self):
+        """A competitor's app must never get a made-up performance budget."""
+        from swagperf.synth_android import gen_android_trace
+        tmp = tempfile.mkdtemp()
+        b, _ = gen_android_trace(3, pkg="com.some.competitor")
+        p = os.path.join(tmp, "c.pftrace")
+        with open(p, "wb") as fh:
+            fh.write(b)
+        m = extract_any(p, app_pkg="com.some.competitor")
+        self.assertIsNone(m["startup"]["budget_ms"])
+        for s in m["steps"]:
+            self.assertIsNone(s["budget_ms"])
+
+    def test_instrumented_app_with_own_budget_is_read_directly(self):
+        """An app the catalogue marks instrumented bypasses derivation entirely."""
+        tmp = tempfile.mkdtemp()
+        p, _ = _trace(tmp, 700)
+        m = extract_any(p, app_pkg="com.swagpay")
+        self.assertFalse(m["derived"])
+        self.assertEqual(m["startup"]["budget_ms"], 420)
+
+
+class TestCatalogue(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self._orig_user = catalogue.USER
+        catalogue.USER = os.path.join(self.tmp, "apps.local.json")
+
+    def tearDown(self):
+        catalogue.USER = self._orig_user
+
+    def test_own_app_is_instrumented_by_default(self):
+        self.assertTrue(catalogue.is_instrumented("com.swagpay"))
+
+    def test_add_and_remove_round_trip(self):
+        catalogue.add("com.test.app", name="Test App", role="competitor")
+        self.assertIsNotNone(catalogue.get("com.test.app"))
+        catalogue.remove("com.test.app")
+        self.assertIsNone(catalogue.get("com.test.app"))
+
+    def test_remove_can_hide_a_builtin_entry(self):
+        self.assertIsNotNone(catalogue.get("com.swagpay"))
+        catalogue.remove("com.swagpay")
+        self.assertIsNone(catalogue.get("com.swagpay"))
+
+    def test_competitor_has_no_budgets_unless_explicitly_given(self):
+        catalogue.add("com.rival.app", name="Rival", role="competitor")
+        self.assertEqual(catalogue.budgets_for("com.rival.app"), {})
+
+    def test_invalid_role_rejected(self):
+        with self.assertRaises(ValueError):
+            catalogue.add("com.bad.app", role="not_a_real_role")
+
+
+class TestCLIPathKindDefaulting(unittest.TestCase):
+    """Regression coverage for a real bug: the CLI's --path-kind flag defaulted
+    to "returning_user" (Swag Pay's own default) and was passed through even
+    for a derived competitor app, silently mislabeling its cold/warm
+    classification and mixing it into Swag Pay's own path_kind bucket."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "cli.db")
+        self._orig_db = store.DB
+        store.DB = self.db
+        self._orig_user = catalogue.USER
+        catalogue.USER = os.path.join(self.tmp, "apps.local.json")
+        catalogue.add("com.rival.app", name="Rival", role="competitor")
+
+    def tearDown(self):
+        store.DB = self._orig_db
+        catalogue.USER = self._orig_user
+
+    def test_analysing_a_derived_app_without_path_kind_flag_infers_cold_or_warm(self):
+        from swagperf import cli
+        from swagperf.synth_android import gen_android_trace
+        b, _ = gen_android_trace(9, pkg="com.rival.app", cold=True)
+        p = os.path.join(self.tmp, "rival.pftrace")
+        with open(p, "wb") as fh:
+            fh.write(b)
+        rc = cli.main(["analyse", p, "--app", "com.rival.app", "--no-llm"])
+        self.assertEqual(rc, 0)
+        c = store.connect(self.db)
+        row = c.execute("select path_kind, app_pkg from runs order by id desc limit 1").fetchone()
+        c.close()
+        self.assertEqual(row["app_pkg"], "com.rival.app")
+        self.assertIn(row["path_kind"], ("cold", "warm"))
+        self.assertNotEqual(row["path_kind"], "returning_user")
 
 
 class TestHeuristic(unittest.TestCase):

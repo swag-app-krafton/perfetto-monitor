@@ -19,6 +19,8 @@ create table if not exists runs (
   device text,
   path_kind text,
   trace_path text,
+  app_pkg text,
+  derived int default 0,
   ttff_ms real, slow_pct real, janky_pct real, thermal_drift_pct real,
   peak_rss_mb real, rss_growth_mb real,
   breaches_json text, violations_json text, frames_json text, memory_json text
@@ -50,28 +52,46 @@ create table if not exists benchmarks (
 BENCH_ANY = "*"
 
 
-def _scope(path_kind, device):
-    return f"{path_kind or BENCH_ANY}|{device or BENCH_ANY}"
+def _scope(path_kind, device, app_pkg=None):
+    """Benchmark scope key. app_pkg is part of it because a reference run for one
+    application says nothing about another."""
+    return f"{app_pkg or BENCH_ANY}|{path_kind or BENCH_ANY}|{device or BENCH_ANY}"
+
+
+# Columns added after the first release. sqlite has no "add column if not
+# exists", so they are applied idempotently on every connect; an existing
+# history.db upgrades in place rather than needing a rebuild.
+MIGRATIONS = [
+    ("runs", "app_pkg", "text"),
+    ("runs", "derived", "int default 0"),
+]
 
 
 def connect(db=None):
     c = sqlite3.connect(db or DB)
     c.row_factory = sqlite3.Row
     c.executescript(SCHEMA)
+    for table, col, decl in MIGRATIONS:
+        have = {r["name"] for r in c.execute(f"pragma table_info({table})")}
+        if col not in have:
+            c.execute(f"alter table {table} add column {col} {decl}")
+    c.commit()
     return c
 
 
 def record(metrics, *, label=None, git_sha=None, app_version=None,
-           device=None, trace_path=None, db=None):
+           device=None, trace_path=None, app_pkg=None, db=None):
     c = connect(db)
     f, mem = metrics["frames"], metrics.get("memory", {})
+    app_pkg = app_pkg or metrics.get("app_pkg")
     cur = c.execute("""insert into runs
-        (ts,label,git_sha,app_version,device,path_kind,trace_path,
+        (ts,label,git_sha,app_version,device,path_kind,trace_path,app_pkg,derived,
          ttff_ms,slow_pct,janky_pct,thermal_drift_pct,peak_rss_mb,rss_growth_mb,
          breaches_json,violations_json,frames_json,memory_json)
-        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+        values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
         datetime.now(timezone.utc).isoformat(timespec="seconds"), label, git_sha,
-        app_version, device, metrics["path_kind"], trace_path,
+        app_version, device, metrics["path_kind"], trace_path, app_pkg,
+        int(bool(metrics.get("derived"))),
         metrics["startup"]["time_to_first_camera_frame_ms"], f["slow_pct"],
         f["janky_pct"], f["thermal_drift_pct"],
         mem.get("rss", {}).get("peak_mb"), mem.get("rss", {}).get("growth_mb"),
@@ -91,7 +111,7 @@ def record(metrics, *, label=None, git_sha=None, app_version=None,
 from .budgets import MIN_BASELINE_RUNS
 
 
-def baseline(step, *, exclude_run=None, window=20, device=None, db=None):
+def baseline(step, *, exclude_run=None, window=20, device=None, app_pkg=None, db=None):
     """Trailing baseline for a step: median + stdev over the last `window` runs."""
     c = connect(db)
     q = """select sm.dur_ms from step_metrics sm join runs r on sm.run_id=r.id
@@ -101,6 +121,8 @@ def baseline(step, *, exclude_run=None, window=20, device=None, db=None):
         q += " and sm.run_id != ?"; args.append(exclude_run)
     if device:
         q += " and r.device = ?"; args.append(device)
+    if app_pkg:
+        q += " and r.app_pkg = ?"; args.append(app_pkg)
     q += " order by sm.run_id desc limit ?"; args.append(window)
     vals = [r["dur_ms"] for r in c.execute(q, args)]
     c.close()
@@ -133,14 +155,17 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True
       returned rows say which mode produced them via `reference`.
     """
     c = connect(db)
-    meta = c.execute("select path_kind, device from runs where id=?", (run_id,)).fetchone()
+    meta = c.execute("select path_kind, device, app_pkg from runs where id=?",
+                     (run_id,)).fetchone()
     rows = list(c.execute(
         "select step,dur_ms,budget_ms from step_metrics where run_id=?", (run_id,)))
     c.close()
+    app_pkg = meta["app_pkg"] if meta else None
 
     bench = None
     if use_benchmark and meta:
-        bench = get_benchmark(path_kind=meta["path_kind"], device=meta["device"], db=db)
+        bench = get_benchmark(path_kind=meta["path_kind"], device=meta["device"],
+                              app_pkg=app_pkg, db=db)
         if bench and bench["run_id"] == run_id:
             # This run IS the reference for its scope. Pinning it declares it the
             # definition of acceptable, so it cannot regress. Returning [] here
@@ -174,7 +199,7 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True
 
     out = []
     for r in rows:
-        b = baseline(r["step"], exclude_run=run_id, db=db)
+        b = baseline(r["step"], exclude_run=run_id, app_pkg=app_pkg, db=db)
         if not b:
             continue
         delta = r["dur_ms"] - b["median_ms"]
@@ -192,12 +217,12 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True
 def set_benchmark(run_id, *, note=None, db=None):
     """Pin a run as the reference for its own (path_kind, device) scope."""
     c = connect(db)
-    r = c.execute("select id, path_kind, device, label from runs where id=?",
+    r = c.execute("select id, path_kind, device, label, app_pkg from runs where id=?",
                   (run_id,)).fetchone()
     if not r:
         c.close()
         raise ValueError(f"no run with id {run_id}")
-    sc = _scope(r["path_kind"], r["device"])
+    sc = _scope(r["path_kind"], r["device"], r["app_pkg"])
     c.execute("""insert into benchmarks (scope, run_id, note, set_at)
                  values (?,?,?,?)
                  on conflict(scope) do update set
@@ -205,28 +230,34 @@ def set_benchmark(run_id, *, note=None, db=None):
               (sc, run_id, note, datetime.now(timezone.utc).isoformat(timespec="seconds")))
     c.commit(); c.close()
     return {"scope": sc, "run_id": run_id, "label": r["label"],
-            "path_kind": r["path_kind"], "device": r["device"]}
+            "path_kind": r["path_kind"], "device": r["device"],
+            "app_pkg": r["app_pkg"]}
 
 
-def clear_benchmark(*, path_kind=None, device=None, run_id=None, db=None):
+def clear_benchmark(*, path_kind=None, device=None, app_pkg=None, run_id=None, db=None):
     """Unpin by scope, or by the run that is pinned."""
     c = connect(db)
     if run_id is not None:
         n = c.execute("delete from benchmarks where run_id=?", (run_id,)).rowcount
     else:
         n = c.execute("delete from benchmarks where scope=?",
-                      (_scope(path_kind, device),)).rowcount
+                      (_scope(path_kind, device, app_pkg),)).rowcount
     c.commit(); c.close()
     return n
 
 
-def get_benchmark(*, path_kind=None, device=None, db=None):
-    """The pinned run for this scope, falling back to a path-only pin."""
+def get_benchmark(*, path_kind=None, device=None, app_pkg=None, db=None):
+    """The pinned run for this scope, narrowest match first.
+
+    Falls back from (app, path, device) to (app, path, any device), but never
+    across applications: a benchmark is only ever a reference for its own app.
+    """
     c = connect(db)
     row = None
-    for sc in (_scope(path_kind, device), _scope(path_kind, None)):
+    for sc in (_scope(path_kind, device, app_pkg),
+               _scope(path_kind, None, app_pkg)):
         row = c.execute("""select b.*, r.label, r.ts, r.git_sha, r.app_version,
-                                  r.device, r.path_kind
+                                  r.device, r.path_kind, r.app_pkg
                            from benchmarks b join runs r on b.run_id = r.id
                            where b.scope=?""", (sc,)).fetchone()
         if row:
@@ -238,7 +269,7 @@ def get_benchmark(*, path_kind=None, device=None, db=None):
 def benchmarks(db=None):
     c = connect(db)
     rows = [dict(r) for r in c.execute(
-        """select b.*, r.label, r.ts, r.device, r.path_kind, r.app_version
+        """select b.*, r.label, r.ts, r.device, r.path_kind, r.app_version, r.app_pkg
            from benchmarks b join runs r on b.run_id = r.id order by b.scope""")]
     c.close()
     return rows
