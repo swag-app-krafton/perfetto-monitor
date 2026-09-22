@@ -53,6 +53,9 @@ HOW TO ANALYSE:
 - Use the child-slice breakdown to attribute within a step. Say which child moved.
 - If the evidence does not identify a cause, say so plainly. Do not invent one.
 - Be concrete and brief. An engineer reads this at the top of a CI log.
+- Call the memory metric "RAM usage" (and its growth "RAM growth") in all prose.
+  The payload keys are named peak_rss_mb / rss_growth_mb for schema stability, but
+  "RSS" is jargon this dashboard does not show the reader -- never write it.
 
 Return ONLY valid JSON, no markdown fence, matching exactly:
 {
