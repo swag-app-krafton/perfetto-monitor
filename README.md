@@ -220,6 +220,30 @@ direct child slice with its own trend. Untraced self-time is shown explicitly, s
 breakdown sums to the step duration — "24ms unaccounted for in compose_shell" is
 itself a finding rather than a rounding gap.
 
+## Token consumption monitor
+
+A second, unrelated dashboard at `/tokens.html` (linked from the main page),
+answering a different question: not how the *app* performs, but how much this
+Claude Code session has spent reading this repository.
+
+`tokens.py` reads the `usage` blocks Claude Code writes into its own session
+transcripts under `~/.claude/projects/<this-project>/*.jsonl` and buckets them
+by how the tokens got into context: `graphify` calls, `Read`/`NotebookRead`,
+`Grep`/`Glob`, and read-only `Bash` (matched shallowly on the command's first
+token -- `cat`, `head`, `sed`, `grep`, `find`, `ls`, `awk`, `less` -- because
+guessing deeper misattributes more often than it helps).
+
+Every figure is server-reported; nothing here is estimated. It deliberately
+does **not** report "tokens saved", since that would need the cost of the path
+not taken, which is a counterfactual and cannot be measured, only modelled --
+that is what `graphify benchmark`'s words/chars ratio does instead, and the two
+should not be confused for the same kind of number. Attribution is sound in
+aggregate and fuzzy for any single call, since a tool result's cost lands on
+the *next* API call rather than being labelled at the point it entered context.
+
+Served at `/api/tokens`, aggregating the most recent sessions for the project
+`server.py` is running in.
+
 ## Layout
 
 ```
@@ -511,6 +535,26 @@ one undifferentiated span. A sub-screen slice is open *inside* its parent's, so
 
 An untagged `screen:Home` from an older build still parses; its kind is reported
 as unknown rather than the visit being dropped.
+
+On the app side (swag-pay), the tag and the sub-screens are produced by:
+
+- `ScreenKind`, an enum in `SwagTrace.kt` that each `AppRoute` declares via
+  `traceKind`, on an exhaustive `when` -- a new route will not compile until
+  it is classified.
+- `SubScreenTrace`, a slot separate from `ScreenTrace` rather than a widening
+  of its single-slot invariant, since a sub-screen slice is open *inside* its
+  parent's and the two must not fight over which is "current".
+- `onboardingReducer` in the React Native layer, instrumented the same way
+  `PayFlow.reduce` already instruments the native pay funnel: one wrapper at
+  the reducer's single choke point covers every step transition, so no call
+  site can add a step without also tracing it. Markers cross to native
+  through the existing `SwagPayNavigation` bridge (`nativeTrace.ts`); a
+  missing bridge degrades to no markers rather than throwing, since tracing
+  must never change app behaviour.
+
+Only step names and outcome classes ever cross into a marker there. Onboarding
+handles a mobile number, an OTP and a PIN, and a trace is pulled off the device
+and shared -- the same rule the existing QR-validation and pay markers follow.
 
 A screen that is still on display when tracing stops has no closing event, so
 Perfetto records it as an unfinished slice (`dur = -1`). Those are reported as
