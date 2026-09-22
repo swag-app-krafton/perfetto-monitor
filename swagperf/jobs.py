@@ -233,3 +233,77 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
 
     threading.Thread(target=run, daemon=True).start()
     return jid
+
+
+def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
+    """Stop a manual session, then pull, extract and record it.
+
+    Stopping is quick but pulling a long manual trace is not -- a ring buffer
+    filled over several minutes can be hundreds of MB -- so this runs as a job
+    like every other capture rather than blocking the request.
+    """
+    from . import capture as cap
+    if not cap.manual_status(device)["recording"]:
+        raise RuntimeError("No manual trace is recording.")
+    jid = _new("manual_stop", pkg=app_pkg)
+
+    def run():
+        if not _capture_lock.acquire(blocking=False):
+            _set(jid, state="error", error="Another capture is running; try again shortly.")
+            return
+        try:
+            _set(jid, state="running")
+            from . import extract as ex, store, catalogue
+            info = cap.device_info(device)
+            out = f"traces/manual_{jid}.pftrace"
+            _log(jid, "stopping the detached session and pulling the trace…")
+            cap.manual_stop(out, serial=device)
+            _log(jid, f"trace saved -> {out}")
+
+            _log(jid, "extracting metrics…")
+            m = ex.extract_any(out, app_pkg=app_pkg)
+            pkg = m.get("app_pkg") or app_pkg
+            if pkg and not catalogue.get(pkg):
+                catalogue.add(pkg, name=pkg, role="competitor")
+
+            # A manual session is driven by hand, so it legitimately may contain
+            # no launch at all -- the user may have traced an already-open app.
+            # Missing startup is therefore reported, not treated as a failure.
+            problems = ex.capture_problems(m, requested_pkg=pkg)
+            for p in problems:
+                _log(jid, "note: " + p)
+
+            rid = store.record(m, label=label or "manual-session",
+                               device=info.get("model") or info.get("device"),
+                               trace_path=out, app_pkg=pkg)
+            _log(jid, f"recorded as run {rid}")
+
+            screens = None
+            try:
+                from .screens import extract_screens
+                screens = extract_screens(out)
+                if screens.get("instrumented"):
+                    _log(jid, f"screen markers found: {len(screens['screens'])} visit(s), "
+                              f"{len(screens['actions'])} action type(s)")
+                else:
+                    _log(jid, "no SwagTrace screen markers in this trace")
+            except Exception as se:
+                _log(jid, f"screen extraction skipped: {se}")
+
+            from .cli import _analyse_run
+            res, _ = _analyse_run(rid, m, use_llm=use_llm)
+            _log(jid, f"verdict: {res.get('verdict')} — {res.get('headline','')}")
+            _set(jid, state="done",
+                 result={"run_id": rid, "app_pkg": pkg, "verdict": res.get("verdict"),
+                         "headline": res.get("headline"),
+                         "path_kind": m.get("path_kind"),
+                         "screens": (len(screens["screens"])
+                                     if screens and screens.get("instrumented") else 0)})
+        except Exception as e:
+            _log(jid, f"ERROR: {e}")
+            _set(jid, state="error", error=str(e))
+        finally:
+            _capture_lock.release()
+
+    threading.Thread(target=run, daemon=True).start()
+    return jid

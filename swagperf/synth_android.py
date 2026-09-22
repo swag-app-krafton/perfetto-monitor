@@ -105,3 +105,84 @@ def gen_android_trace(seed=0, *, pkg="com.example.app", cold=True,
         out += counter(ts, T_RSS, int((rss_base + growth + rnd.uniform(-3, 3)) * 1024 * 1024))
 
     return bytes(out), {"launch_start_ns": launch_start, "first_frame_ns": t, "pkg": pkg}
+
+
+def gen_swagpay_trace(seed=0, *, pkg="com.swagpay", flow=None, regress=None):
+    """Synthetic trace carrying SwagTrace screen/action/nav markers.
+
+    Mirrors what the instrumented Swag Pay app emits so `screens.py` can be
+    developed and tested without a device. `flow` is the sequence of screens
+    visited; each entry is (route, dwell_ms).
+    """
+    rnd = random.Random(seed)
+    regress = regress or {}
+    flow = flow or [("Home", 2200), ("Store", 1400), ("Pay", 2600),
+                    ("History", 1100), ("Home", 900)]
+    out = bytearray()
+    pid = 7000 + (seed % 400)
+
+    out += packet(0, track_desc(T_APP_MAIN, pkg, pid=pid, tid=pid))
+    out += packet(0, track_desc(T_APP_RT, "RenderThread", pid=pid, tid=pid + 1))
+    out += packet(0, track_desc(T_RSS, "mem.rss", counter=True))
+
+    t = 5 * MS
+    # Startup steps, as the coordinator emits them.
+    for step in ("step:returning_bootstrap", "step:first_usable_camera_frame",
+                 "step:hermes_runtime_active"):
+        out += slice_begin(t, T_APP_MAIN, step)
+        out += slice_end(t + 1 * MS, T_APP_MAIN)
+        t += 30 * MS
+
+    rss = 190.0
+    prev = None
+    for route, dwell in flow:
+        dwell = int(dwell * MS * regress.get(route, 1.0))
+        # The navigation slice must OPEN AND CLOSE before the screen slice
+        # opens. Sync slices on one track are a stack: emitting nav-begin,
+        # screen-begin, nav-end would make the reader close the screen slice
+        # first and swap the two durations.
+        if prev:
+            nav_dur = int(rnd.uniform(8, 26) * MS)
+            out += slice_begin(t, T_APP_MAIN, f"nav:{prev}->{route}")
+            out += slice_end(t + nav_dur, T_APP_MAIN)
+            t += nav_dur
+        out += slice_begin(t, T_APP_MAIN, f"screen:{route}")
+        screen_start = t
+        end = t + dwell
+
+        # Frames and per-screen actions inside the visit.
+        ts = t
+        while ts < end - 16_666_667:
+            fdur = int(rnd.gauss(9.5, 2.5) * MS)
+            if rnd.random() < 0.05:
+                fdur = int(rnd.uniform(18, 40) * MS)
+            fdur = max(fdur, 2 * MS)
+            out += slice_begin(ts, T_APP_MAIN, "Choreographer#doFrame")
+            out += slice_end(ts + fdur, T_APP_MAIN)
+            ts += max(fdur, 16_666_667)
+
+        if route == "Home":
+            for _ in range(int(dwell / MS / 250)):
+                a = screen_start + int(rnd.uniform(0, dwell))
+                out += slice_begin(a, T_APP_MAIN, "action:qr_validate_valid_upi")
+                out += slice_end(a + 1 * MS, T_APP_MAIN)
+        if route == "Pay":
+            for i, nm in enumerate(("pay_amount_to_choosebank",
+                                    "pay_choosebank_to_upipin",
+                                    "pay_upipin_to_processing",
+                                    "pay_processing_to_success")):
+                a = screen_start + int(dwell * (i + 1) / 6)
+                out += slice_begin(a, T_APP_MAIN, f"action:{nm}")
+                out += slice_end(a + 1 * MS, T_APP_MAIN)
+
+        # RAM grows while a screen is open; Pay grows fastest (RN surface).
+        grow = {"Pay": 9.0, "Store": 5.0}.get(route, 2.0) * regress.get("mem", 1.0)
+        for k in range(6):
+            out += counter(screen_start + int(dwell * k / 6), T_RSS,
+                           int((rss + grow * k / 6 + rnd.uniform(-1, 1)) * 1024 * 1024))
+        rss += grow
+        out += slice_end(end, T_APP_MAIN)
+        t = end + int(rnd.uniform(40, 120) * MS)
+        prev = route
+
+    return bytes(out), {"pkg": pkg, "flow": flow}

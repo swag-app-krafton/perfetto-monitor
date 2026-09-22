@@ -376,3 +376,59 @@ Three deliberate choices:
 
 Stress history is kept separate from run history, since a row there is a whole
 test rather than one capture.
+
+## Manual mode
+
+Some flows cannot be scripted: a real payment, a biometric unlock, a specific
+sequence of screens. Manual mode lets you drive the app by hand and control
+tracing yourself.
+
+```bash
+./.venv/bin/python -m swagperf.cli manual start --pkg com.swagpay --cold
+# ... use the app on the device ...
+./.venv/bin/python -m swagperf.cli manual stop
+./.venv/bin/python -m swagperf.cli manual status
+./.venv/bin/python -m swagperf.cli manual abort    # discard without analysing
+```
+
+Or the dashboard's **Manual** tab: Start tracing → use the app → Stop and analyse.
+
+Tracing runs as a **detached** perfetto session (`--detach=KEY`, stopped with
+`--attach=KEY --stop`), so it survives between HTTP requests and carries no
+`duration_ms` at all. A long-but-finite duration would truncate a long session
+and waste buffer on a short one. The buffer is a ring, so an over-long session
+keeps the most recent data rather than failing.
+
+A manual session may legitimately contain no launch — you might trace an
+already-open app — so missing startup is reported as a note rather than treated
+as a failed capture.
+
+## Per-screen CPU and RAM
+
+When the app emits `SwagTrace` markers (see the swag-pay repo), `screens.py`
+attributes cost to named screens and actions:
+
+```bash
+./.venv/bin/python -m swagperf.cli screens traces/session.pftrace
+```
+
+Or the dashboard's **Screens** tab, which reads any recorded run's trace.
+
+| Marker | Meaning |
+|---|---|
+| `screen:<Route>` | async slice, open for the whole screen visit |
+| `action:<name>` | a discrete user action |
+| `nav:<From>-><To>` | the navigation transition itself |
+| `step:<name>` | startup milestones, matching the existing step model |
+
+Two things worth knowing about the numbers:
+
+- **CPU is scheduled CPU time, not wall time.** It comes from `sched_slice`
+  clipped to the visit window. A screen that is merely *open* while the device
+  idles has not cost anything, and wall time cannot tell that apart from real
+  work. The two are shown side by side so the difference is visible. This needs
+  the `sched/sched_switch` ftrace event; a synthetic trace has none, and the tab
+  says so rather than drawing zero bars.
+- **RAM growth is min-to-peak within a single visit.** A screen that repeatedly
+  leaves RAM higher than it found it is the orphaned-surface signature the shell
+  architecture names.

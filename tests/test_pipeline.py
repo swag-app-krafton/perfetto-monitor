@@ -399,6 +399,100 @@ class TestStressTests(unittest.TestCase):
         self.assertEqual(len(t["sessions"]), 4)
 
 
+class TestScreenMetrics(unittest.TestCase):
+    """Per-screen attribution from SwagTrace markers."""
+
+    @classmethod
+    def setUpClass(cls):
+        from swagperf.synth_android import gen_swagpay_trace
+        from swagperf.screens import extract_screens
+        cls.tmp = tempfile.mkdtemp()
+        cls.flow = [("Home", 2000), ("Store", 1200), ("Pay", 2400), ("Home", 800)]
+        b, _ = gen_swagpay_trace(11, flow=cls.flow)
+        cls.path = os.path.join(cls.tmp, "s.pftrace")
+        with open(cls.path, "wb") as fh:
+            fh.write(b)
+        cls.d = extract_screens(cls.path)
+
+    def test_detects_markers(self):
+        self.assertTrue(self.d["instrumented"])
+
+    def test_one_visit_per_flow_entry(self):
+        self.assertEqual(len(self.d["screens"]), len(self.flow))
+        self.assertEqual([v["route"] for v in self.d["screens"]],
+                         [r for r, _ in self.flow])
+
+    def test_visit_durations_match_the_flow(self):
+        """A nav slice opening before the screen slice would swap these."""
+        for visit, (_, dwell) in zip(self.d["screens"], self.flow):
+            self.assertAlmostEqual(visit["duration_ms"], dwell, delta=5.0)
+
+    def test_repeat_visits_are_summed_not_averaged(self):
+        home = next(s for s in self.d["screen_summary"] if s["route"] == "Home")
+        self.assertEqual(home["visits"], 2)
+        self.assertAlmostEqual(home["total_ms"], 2000 + 800, delta=10.0)
+
+    def test_ram_growth_attributed_per_screen(self):
+        pay = next(s for s in self.d["screen_summary"] if s["route"] == "Pay")
+        home = next(s for s in self.d["screen_summary"] if s["route"] == "Home")
+        # Pay hosts an RN surface and grows fastest in the generator; the point
+        # of per-screen RAM is that this difference is visible at all.
+        self.assertGreater(pay["max_rss_delta_mb"], home["max_rss_delta_mb"])
+
+    def test_actions_are_counted(self):
+        names = {a["action"] for a in self.d["actions"]}
+        self.assertIn("qr_validate_valid_upi", names)
+        self.assertTrue(any(a.startswith("pay_") for a in names))
+
+    def test_navigations_report_the_transition_not_the_dwell(self):
+        """A transition costs tens of ms; a dwell costs hundreds."""
+        self.assertTrue(self.d["navigations"])
+        for n in self.d["navigations"]:
+            self.assertIsNotNone(n["from"])
+            self.assertIsNotNone(n["to"])
+            self.assertLess(n["max_ms"], 200.0)
+
+    def test_uninstrumented_trace_says_so_rather_than_reporting_zeros(self):
+        from swagperf.synth_android import gen_android_trace
+        from swagperf.screens import extract_screens
+        b, _ = gen_android_trace(12, pkg="com.plain.app")
+        p2 = os.path.join(self.tmp, "plain.pftrace")
+        with open(p2, "wb") as fh:
+            fh.write(b)
+        d = extract_screens(p2)
+        self.assertFalse(d["instrumented"])
+        self.assertEqual(d["screens"], [])
+        self.assertIn("SwagTrace", d["note"])
+
+
+class TestManualModeConfig(unittest.TestCase):
+    def test_manual_config_has_no_duration(self):
+        """A manual session is open-ended; a duration would truncate it."""
+        from swagperf import capture
+        self.assertNotIn("duration_ms", capture.MANUAL_CONFIG)
+        self.assertIn("duration_ms", capture.CONFIG)
+
+    def test_manual_config_formats_with_pkg(self):
+        from swagperf import capture
+        cfg = capture.MANUAL_CONFIG.format(pkg="com.example.app")
+        self.assertIn('atrace_apps: "com.example.app"', cfg)
+        # Braces survive as real perfetto config syntax; what must NOT survive
+        # is a doubled brace, which would mean a placeholder was left unescaped.
+        self.assertNotIn("{{", cfg)
+        self.assertNotIn("}}", cfg)
+
+    def test_manual_status_without_device_is_not_an_error(self):
+        from swagperf import capture
+        orig = capture.devices
+        capture.devices = lambda: []
+        try:
+            st = capture.manual_status()
+            self.assertFalse(st["device"])
+            self.assertFalse(st["recording"])
+        finally:
+            capture.devices = orig
+
+
 class TestHeuristic(unittest.TestCase):
     def test_heuristic_runs_without_network(self):
         tmp = tempfile.mkdtemp()

@@ -121,3 +121,143 @@ def capture(out_path, *, pkg="com.swagpay", duration_ms=10000, serial=None,
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     subprocess.run(base + ["pull", remote, out_path], check=True, capture_output=True)
     return out_path
+
+
+# ---------------------------------------------------------------- manual mode
+
+# A manual session is open-ended: the user drives the app by hand and stops
+# tracing when they are done. That needs a detached perfetto session, because
+# the trace has to outlive the adb command that started it. `--detach=KEY`
+# leaves the session running under a name we can reattach to later.
+MANUAL_KEY = "swagperf_manual"
+MANUAL_REMOTE = "/data/misc/perfetto-traces/swagperf_manual.pftrace"
+
+# No `duration_ms` here: the session runs until stopped. A long-but-finite
+# duration would silently truncate a long manual session and waste buffer on a
+# short one. The buffer is a ring, so an over-long session keeps the most
+# recent data rather than failing.
+MANUAL_CONFIG = """
+buffers: {{ size_kb: 262144 fill_policy: RING_BUFFER }}
+buffers: {{ size_kb: 8192 fill_policy: DISCARD }}
+data_sources: {{
+  config {{
+    name: "linux.ftrace"
+    ftrace_config {{
+      ftrace_events: "sched/sched_switch"
+      ftrace_events: "sched/sched_process_exit"
+      ftrace_events: "power/suspend_resume"
+      ftrace_events: "power/cpu_frequency"
+      ftrace_events: "power/cpu_idle"
+      atrace_categories: "gfx" atrace_categories: "view" atrace_categories: "am"
+      atrace_categories: "camera" atrace_categories: "res" atrace_categories: "sched"
+      atrace_categories: "freq" atrace_categories: "binder_driver"
+      atrace_apps: "{pkg}"
+      buffer_size_kb: 32768
+    }}
+  }}
+}}
+data_sources: {{ config {{ name: "linux.process_stats"
+  process_stats_config {{ scan_all_processes_on_start: true proc_stats_poll_ms: 500 }} }} }}
+data_sources: {{ config {{ name: "linux.sys_stats"
+  sys_stats_config {{ stat_period_ms: 500 stat_counters: STAT_CPU_TIMES
+    stat_counters: STAT_FORK_COUNT meminfo_period_ms: 500 }} }} }}
+data_sources: {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
+"""
+
+
+def manual_status(serial=None):
+    """Whether a detached swagperf session is currently recording.
+
+    `--is_detached` exits 0 when the key exists, 2 when it does not, so the
+    exit code is the answer.
+    """
+    devs = devices()
+    if not devs:
+        return {"device": False, "recording": False}
+    serial = serial or devs[0]
+    p = subprocess.run(["adb", "-s", serial, "shell",
+                        f"perfetto --is_detached={MANUAL_KEY}"],
+                       capture_output=True, text=True)
+    return {"device": True, "serial": serial, "recording": p.returncode == 0}
+
+
+def manual_start(*, pkg="com.swagpay", serial=None, cold=False):
+    """Begin an open-ended trace the user drives by hand.
+
+    With cold=True the app is force-stopped and launched once tracing is live,
+    so a manual session can still start from a real cold start.
+    """
+    devs = devices()
+    if not devs:
+        raise RuntimeError("No adb device connected.")
+    serial = serial or devs[0]
+    base = ["adb", "-s", serial]
+
+    if manual_status(serial)["recording"]:
+        raise RuntimeError(
+            "A manual trace is already recording. Stop it before starting another.")
+
+    subprocess.run(base + ["shell", "rm", "-f", MANUAL_REMOTE], capture_output=True)
+    if cold:
+        force_stop(pkg, serial)
+
+    cfg = MANUAL_CONFIG.format(pkg=pkg)
+    p = subprocess.run(
+        base + ["shell", f"perfetto --txt -c - -o {MANUAL_REMOTE} --detach={MANUAL_KEY}"],
+        input=cfg, text=True, capture_output=True, timeout=40)
+    if p.returncode != 0:
+        raise RuntimeError(f"perfetto failed to start: {(p.stderr or p.stdout)[:400]}")
+
+    launched = False
+    if cold:
+        time.sleep(0.6)
+        try:
+            launch(pkg, serial)
+            launched = True
+        except RuntimeError:
+            # Failing to launch is not fatal: the session is recording, and the
+            # user can open the app by hand -- which is the point of this mode.
+            launched = False
+    return {"key": MANUAL_KEY, "pkg": pkg, "serial": serial, "launched": launched}
+
+
+def manual_stop(out_path, *, serial=None):
+    """Stop the detached session and pull its trace."""
+    devs = devices()
+    if not devs:
+        raise RuntimeError("No adb device connected.")
+    serial = serial or devs[0]
+    base = ["adb", "-s", serial]
+
+    if not manual_status(serial)["recording"]:
+        raise RuntimeError("No manual trace is recording.")
+
+    # Reattach and stop. --stop makes the reattached session finalise the file.
+    p = subprocess.run(base + ["shell", f"perfetto --attach={MANUAL_KEY} --stop"],
+                       capture_output=True, text=True, timeout=120)
+    if p.returncode != 0:
+        raise RuntimeError(f"failed to stop the session: {(p.stderr or p.stdout)[:400]}")
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    pull = subprocess.run(base + ["pull", MANUAL_REMOTE, out_path],
+                          capture_output=True, text=True)
+    if pull.returncode != 0:
+        raise RuntimeError(f"failed to pull the trace: {(pull.stderr or pull.stdout)[:300]}")
+    subprocess.run(base + ["shell", "rm", "-f", MANUAL_REMOTE], capture_output=True)
+    return out_path
+
+
+def manual_abort(serial=None):
+    """Discard a recording session without pulling it."""
+    devs = devices()
+    if not devs:
+        return False
+    serial = serial or devs[0]
+    if not manual_status(serial)["recording"]:
+        return False
+    subprocess.run(["adb", "-s", serial, "shell",
+                    f"perfetto --attach={MANUAL_KEY} --stop"],
+                   capture_output=True, timeout=120)
+    subprocess.run(["adb", "-s", serial, "shell", "rm", "-f", MANUAL_REMOTE],
+                   capture_output=True)
+    return True

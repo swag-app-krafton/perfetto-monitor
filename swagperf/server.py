@@ -106,6 +106,27 @@ class H(SimpleHTTPRequestHandler):
                 return self._json({"error": str(e)}, 404)
         if u.path.startswith("/api/device"):
             return self._json(_device_payload())
+        if u.path.startswith("/api/manual/status"):
+            from .capture import manual_status
+            return self._json(manual_status())
+        if u.path.startswith("/api/screens"):
+            from .screens import extract_screens
+            import os as _os
+            rid = q.get("run", [None])[0]
+            if not rid:
+                return self._json({"error": "run query param is required"}, 400)
+            c = store.connect()
+            row = c.execute("select trace_path, app_pkg from runs where id=?",
+                            (rid,)).fetchone()
+            c.close()
+            if not row or not row["trace_path"]:
+                return self._json({"error": "no trace recorded for that run"}, 404)
+            if not _os.path.exists(row["trace_path"]):
+                return self._json({"error": f"trace file is gone: {row['trace_path']}"}, 404)
+            try:
+                return self._json(extract_screens(row["trace_path"]))
+            except Exception as e:
+                return self._json({"error": str(e)}, 500)
         if u.path.startswith("/api/stress"):
             sid = q.get("id", [None])[0]
             if sid:
@@ -143,6 +164,26 @@ class H(SimpleHTTPRequestHandler):
                                       device=payload.get("device"),
                                       app_pkg=payload.get("app_pkg"))
             return self._json({"ok": True, "cleared": k})
+        if u.path == "/api/manual/start":
+            from .capture import manual_start
+            try:
+                r = manual_start(pkg=(payload.get("pkg") or "com.swagpay").strip(),
+                                 cold=bool(payload.get("cold")))
+            except RuntimeError as e:
+                return self._json({"error": str(e)}, 409)
+            return self._json({"ok": True, **r})
+        if u.path == "/api/manual/stop":
+            from . import jobs
+            try:
+                jid = jobs.start_manual_stop(label=payload.get("label"),
+                                             app_pkg=payload.get("pkg"),
+                                             use_llm=payload.get("use_llm", False))
+            except RuntimeError as e:
+                return self._json({"error": str(e)}, 409)
+            return self._json({"ok": True, "job_id": jid})
+        if u.path == "/api/manual/abort":
+            from .capture import manual_abort
+            return self._json({"ok": True, "discarded": manual_abort()})
         if u.path == "/api/stress/start":
             from . import jobs
             try:
