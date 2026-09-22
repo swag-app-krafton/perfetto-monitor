@@ -190,6 +190,8 @@ tr.steprow:focus-visible{outline:2px solid var(--s1);outline-offset:-2px}
 tr.steprow.open{background:var(--surface-2)}
 tr.steprow.open td:first-child{box-shadow:inset 3px 0 0 var(--s1)}
 tr.cur td{font-weight:600}
+tr.rowbtn{cursor:pointer}
+tr.rowbtn:hover td{background:var(--surface-1)}
 tr.selfrow td{color:var(--text-muted);font-style:italic}
 /* drill-down */
 .drill{border:1px solid var(--border-strong);border-radius:10px;padding:15px 16px;margin-bottom:16px;background:var(--surface-0)}
@@ -219,6 +221,9 @@ table.tight td,table.tight th{padding:5px 9px}
       <p class="sub">Perfetto trace regression monitor &middot; three runtimes, one process</p>
     </div>
     <div class="ctl">
+      <a href="/tokens.html" style="font:inherit;font-size:13px;color:var(--text-primary);
+        background:var(--surface-1);border:1px solid var(--border);border-radius:7px;
+        padding:5px 10px;text-decoration:none">Tokens</a>
       <select id="appsel" aria-label="App under test"></select>
       <select id="pathsel" aria-label="Startup path"></select>
       <button id="rangebtn" data-r="30">Last 30</button>

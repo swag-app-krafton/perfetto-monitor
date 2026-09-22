@@ -40,9 +40,25 @@ let STR = { list: null, open: null, detail: null, job: null, polling: false,
 // The installed list is long (140+ on a real phone); cap what is rendered but
 // say so, rather than silently truncating.
 const MAN_LIST_LIMIT = 60;
-let MAN = { status: null, pkg: 'com.swagpay', cold: false, job: null,
-            polling: false, since: null, q: '' };
-let SCR = { runId: null, data: null, loading: false };
+// Each live poll costs an adb pull plus a trace parse, so keep it well clear
+// of the server's own 4s cache rather than hammering it.
+const LIVE_POLL_MS = 5000;
+let MAN = { status: null, pkg: 'com.swag.pay', cold: false, job: null,
+            polling: false, since: null, q: '',
+            // Live marker feed while recording. `kinds` is the filter: an empty
+            // set would mean "show nothing", so it starts with everything on.
+            live: null, liveErr: null, livePolling: false,
+            kinds: new Set(['screen', 'action', 'nav', 'step']) };
+let SCR = {
+  runId: null, data: null, loading: false,
+  // Sub-tab inside Screens: 'launch' (startup metrics for the same run) or
+  // 'usage' (per-screen attribution). A manual session records both, and the
+  // launch half was only reachable from the Startup tab, which is driven by a
+  // different run picker -- so after a manual run the numbers looked missing.
+  view: 'usage',
+  // Which screen's per-visit detail is expanded, and which metric it charts.
+  open: null, metric: 'cpu_pct_of_wall',
+};
 
 const TABS = [
   { id: 'overview', label: 'Overview',  blurb: 'Verdict, budgets and findings for the latest run.' },
@@ -684,8 +700,10 @@ async function manualStart() {
   if (r.error) { MAN.job = { state: 'error', error: r.error, log: [] }; render(); return; }
   MAN.since = Date.now();
   MAN.job = null;
+  MAN.live = null; MAN.liveErr = null;
   await loadManualStatus(true);
   render();
+  pollLiveMarkers();
 }
 
 async function manualStop() {
@@ -702,6 +720,88 @@ async function manualAbort() {
   MAN.since = null; MAN.job = null;
   await loadManualStatus(true);
   render();
+}
+
+/* Live marker feed.
+
+   Each poll pulls the partial trace off the device and parses it, which costs
+   real time on a long session, so this is a self-rescheduling loop rather than
+   a fixed interval: the next poll is scheduled only once the previous one has
+   answered. A setInterval would pile overlapping requests onto a capture that
+   is already busy. */
+async function pollLiveMarkers() {
+  if (MAN.livePolling) return;
+  MAN.livePolling = true;
+  while (MAN.status && MAN.status.recording) {
+    try {
+      const r = await (await fetch('/api/manual/live')).json();
+      if (!r.recording) break;
+      MAN.live = r; MAN.liveErr = null;
+    } catch (e) {
+      // A dropped poll is not worth tearing the view down over: keep the last
+      // markers on screen and say the feed is stale.
+      MAN.liveErr = String(e);
+    }
+    if (TAB === 'manual') renderLiveFeed();
+    await new Promise(r => setTimeout(r, LIVE_POLL_MS));
+  }
+  MAN.livePolling = false;
+}
+
+/* Repaint only the feed, not the whole page.
+
+   A full render() would rebuild the package search box and steal focus, and
+   restart the elapsed timer, every few seconds while the user is trying to
+   drive the app. */
+function renderLiveFeed() {
+  const host = $('#manlive');
+  if (host) host.innerHTML = liveFeedHTML();
+  bindLiveFilters();
+}
+
+function liveFeedHTML() {
+  const L = MAN.live;
+  if (!L) return '<p class="empty">Waiting for the first markers\u2026</p>';
+  const counts = L.counts || {};
+  const all = L.events || [];
+  const shown = all.filter(e => MAN.kinds.has(e.kind));
+  const KINDS = [['screen', 'Screens'], ['action', 'Actions'],
+                 ['nav', 'Navigations'], ['step', 'Steps']];
+  return `
+    <div class="ctl" style="margin-bottom:10px;flex-wrap:wrap">
+      ${KINDS.map(([k, l]) => `<button class="seg${MAN.kinds.has(k) ? ' on' : ''}"
+        data-lk="${k}">${l} <span class="count">${counts[k] || 0}</span></button>`).join('')}
+      <span class="count">${shown.length} of ${all.length} shown</span>
+      ${L.current_screen ? `<span class="pill pass">on ${esc(L.current_screen)}${
+          L.current_screen_kind ? ` \u00b7 ${esc(L.current_screen_kind)}` : ''}</span>` : ''}
+    </div>
+    ${MAN.liveErr ? `<p class="hint" style="color:var(--warn)">Feed stale: ${esc(MAN.liveErr)}</p>` : ''}
+    ${L.note ? `<p class="hint">${esc(L.note)}</p>` : ''}
+    ${L.truncated ? `<p class="hint">Showing the most recent ${all.length} of ${L.total} markers.</p>` : ''}
+    <div class="scroll" style="max-height:320px"><table>
+      <thead><tr><th>At</th><th>Kind</th><th>Marker</th><th>Duration</th></tr></thead>
+      <tbody>${shown.slice().reverse().map(e => `<tr>
+        <td style="color:var(--text-secondary);font-size:12px">${(e.at_ms / 1000).toFixed(1)}s</td>
+        <td><span class="tag">${e.kind}</span>${e.screen_kind_label
+            ? ` <span class="tag">${esc(e.screen_kind_label)}</span>` : ''}</td>
+        <td>${e.step ? '<span style="color:var(--text-secondary)">\u21b3 </span>' : ''}${esc(e.name)}${e.open_ended ? ' <span class="pill pass">open</span>' : ''}</td>
+        <td style="color:var(--text-secondary);font-size:12px">${e.duration_ms != null ? e.duration_ms + 'ms' : '\u2014'}</td>
+      </tr>`).join('') || `<tr><td colspan="4" class="empty">${all.length
+          ? 'No markers of the selected kinds yet.'
+          : 'No markers yet. Drive the app to produce some.'}</td></tr>`}</tbody>
+    </table></div>`;
+}
+
+function bindLiveFilters() {
+  document.querySelectorAll('[data-lk]').forEach(b => b.onclick = () => {
+    const k = b.dataset.lk;
+    // Never let the filter empty out completely: an empty set renders a blank
+    // table that looks like "no markers found", which is the bug this whole
+    // view exists to make impossible to misread.
+    if (MAN.kinds.has(k)) { if (MAN.kinds.size > 1) MAN.kinds.delete(k); }
+    else MAN.kinds.add(k);
+    renderLiveFeed();
+  });
 }
 
 async function pollManual(jid) {
@@ -736,42 +836,196 @@ async function loadScreens(runId) {
   SCR.loading = false;
 }
 
-/* Horizontal bars: one screen per row, so total cost is comparable at a glance.
-   A stacked or pie form would hide that these are independent magnitudes. */
-function screenBars(rows, key, unit, label, color) {
-  const W = 1180, rowH = 30, L = 170, R = 90, T = 8;
-  const H = T + rows.length * rowH + 26;
-  const iw = W - L - R;
-  const max = Math.max(...rows.map(r => r[key] || 0), 1);
-  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': label });
+/* One bar per visit to a single screen.
+
+   A per-screen total cannot distinguish twelve even visits from eleven cheap
+   ones and a pathological twelfth, and it is nearly always the twelfth that is
+   the bug. Visits are drawn in the order they happened so a trend -- a screen
+   that gets more expensive each time it is opened, the signature of state
+   accumulating across visits -- is visible as a slope rather than hidden in a
+   sum. The mean is drawn as a reference line, and any visit more than two
+   standard deviations from it is called out. */
+const METRICS = {
+  cpu_pct_of_wall: { label: 'CPU % of wall', unit: '%', dp: 1 },
+  cpu_ms: { label: 'CPU time', unit: ' ms', dp: 1 },
+  peak_rss_mb: { label: 'Peak RAM', unit: ' MB', dp: 1 },
+  rss_delta_mb: { label: 'RAM growth', unit: ' MB', dp: 1 },
+  duration_ms: { label: 'Wall time', unit: ' ms', dp: 1 },
+};
+
+function visitBars(row, metric) {
+  const m = METRICS[metric] || METRICS.cpu_pct_of_wall;
+  const visits = row.visit_list || [];
+  const stat = (row.stats || {})[metric] || {};
+  const W = 1180, H = 240, L = 58, R = 18, T = 16, B = 42;
+  const iw = W - L - R, ih = H - T - B;
+  const vals = visits.map(v => v[metric]).filter(x => x != null);
+  const max = Math.max(...vals, stat.mean || 0, 1);
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img',
+    'aria-label': `${m.label} for each visit to ${row.route}` });
   const g = el('g');
-  rows.forEach((r, i) => {
-    const y = T + i * rowH;
-    const w = Math.max(((r[key] || 0) / max) * iw, 1);
-    g.appendChild(el('text', { x: L - 10, y: y + 15, class: 'ax', 'text-anchor': 'end',
-      fill: 'var(--text-primary)' }, [document.createTextNode(r.route)]));
-    // 4px rounded data-end, anchored to the baseline at x=L
-    g.appendChild(el('path', {
-      d: `M${L},${y + 4} h${Math.max(w - 4, 0)} q4,0 4,4 v${rowH - 16} q0,4 -4,4 h${-Math.max(w - 4, 0)} Z`,
-      fill: color }));
-    g.appendChild(el('text', { x: L + w + 8, y: y + 15, class: 'ax',
-      fill: 'var(--text-secondary)' },
-      [document.createTextNode(fmt(r[key] || 0, 1) + unit)]));
-    const hit = el('rect', { x: L, y, width: iw, height: rowH, class: 'hit' });
-    hit.addEventListener('mousemove', e => showTip(
-      `<b>${esc(r.route)}</b>` +
-      `<div class="r"><span>visits</span><b>${r.visits}</b></div>` +
-      `<div class="r"><span>total on screen</span><b>${fmt(r.total_ms, 1)} ms</b></div>` +
-      `<div class="r"><span>CPU</span><b>${fmt(r.total_cpu_ms, 1)} ms</b></div>` +
-      (r.slow_frame_pct != null ? `<div class="r"><span>slow frames</span><b>${fmt(r.slow_frame_pct, 2)}%</b></div>` : '') +
-      (r.max_rss_delta_mb != null ? `<div class="r"><span>worst RAM growth</span><b>${fmt(r.max_rss_delta_mb, 1)} MB</b></div>` : ''), e));
+  const y = v => T + ih - (v / max) * ih;
+
+  // Horizontal grid, so a bar can be read against a value without a tooltip.
+  for (let i = 0; i <= 4; i++) {
+    const gv = (max / 4) * i;
+    g.appendChild(el('line', { x1: L, x2: W - R, y1: y(gv), y2: y(gv),
+      stroke: 'var(--grid)', 'stroke-width': 1 }));
+    g.appendChild(el('text', { x: L - 8, y: y(gv) + 4, class: 'ax',
+      'text-anchor': 'end' }, [document.createTextNode(fmt(gv, m.dp))]));
+  }
+
+  const bw = Math.max(iw / Math.max(visits.length, 1) - 6, 3);
+  visits.forEach((v, i) => {
+    const val = v[metric];
+    const x = L + (iw / Math.max(visits.length, 1)) * i + 3;
+    if (val == null) {
+      // Absent is not zero: a visit with no RAM samples must not read as a
+      // visit that used none.
+      g.appendChild(el('text', { x: x + bw / 2, y: T + ih - 4, class: 'ax',
+        'text-anchor': 'middle', fill: 'var(--text-muted)' },
+        [document.createTextNode('–')]));
+    } else {
+      const isOut = (v.outlier || {})[metric];
+      g.appendChild(el('rect', {
+        x, y: y(val), width: bw, height: Math.max(T + ih - y(val), 1), rx: 3,
+        fill: isOut ? 'var(--crit)' : 'var(--s2)' }));
+    }
+    g.appendChild(el('text', { x: x + bw / 2, y: H - B + 16, class: 'ax',
+      'text-anchor': 'middle' }, [document.createTextNode(String(v.index))]));
+
+    const hit = el('rect', { x: x - 3, y: T, width: bw + 6, height: ih, class: 'hit' });
+    hit.addEventListener('mousemove', e => {
+      const dev = (stat.mean != null && val != null && stat.stdev)
+        ? (val - stat.mean) / stat.stdev : null;
+      showTip(
+        `<b>${esc(row.route)} · visit ${v.index}</b>` +
+        `<div class="r"><span>${m.label}</span><b>${val == null ? 'no data' : fmt(val, m.dp) + m.unit}</b></div>` +
+        (stat.mean != null ? `<div class="r"><span>mean of ${row.visits} visits</span><b>${fmt(stat.mean, m.dp)}${m.unit}</b></div>` : '') +
+        (dev != null ? `<div class="r"><span>deviation</span><b>${dev >= 0 ? '+' : ''}${fmt(dev, 1)} sd</b></div>` : '') +
+        ((v.outlier || {})[metric] ? '<div class="r"><span>flagged</span><b>outlier, &gt;2 sd from mean</b></div>' : '') +
+        `<div class="r"><span>avg CPU</span><b>${v.cpu_pct_of_wall == null ? '–' : fmt(v.cpu_pct_of_wall, 1) + '%'} of wall</b></div>` +
+        `<div class="r"><span>avg RAM</span><b>${v.peak_rss_mb == null ? '–' : fmt(v.peak_rss_mb, 1) + ' MB peak'}</b></div>` +
+        `<div class="r"><span>wall time</span><b>${fmt(v.duration_ms, 1)} ms</b></div>` +
+        (v.stack && v.stack.length > 1
+          ? `<div class="r"><span>stack</span><b>${esc(v.stack.join(' \u203a '))}</b></div>` +
+            `<div class="r"><span>held beneath</span><b>${esc((v.beneath || []).join(', '))}</b></div>`
+          : '<div class="r"><span>stack</span><b>root, nothing beneath</b></div>') +
+        (v.open_ended ? '<div class="r"><span>note</span><b>still open when tracing stopped</b></div>' : ''), e);
+    });
     hit.addEventListener('mouseleave', hideTip);
     g.appendChild(hit);
   });
+
+  if (stat.mean != null && vals.length > 1) {
+    g.appendChild(el('line', { x1: L, x2: W - R, y1: y(stat.mean), y2: y(stat.mean),
+      stroke: 'var(--text-secondary)', 'stroke-width': 1.5, 'stroke-dasharray': '5 4' }));
+    g.appendChild(el('text', { x: W - R, y: y(stat.mean) - 6, class: 'ax',
+      'text-anchor': 'end', fill: 'var(--text-secondary)' },
+      [document.createTextNode(`mean ${fmt(stat.mean, m.dp)}${m.unit}`)]));
+  }
+
   g.appendChild(el('text', { x: L + iw / 2, y: H - 6, class: 'ax', 'text-anchor': 'middle' },
-    [document.createTextNode(label)]));
+    [document.createTextNode(`visit number (in the order they happened) — ${m.label}`)]));
   svg.appendChild(g);
   return svg;
+}
+
+/* Cost grouped by how deep the screen sat in the navigation stack.
+
+   A per-screen number says what the screen on top cost. It cannot say what was
+   still held open underneath it -- and a screen pushed onto two others has not
+   replaced them: those are still alive, still holding their views and bitmaps.
+   That is usually the answer when a screen's own work looks cheap but RAM is
+   high while it is showing. */
+function stackViewHTML(d) {
+  const rows = d.stack_summary || [];
+  if (!rows.length) return '';
+  const deepest = rows[rows.length - 1];
+  return `
+    <div class="card">
+      <h2>Navigation stack</h2>
+      <p class="hint">Reconstructed by replaying the app's own push, pop and tab-reset
+        markers, so this is the same back stack the app held \u2014 not an inference from
+        overlapping slices (screen slices never overlap; only one is open at a time).
+        Deepest stack reached: <b>${d.max_depth}</b>.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Depth</th><th class="num">Visits</th><th class="num">Wall ms</th>
+          <th class="num">CPU % of wall</th><th class="num">Peak RAM</th>
+          <th>Screens at this depth</th><th>Held open beneath</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+          <td><b>${r.depth}</b></td>
+          <td class="num">${r.visits}</td>
+          <td class="num">${fmt(r.total_ms, 1)}</td>
+          <td class="num">${r.mean_cpu_pct == null ? '\u2013' : fmt(r.mean_cpu_pct, 1) + '%'}</td>
+          <td class="num ${(r.peak_rss_mb || 0) > 400 ? 'up' : ''}">${r.peak_rss_mb == null ? '\u2013' : fmt(r.peak_rss_mb, 1) + ' MB'}</td>
+          <td style="font-size:12px">${r.routes.map(([k, n]) => `${esc(k)}${n > 1 ? ` \u00d7${n}` : ''}`).join(', ')}</td>
+          <td style="font-size:12px;color:var(--text-secondary)">${r.beneath.length
+            ? r.beneath.map(([k, n]) => `${esc(k)}${n > 1 ? ` \u00d7${n}` : ''}`).join(', ')
+            : '\u2014 nothing, this is the root'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+      ${deepest && deepest.depth > 1 && deepest.mean_cpu_pct != null
+          && deepest.peak_rss_mb != null && deepest.mean_cpu_pct < 25 ? `
+        <p class="hint" style="margin-top:9px">At depth ${deepest.depth} the screen on top is
+          using only ${fmt(deepest.mean_cpu_pct, 1)}% CPU yet ${fmt(deepest.peak_rss_mb, 1)} MB is
+          resident. Work is not what is costing memory there \u2014
+          ${deepest.beneath.map(([k]) => esc(k)).join(' and ')}
+          ${deepest.beneath.length === 1 ? 'is' : 'are'} still held open beneath it.</p>` : ''}
+    </div>`;
+}
+
+/* Launch metrics for the run selected in the Screens tab.
+
+   A manual session produces one trace that carries both halves: the startup
+   steps and the screen markers. The Startup tab reads the *globally* selected
+   run, so after a manual capture the user had to switch tabs and re-pick the
+   same run to see its launch numbers -- which read as the numbers not existing.
+   This shows them beside the usage view, for the run already chosen here. */
+function launchViewHTML(run) {
+  if (!run) {
+    return '<div class="card"><p class="empty">Select a run to see its launch metrics.</p></div>';
+  }
+  const steps = run.steps || [];
+  const ttff = run.ttff_ms;
+  const label = run.derived ? 'Time to initial display' : 'First camera frame';
+  if (!ttff && !steps.length) {
+    return `<div class="card"><h2>No launch in this trace</h2>
+      <p class="hint">This run records no startup steps. A manual session that begins with the
+        app already open has no launch to measure \u2014 trace a cold start to capture one.
+        The screen usage view is unaffected.</p></div>`;
+  }
+  const worst = steps.reduce((a, b) => (b.dur_ms > (a?.dur_ms || 0) ? b : a), null);
+  // Step timestamps are boot-relative, which is a number in the tens of
+  // millions and says nothing. Rebase on the first step so the column reads as
+  // "this far into the launch", which is the only comparison worth making.
+  const t0 = steps.length ? Math.min(...steps.map(st => st.start_ms || 0)) : 0;
+  return `
+    <div class="tiles">
+      ${tileHTML(label, ttff, 'ms', run.ttid_budget_ms, null, 1)}
+      ${tileHTML('Startup steps', steps.length, '', null, null, 0)}
+      ${tileHTML('Slowest step', worst ? worst.dur_ms : null, 'ms', null, null, 1)}
+    </div>
+    <div class="card">
+      <h2>Startup steps</h2>
+      <p class="hint">Each stage of the launch this trace recorded, in order, with the
+        slices that dominate it. Path: ${esc(run.path_kind || 'unknown')}.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Step</th><th class="num">Start</th><th class="num">Duration</th>
+          <th>Dominated by</th></tr></thead>
+        <tbody>${steps.map(st => {
+          const kids = (st.children || []).slice(0, 2)
+            .map(k => `${esc(k.name)} ${fmt(k.dur_ms, 1)}ms`).join(', ');
+          return `<tr>
+            <td>${esc(String(st.step || '').replace(/^step:/, ''))}</td>
+            <td class="num" style="color:var(--text-secondary)">+${fmt((st.start_ms || 0) - t0, 1)} ms</td>
+            <td class="num ${st.over_budget ? 'up' : ''}">${fmt(st.dur_ms, 2)} ms</td>
+            <td style="color:var(--text-secondary);font-size:12px">${kids || '\u2014'}</td>
+          </tr>`; }).join('')}</tbody>
+      </table></div>
+      <p class="hint" style="margin-top:9px">Start is relative to the first step. For the full
+        critical-path breakdown, budgets and ordering checks, open the <b>Startup</b> tab.</p>
+    </div>`;
 }
 
 /* ---------- render ---------- */
@@ -1005,7 +1259,7 @@ function render() {
           <em>${fmt(hh.growth_mb, 1)}MB of ${fmt(cur.rss_growth_mb, 1)}MB total</em></div></div>` : ''}
       </div>
       <div class="card"><h2>Peak RAM usage and Hermes heap</h2>
-        <p class="hint">Both in MB on one axis. RAM usage is the app's resident set: the physical memory it actually occupies, which is what Android's low-memory killer acts on.${memBudget('peak_rss_mb') ? ` Dashed line is the ${gb.peak_rss_mb}MB ceiling.` : ''}</p>
+        <p class="hint">Both in MB on one axis. RAM usage is the physical memory the app actually occupies, which is what Android's low-memory killer acts on.${memBudget('peak_rss_mb') ? ` Dashed line is the ${gb.peak_rss_mb}MB ceiling.` : ''}</p>
         <div class="legend"><span><i style="background:var(--s1)"></i>Peak RAM usage</span><span><i style="background:var(--s2)"></i>Hermes heap peak</span></div>
         <div id="c6"></div></div>
       <div class="card"><h2>Session growth</h2>
@@ -1013,7 +1267,7 @@ function render() {
         <div id="c7"></div></div>
       <div class="card"><h2>Memory findings</h2>
         <div>${findingsHTML(an, { kinds: ['memory', 'budget_breach'],
-          about: ['memor', 'rss', 'heap', 'leak', 'surface', 'resident', 'growth'],
+          about: ['memor', 'ram', 'rss', 'heap', 'leak', 'surface', 'resident', 'growth'],
           emptyMsg: 'No memory findings for the latest run.' })}</div></div>`;
     post.push(() => {
       $('#c6').appendChild(multiLine(rs, [
@@ -1400,8 +1654,9 @@ function render() {
           <h2>Manual tracing session</h2>
           <p class="hint">Tracing runs as a <b>detached</b> perfetto session, so it keeps
             recording between requests and has no fixed duration — you decide when to stop.
-            The buffer is a ring, so a long session keeps the most recent data rather than
-            failing. Use this to trace a flow no script can reproduce: a real payment, a
+            The buffer is drained to the device every few seconds, so a long session
+            accumulates rather than failing — but the trace file grows with it, so stop
+            when you are done. Use this to trace a flow no script can reproduce: a real payment, a
             biometric unlock, a specific sequence of screens.</p>
           <div class="ctl" style="margin-bottom:10px">
             <span class="pill ${st.recording ? 'fail' : 'pass'}">${st.recording ? 'recording' : 'idle'}</span>
@@ -1440,6 +1695,14 @@ function render() {
             <p class="hint" style="margin-top:10px">Drive the app on the device now.
               Stop when you are done and the trace will be pulled, analysed and recorded.</p>`}
         </div>
+        ${st.recording ? `<div class="card">
+          <h2>Live markers</h2>
+          <p class="hint">Markers as they land, read from the partial trace on the device
+            every few seconds. A screen marked <b>open</b> is the one currently on display.
+            If this stays empty while you use the app, the build you are tracing is not
+            emitting SwagTrace markers \u2014 check the package above is the instrumented one.</p>
+          <div id="manlive">${liveFeedHTML()}</div>
+        </div>` : ''}
         ${job ? `<div class="card" style="${job.state === 'error' ? 'border-color:var(--crit)' : job.state === 'done' ? 'border-color:var(--good)' : ''}">
           <h2>${busy ? 'Processing the session…' : job.state === 'done' ? 'Session recorded' : 'Failed'}</h2>
           <div class="joblog">${(job.log || []).map(l => `<div class="jl ${/^ERROR/.test(l.text) ? 'bad' : /^note/.test(l.text) ? 'warn' : ''}">
@@ -1472,6 +1735,10 @@ function render() {
         document.querySelectorAll('[data-manpick]').forEach(b => b.onclick = () => {
           MAN.pkg = b.dataset.manpick; render();
         });
+        bindLiveFilters();
+        // A page reload mid-session leaves the loop dead but the device still
+        // recording, so restart it from whatever state the status reports.
+        if (st.recording && !MAN.livePolling) pollLiveMarkers();
         const s1 = $('#manstart'); if (s1) s1.onclick = () => manualStart();
         const s2 = $('#manstop'); if (s2) s2.onclick = () => manualStop();
         const s3 = $('#manabort'); if (s3) s3.onclick = () => manualAbort();
@@ -1494,6 +1761,12 @@ function render() {
     const withTraces = DATA.runs.filter(r => r.trace_path);
     if (SCR.runId == null && withTraces.length) SCR.runId = withTraces.at(-1).id;
     const d = SCR.data;
+    // The launch half reads the same run the Screens picker selected, rather
+    // than the global run selection the Startup tab uses. A manual session
+    // records startup steps and screen markers from one trace, so making the
+    // user change tabs and re-pick the run to see the other half of their own
+    // capture was the gap that made launch metrics look absent.
+    const scrRun = DATA.runs.find(r => r.id === SCR.runId) || null;
 
     app.innerHTML = head + `
       <div class="card">
@@ -1510,45 +1783,66 @@ function render() {
           <code>screen:</code> and <code>action:</code> markers via SwagTrace. CPU here is
           scheduled CPU time overlapped with each visit, not wall time — a screen that is
           merely open while the device idles has not cost anything.</p>
+        <div class="ctl" style="margin-top:12px">
+          <span class="flabel">View</span><div id="scrview"></div>
+        </div>
       </div>
       ${SCR.loading ? '<div class="card"><p class="empty">Reading the trace…</p></div>' : ''}
       ${d && d.error ? `<div class="card"><p class="empty">${esc(d.error)}</p></div>` : ''}
-      ${d && !d.error && !d.instrumented ? `<div class="card">
+      ${d && !d.error && !d.instrumented && SCR.view === 'usage' ? `<div class="card">
         <h2>No screen markers in this trace</h2>
         <p class="hint">${esc(d.note || '')}</p></div>` : ''}
-      ${d && d.instrumented ? `
-        <div class="card"><h2>CPU by screen</h2>
-          ${d.screen_summary.some(r => (r.total_cpu_ms || 0) > 0)
-            ? `<p class="hint">Scheduled CPU time attributed to each screen, summed across visits.</p>
-               <div id="scb1"></div>`
-            : `<p class="empty">No scheduler data in this trace, so CPU cannot be attributed.
-               CPU attribution needs the <code>sched/sched_switch</code> ftrace event, which a
-               real device capture includes but a synthetic trace does not. Every other figure
-               on this page is unaffected.</p>`}</div>
-        <div class="card"><h2>Time on screen</h2>
-          <p class="hint">Wall time the screen was visible. Compare against CPU above:
-            a screen high here but low there was idle, not expensive.</p>
-          <div id="scb2"></div></div>
+      ${/* Launch metrics come from the run record, not from screen markers, so an
+            uninstrumented app still has them. Gating this on `instrumented`
+            would hide the half of the page that does work for exactly the apps
+            -- competitors -- where it is the only half available. */''
+        }${d && !d.error && SCR.view === 'launch' ? launchViewHTML(scrRun) : ''}
+      ${d && d.instrumented && SCR.view === 'usage' ? `
+        ${stackViewHTML(d)}
         <div class="card"><h2>Screens</h2>
+          <p class="hint">Select a row to chart every visit to that screen separately.
+            <b>Depth</b> is how far down the navigation stack the screen sat; a screen that is
+            cheap on its own can still be expensive three deep, because everything beneath it
+            is still alive.</p>
           <div class="scroll"><table>
-            <thead><tr><th>Route</th><th class="num">Visits</th><th class="num">Total ms</th>
+            <thead><tr><th>Route</th><th>Rendered by</th><th class="num">Depth</th><th class="num">Visits</th><th class="num">Total ms</th>
               <th class="num">CPU ms</th><th class="num">CPU % of wall</th>
               <th class="num">Slow frames</th><th class="num">Worst RAM growth</th></tr></thead>
             <tbody>${d.screen_summary.map(r => {
               const cpuPct = r.total_ms ? (r.total_cpu_ms / r.total_ms * 100) : null;
-              return `<tr>
-                <td>${esc(r.route)}</td>
+              const isOpen = SCR.open === r.route;
+              return `<tr class="rowbtn${isOpen ? ' cur' : ''}" data-scrrow="${esc(r.route)}">
+                <td>${r.step ? '<span style="color:var(--text-secondary)">\u21b3 </span>' : ''}<span style="color:var(--text-secondary)">${isOpen ? '\u25be' : '\u25b8'}</span> ${esc(r.route)}</td>
+                <td><span class="tag">${esc(r.kind_label || 'Unknown')}</span></td>
+                <td class="num" title="${esc((r.depths || []).join(', '))}">${
+                  r.depth_label || '\u2013'}</td>
                 <td class="num">${r.visits}</td>
                 <td class="num">${fmt(r.total_ms, 1)}</td>
                 <td class="num">${fmt(r.total_cpu_ms, 1)}</td>
                 <td class="num" style="color:var(--text-secondary)">${cpuPct == null ? '–' : fmt(cpuPct, 1) + '%'}</td>
                 <td class="num ${(r.slow_frame_pct || 0) > 5 ? 'up' : ''}">${r.slow_frame_pct == null ? '–' : fmt(r.slow_frame_pct, 2) + '%'}</td>
                 <td class="num ${(r.max_rss_delta_mb || 0) > 10 ? 'up' : ''}">${r.max_rss_delta_mb == null ? '–' : fmt(r.max_rss_delta_mb, 1) + ' MB'}</td>
-              </tr>`; }).join('')}</tbody>
+              </tr>${isOpen ? `<tr><td colspan="9" style="background:var(--surface-1)">
+                <div class="ctl" style="margin:4px 0 10px">
+                  <span class="flabel">Chart</span><div id="scrmetric"></div>
+                  <span class="count">${r.visits} visit${r.visits === 1 ? '' : 's'}</span>
+                  ${(r.visit_list || []).some(v => Object.values(v.outlier || {}).some(Boolean))
+                    ? '<span class="pill fail">has outliers</span>' : ''}
+                </div>
+                <div id="scrvisits"></div>
+                <p class="hint">One bar per visit, in the order they happened. The dashed line is
+                  the mean; a bar in red sits more than two standard deviations from it, which is
+                  the visit worth opening. A rising slope across visits is state accumulating
+                  between them.</p>
+              </td></tr>` : ''}`; }).join('')}</tbody>
           </table></div>
           <p class="hint" style="margin-top:9px">RAM growth is min-to-peak within a single
             visit. A screen that repeatedly leaves RAM higher than it found it is the
             orphaned-surface signature the shell architecture names.</p>
+          <p class="hint">Indented rows (\u21b3) are steps <em>inside</em> the route above them,
+            so their time is already counted in the parent and the column does not sum.
+            <b>Rendered by</b> says what drew the screen \u2014 the comparison worth making in a
+            hybrid app is React Native against Compose.</p>
         </div>
         ${d.navigations.length ? `<div class="card"><h2>Transitions</h2>
           <p class="hint">Cost of the navigation itself, separate from the screens either side.</p>
@@ -1577,13 +1871,35 @@ function render() {
       if (sel) sel.onchange = () => { SCR.runId = +sel.value; SCR.data = null; render(); };
       const lb = $('#scrload');
       if (lb) lb.onclick = () => loadScreens(SCR.runId).then(render);
-      if (d && d.instrumented) {
-        const b1 = $('#scb1'), b2 = $('#scb2');
-        if (b1 && d.screen_summary.some(r => (r.total_cpu_ms || 0) > 0))
-          b1.appendChild(screenBars(d.screen_summary, 'total_cpu_ms', ' ms',
-                                    'CPU ms by screen', 'var(--s2)'));
-        if (b2) b2.appendChild(screenBars([...d.screen_summary].sort((x, y) => y.total_ms - x.total_ms),
-                                          'total_ms', ' ms', 'time on screen (ms)', 'var(--s1)'));
+      const vb = $('#scrview');
+      if (vb) {
+        vb.innerHTML = [['usage', 'Screen usage'], ['launch', 'Launch metrics']]
+          .map(([v, l]) => `<button class="seg${SCR.view === v ? ' on' : ''}" data-scrview="${v}">${l}</button>`).join('');
+        vb.querySelectorAll('.seg').forEach(b => b.onclick = () => {
+          SCR.view = b.dataset.scrview; render();
+        });
+      }
+      if (d && d.instrumented && SCR.view === 'usage') {
+        document.querySelectorAll('[data-scrrow]').forEach(tr => tr.onclick = () => {
+          const route = tr.dataset.scrrow;
+          SCR.open = SCR.open === route ? null : route;
+          render();
+        });
+        const mb = $('#scrmetric');
+        const row = (d.screen_summary || []).find(r => r.route === SCR.open);
+        if (mb && row) {
+          mb.innerHTML = Object.entries(METRICS)
+            .map(([k, m]) => `<button class="seg${SCR.metric === k ? ' on' : ''}" data-scrm="${k}">${m.label}</button>`).join('');
+          mb.querySelectorAll('.seg').forEach(b => b.onclick = e => {
+            e.stopPropagation(); SCR.metric = b.dataset.scrm; render();
+          });
+        }
+        const vis = $('#scrvisits');
+        if (vis && row) vis.appendChild(visitBars(row, SCR.metric));
+        // The detail row sits inside a clickable row, so stop clicks in it from
+        // collapsing the thing the user is trying to read.
+        [mb, vis].forEach(n => n && n.closest('td') &&
+          n.closest('td').addEventListener('click', e => e.stopPropagation()));
       }
       if (!d && !SCR.loading && SCR.runId != null) loadScreens(SCR.runId).then(render);
     });
