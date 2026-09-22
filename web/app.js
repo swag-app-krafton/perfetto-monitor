@@ -37,6 +37,9 @@ let CAP = { device: null, loading: false, pkg: '', cold: true, duration: 8000,
             q: '', job: null, polling: false };
 let STR = { list: null, open: null, detail: null, job: null, polling: false,
             pkg: '', sessions: 5, cold: true, duration: 8000, q: '' };
+// The installed list is long (140+ on a real phone); cap what is rendered but
+// say so, rather than silently truncating.
+const MAN_LIST_LIMIT = 60;
 let MAN = { status: null, pkg: 'com.swagpay', cold: false, job: null,
             polling: false, since: null, q: '' };
 let SCR = { runId: null, data: null, loading: false };
@@ -787,6 +790,15 @@ function memBudget(key) {
 }
 
 function tileHTML(k, v, unit, budget, prevV, d) {
+  // A startup metric of exactly 0 means it could not be measured, not that it
+  // was instant. Rendering it as a value -- and worse, as a large improvement
+  // over the previous run -- presents a failed measurement as a win.
+  if ((v === 0 || v == null) && /camera frame|initial display/i.test(k)) {
+    return `<div class="tile">
+      <div class="k">${esc(k)}</div>
+      <div class="v" style="font-size:19px;color:var(--text-muted)">not measured</div>
+      <div class="m">no startup marker in this trace</div></div>`;
+  }
   const bad = budget != null && v > budget;
   const warnb = budget != null && v > budget * 0.9 && !bad;
   const dl = (a, b) => {
@@ -1241,15 +1253,18 @@ function render() {
               <select id="strdur" ${busy ? 'disabled' : ''} aria-label="Duration per session">
                 ${[5000, 8000, 10000, 15000].map(v => `<option value="${v}"${STR.duration === v ? ' selected' : ''}>${v / 1000}s</option>`).join('')}
               </select>
-              <span class="count">~${Math.round(STR.sessions * (STR.duration + 4000) / 1000)}s total</span>
+              <span class="count">~${Math.round(STR.sessions * (STR.duration + 4000) / 1000)}s total
+                \u00b7 ${pkgs.length} of ${installed.length} apps</span>
             </div>
-            <div class="scroll" style="max-height:230px"><table><tbody>
-              ${pkgs.slice(0, 40).map(p => `<tr>
-                <td>${esc(p.name || p.pkg)}</td>
+            <div class="scroll" style="max-height:300px"><table>
+              <thead><tr><th>App</th><th>Package</th><th></th></tr></thead>
+              <tbody>${pkgs.slice(0, MAN_LIST_LIMIT).map(p => `<tr>
+                <td>${esc(p.name || p.pkg)}${p.instrumented ? ' <span class="tag">instrumented</span>' : ''}</td>
                 <td style="color:var(--text-secondary);font-size:12px">${esc(p.pkg)}</td>
-                <td><button class="mini-btn" data-strpkg="${esc(p.pkg)}" ${busy ? 'disabled' : ''}>${busy && STR.pkg === p.pkg ? 'Running…' : 'Stress test'}</button></td>
-              </tr>`).join('') || '<tr><td class="empty">No installed apps match that search.</td></tr>'}
-            </tbody></table></div>`}
+                <td><button class="mini-btn" data-strpkg="${esc(p.pkg)}" ${busy ? 'disabled' : ''}>${busy && STR.pkg === p.pkg ? 'Running\u2026' : 'Stress test'}</button></td>
+              </tr>`).join('') || '<tr><td colspan="3" class="empty">No installed apps match that search.</td></tr>'}</tbody>
+            </table></div>
+            ${pkgs.length > MAN_LIST_LIMIT ? `<p class="hint" style="margin-top:9px">Showing ${MAN_LIST_LIMIT} of ${pkgs.length} matches. Narrow the search to see the rest.</p>` : ''}`}
         </div>
 
         ${job ? `<div class="card" style="${job.state === 'error' ? 'border-color:var(--crit)' : job.state === 'done' ? 'border-color:var(--good)' : ''}">
@@ -1396,20 +1411,28 @@ function render() {
           ${!st.recording ? `
             <div class="ctl" style="margin-bottom:10px">
               <span class="flabel">App</span>
-              <input id="manpkg" type="search" value="${esc(MAN.pkg)}" aria-label="Package to trace"
-                     style="min-width:280px" ${busy ? 'disabled' : ''}>
+              <input id="manpkg" type="text" value="${esc(MAN.pkg)}" aria-label="Package to trace"
+                     style="min-width:300px" ${busy ? 'disabled' : ''}>
               <span class="flabel">Start</span><div id="mancold"></div>
               <button id="manstart" ${busy ? 'disabled' : ''}>Start tracing</button>
             </div>
             <p class="hint">Cold force-stops the app and launches it once tracing is live.
-              Warm traces whatever is already running — open the app yourself first.</p>
-            <div class="scroll" style="max-height:190px"><table><tbody>
-              ${pkgs.slice(0, 30).map(p => `<tr>
-                <td>${esc(p.name || p.pkg)}</td>
+              Warm traces whatever is already running \u2014 open the app yourself first.</p>
+            <div class="ctl" style="margin:14px 0 10px">
+              <input id="mansearch" type="search" placeholder="Search installed apps\u2026"
+                     value="${esc(MAN.q)}" aria-label="Search installed apps"
+                     style="min-width:260px" ${busy ? 'disabled' : ''}>
+              <span class="count">${pkgs.length} of ${installed.length} installed</span>
+            </div>
+            <div class="scroll" style="max-height:300px"><table>
+              <thead><tr><th>App</th><th>Package</th><th></th></tr></thead>
+              <tbody>${pkgs.slice(0, MAN_LIST_LIMIT).map(p => `<tr class="${MAN.pkg === p.pkg ? 'cur' : ''}">
+                <td>${esc(p.name || p.pkg)}${p.instrumented ? ' <span class="tag">instrumented</span>' : ''}</td>
                 <td style="color:var(--text-secondary);font-size:12px">${esc(p.pkg)}</td>
-                <td><button class="mini-btn" data-manpick="${esc(p.pkg)}">Use</button></td>
-              </tr>`).join('') || '<tr><td class="empty">No installed apps match.</td></tr>'}
-            </tbody></table></div>`
+                <td><button class="mini-btn" data-manpick="${esc(p.pkg)}" ${busy ? 'disabled' : ''}>${MAN.pkg === p.pkg ? 'Selected' : 'Use'}</button></td>
+              </tr>`).join('') || '<tr><td colspan="3" class="empty">No installed apps match that search.</td></tr>'}</tbody>
+            </table></div>
+            ${pkgs.length > MAN_LIST_LIMIT ? `<p class="hint" style="margin-top:9px">Showing ${MAN_LIST_LIMIT} of ${pkgs.length} matches. Narrow the search to see the rest.</p>` : ''}`
           : `<div class="ctl">
               <button id="manstop" ${busy ? 'disabled' : ''}>${busy ? 'Stopping…' : 'Stop and analyse'}</button>
               <button id="manabort" class="mini-btn" ${busy ? 'disabled' : ''}>Discard</button>
@@ -1433,7 +1456,13 @@ function render() {
         const rb = $('#manrecheck');
         if (rb) rb.onclick = () => loadManualStatus(true).then(render);
         const pk = $('#manpkg');
-        if (pk) pk.oninput = () => { MAN.pkg = pk.value; };
+        if (pk) pk.oninput = () => { MAN.pkg = pk.value.trim(); };
+        const sr = $('#mansearch');
+        if (sr) sr.oninput = () => {
+          MAN.q = sr.value; clearTimeout(sr._t);
+          sr._t = setTimeout(() => { render(); const n = $('#mansearch');
+            if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 200);
+        };
         const cb = $('#mancold');
         if (cb) {
           cb.innerHTML = [[true, 'Cold'], [false, 'Warm']].map(([v, l]) =>
