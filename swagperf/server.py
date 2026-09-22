@@ -1,5 +1,5 @@
 """Local dashboard server: static page + JSON history API."""
-import json, os
+import json, os, tempfile, threading, time
 from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from . import store
@@ -76,16 +76,83 @@ def _payload(limit=100):
             "signed_metrics": sorted(store.SIGNED_METRICS)}
 
 
+# ----------------------------------------------------------- live marker view
+
+# Pulling and parsing a partial trace costs seconds on a long session, and the
+# dashboard polls while recording. Serve a cached answer inside this window so
+# an impatient poll (or several open tabs) cannot queue up overlapping adb
+# pulls of a file that is hundreds of megabytes by then.
+_LIVE_TTL_S = 4.0
+_live_cache = {"at": 0.0, "value": None}
+_live_lock = threading.Lock()
+
+
+def _live_markers():
+    """Markers seen so far in the in-progress manual session.
+
+    Snapshotting is best-effort by design: the session keeps recording whatever
+    happens here, so a failed pull or an unparseable partial trace degrades to
+    an empty marker list with a note rather than disturbing the capture.
+    """
+    from .capture import manual_snapshot, manual_status
+    from .screens import live_markers
+
+    st = manual_status()
+    if not st.get("recording"):
+        return {"recording": False, "events": [], "counts": {}}
+
+    now = time.time()
+    with _live_lock:
+        c = _live_cache["value"]
+        if c and (now - _live_cache["at"]) < _LIVE_TTL_S:
+            return {**c, "cached": True}
+
+        tmp = os.path.join(tempfile.gettempdir(), "swagperf_live.pftrace")
+        try:
+            manual_snapshot(tmp)
+            data = live_markers(tmp)
+            out = {"recording": True, **data}
+        except Exception as e:
+            # A partial trace whose last window is half-written parses as a
+            # hard error. That is expected mid-drain, not a failure worth
+            # breaking the page over -- report it and let the next poll retry.
+            out = {"recording": True, "events": [], "counts": {},
+                   "note": f"markers unavailable this poll: {e}"}
+        _live_cache["at"] = time.time()
+        _live_cache["value"] = out
+        return out
+
+
 class H(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=os.path.abspath(WEB), **kw)
+
+    def send_response(self, code, *a):
+        # The dashboard is edited and reloaded constantly, and this is a local
+        # single-user server, so caching buys nothing and costs real confusion:
+        # SimpleHTTPRequestHandler sends Last-Modified and answers a browser's
+        # If-Modified-Since with 304, which silently served a stale index.html
+        # long after its CSS had changed -- the red titles were in the file but
+        # never on the page. Dropping the request's If-Modified-Since (below)
+        # stops the 304, and this no-store header stops the browser reusing a
+        # response it already holds, so an edit is one ordinary reload away.
+        super().send_response(code, *a)
+        self.send_header("Cache-Control", "no-store, must-revalidate")
+
+    def send_head(self):
+        # Static files only reach here, so this is where the conditional-GET
+        # negotiation happens: drop the browser's validators so the base class
+        # cannot answer 304 from a file it thinks is unchanged.
+        for h in ("If-Modified-Since", "If-None-Match"):
+            if h in self.headers:
+                del self.headers[h]
+        return super().send_head()
 
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
@@ -104,11 +171,19 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(store.compare(run, base))
             except ValueError as e:
                 return self._json({"error": str(e)}, 404)
+        if u.path.startswith("/api/tokens"):
+            from . import tokens as _tokens
+            try:
+                return self._json(_tokens.payload(os.getcwd()))
+            except Exception as e:
+                return self._json({"error": str(e), "sessions": []}, 500)
         if u.path.startswith("/api/device"):
             return self._json(_device_payload())
         if u.path.startswith("/api/manual/status"):
             from .capture import manual_status
             return self._json(manual_status())
+        if u.path.startswith("/api/manual/live"):
+            return self._json(_live_markers())
         if u.path.startswith("/api/screens"):
             from .screens import extract_screens
             import os as _os
@@ -167,7 +242,7 @@ class H(SimpleHTTPRequestHandler):
         if u.path == "/api/manual/start":
             from .capture import manual_start
             try:
-                r = manual_start(pkg=(payload.get("pkg") or "com.swagpay").strip(),
+                r = manual_start(pkg=(payload.get("pkg") or "com.swag.pay").strip(),
                                  cold=bool(payload.get("cold")))
             except RuntimeError as e:
                 return self._json({"error": str(e)}, 409)

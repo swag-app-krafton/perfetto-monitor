@@ -79,7 +79,7 @@ def launch(pkg, serial=None):
         raise RuntimeError(f"could not launch {pkg}: {(p.stderr or p.stdout)[:200]}")
 
 
-def capture(out_path, *, pkg="com.swagpay", duration_ms=10000, serial=None,
+def capture(out_path, *, pkg="com.swag.pay", duration_ms=10000, serial=None,
             cold=False, launch_after_ms=600):
     """Record a trace. With cold=True the app is force-stopped first and launched
     just after tracing starts, which is the only way to measure a real cold start.
@@ -134,11 +134,20 @@ MANUAL_REMOTE = "/data/misc/perfetto-traces/swagperf_manual.pftrace"
 
 # No `duration_ms` here: the session runs until stopped. A long-but-finite
 # duration would silently truncate a long manual session and waste buffer on a
-# short one. The buffer is a ring, so an over-long session keeps the most
-# recent data rather than failing.
+# short one. The ring buffer is drained to the on-device file every few
+# seconds (see write_into_file below), so a long session accumulates in the
+# file instead of overwriting itself in memory.
 MANUAL_CONFIG = """
 buffers: {{ size_kb: 262144 fill_policy: RING_BUFFER }}
 buffers: {{ size_kb: 8192 fill_policy: DISCARD }}
+# `--detach` requires write_into_file: a detached session outlives the adb
+# command that started it, so there is no pipe left to stream the trace back
+# through -- traced has to write it to MANUAL_REMOTE itself. Perfetto rejects
+# the config outright without it. Each periodic drain appends to the file, so
+# the ring buffer only has to hold one drain window and the full session is
+# preserved on device.
+write_into_file: true
+file_write_period_ms: 2500
 data_sources: {{
   config {{
     name: "linux.ftrace"
@@ -181,7 +190,7 @@ def manual_status(serial=None):
     return {"device": True, "serial": serial, "recording": p.returncode == 0}
 
 
-def manual_start(*, pkg="com.swagpay", serial=None, cold=False):
+def manual_start(*, pkg="com.swag.pay", serial=None, cold=False):
     """Begin an open-ended trace the user drives by hand.
 
     With cold=True the app is force-stopped and launched once tracing is live,
@@ -261,3 +270,34 @@ def manual_abort(serial=None):
     subprocess.run(["adb", "-s", serial, "shell", "rm", "-f", MANUAL_REMOTE],
                    capture_output=True)
     return True
+
+
+def manual_snapshot(out_path, *, serial=None):
+    """Copy the in-progress manual trace off the device without stopping it.
+
+    The manual config sets `write_into_file` with `file_write_period_ms`, so
+    traced is already appending completed windows to MANUAL_REMOTE while the
+    session records. Pulling that file mid-session therefore yields a valid,
+    if truncated, trace -- which is exactly what a live marker view needs.
+
+    The session is left untouched: no attach, no stop, no flush. A pull is a
+    plain file read, so the worst case is that the newest couple of seconds are
+    still in the ring buffer and not yet on disk. Markers appear a beat late
+    rather than the session being disturbed to fetch them, which is the right
+    trade for a dashboard that refreshes every few seconds anyway.
+    """
+    devs = devices()
+    if not devs:
+        raise RuntimeError("No adb device connected.")
+    serial = serial or devs[0]
+
+    if not manual_status(serial)["recording"]:
+        raise RuntimeError("No manual trace is recording.")
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    pull = subprocess.run(["adb", "-s", serial, "pull", MANUAL_REMOTE, out_path],
+                          capture_output=True, text=True, timeout=180)
+    if pull.returncode != 0:
+        raise RuntimeError(f"failed to pull the partial trace: "
+                           f"{(pull.stderr or pull.stdout)[:300]}")
+    return out_path
