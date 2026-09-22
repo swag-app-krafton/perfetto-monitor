@@ -158,7 +158,7 @@ def main(argv=None):
 
     c = sub.add_parser("capture", help="capture a trace from a connected device")
     c.add_argument("-o", "--out", default=None)
-    c.add_argument("--pkg", default="com.swagpay")
+    c.add_argument("--pkg", default="com.swag.pay")
     c.add_argument("--duration-ms", type=int, default=10000)
     c.add_argument("--cold", action="store_true",
                    help="force-stop then launch inside the trace window (real cold start)")
@@ -170,7 +170,7 @@ def main(argv=None):
     mn = sub.add_parser("manual", help="drive the app by hand; start/stop tracing yourself")
     mnx = mn.add_subparsers(dest="mcmd", required=True)
     mst = mnx.add_parser("start", help="begin an open-ended trace")
-    mst.add_argument("--pkg", default="com.swagpay")
+    mst.add_argument("--pkg", default="com.swag.pay")
     mst.add_argument("--cold", action="store_true",
                      help="force-stop and launch the app once tracing is live")
     msp = mnx.add_parser("stop", help="stop tracing, pull and analyse the trace")
