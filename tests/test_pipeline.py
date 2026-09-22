@@ -452,6 +452,248 @@ class TestScreenMetrics(unittest.TestCase):
             self.assertIsNotNone(n["to"])
             self.assertLess(n["max_ms"], 200.0)
 
+    def test_unclosed_screen_slice_is_still_a_visit(self):
+        """The last screen of a manual session never closes.
+
+        Perfetto stores dur = -1 for a slice whose end event never arrived,
+        which is the normal shape of whichever screen was on display when
+        tracing stopped. Discarding those reported "0 visits" for a session
+        that plainly had one, so the visit must survive, be clamped to the end
+        of the trace, and be flagged as open-ended rather than silently
+        presented as a completed span.
+        """
+        from swagperf.screens import screen_visits
+
+        class FakeTP:
+            """Minimal stand-in: screens.py only ever calls _rows(tp, sql)."""
+
+        import swagperf.screens as sc
+        real_rows = sc._rows
+        calls = []
+
+        def fake_rows(tp, sql):
+            calls.append(sql)
+            if "max(ts + max(dur, 0))" in sql:
+                return [{"e": 5_000_000_000}]
+            if "like 'screen:%'" in sql:
+                return [{"sid": 1, "nm": "screen:Onboarding",
+                         "ts": 1_000_000_000, "dur": -1, "upid": 7}]
+            if "sched_slice" in sql:
+                return [{"cpu_ns": 400_000_000}]
+            if "mem.rss" in sql:
+                return [{"lo": 100 * 1024 * 1024, "hi": 150 * 1024 * 1024}]
+            return [{"n": 0, "slow": 0}]
+
+        sc._rows = fake_rows
+        try:
+            visits = screen_visits(FakeTP())
+        finally:
+            sc._rows = real_rows
+
+        self.assertEqual(len(visits), 1)
+        v = visits[0]
+        self.assertEqual(v["route"], "Onboarding")
+        self.assertTrue(v["open_ended"])
+        # Clamped to trace end: 5s - 1s = 4s, not left at -1.
+        self.assertAlmostEqual(v["duration_ms"], 4000.0, delta=1.0)
+        self.assertEqual(v["cpu_ms"], 400.0)
+        self.assertEqual(v["rss"]["delta_mb"], 50.0)
+
+    def test_live_markers_timeline_and_current_screen(self):
+        """The live feed reports each kind and which screen is still open."""
+        from swagperf.screens import live_markers
+        d = live_markers(self.path)
+        self.assertEqual(d["counts"].get("screen"), len(self.flow))
+        self.assertTrue(d["counts"].get("action"))
+        kinds = {e["kind"] for e in d["events"]}
+        self.assertTrue(kinds <= {"screen", "action", "nav", "step"})
+        # The synthetic flow closes every screen, so nothing is left open.
+        self.assertIsNone(d["current_screen"])
+        # Timeline is ordered and zeroed on the first marker.
+        ats = [e["at_ms"] for e in d["events"]]
+        self.assertEqual(ats, sorted(ats))
+        self.assertEqual(ats[0], 0.0)
+
+    def test_screen_kind_is_parsed_from_the_marker(self):
+        """A hybrid app must say what rendered each screen.
+
+        The kind rides as a `#suffix` on the slice name so the extractor's
+        prefix matching is unchanged. An untagged name must still parse, or a
+        trace from an older build would lose every visit rather than just the
+        tag.
+        """
+        from swagperf.screens import parse_route
+        rn = parse_route("Onboarding.otp#rn")
+        self.assertEqual(rn["route"], "Onboarding.otp")
+        self.assertEqual(rn["parent"], "Onboarding")
+        self.assertEqual(rn["step"], "otp")
+        self.assertEqual(rn["kind_label"], "React Native")
+
+        compose = parse_route("Home#compose")
+        self.assertEqual(compose["route"], "Home")
+        self.assertIsNone(compose["step"])
+        self.assertEqual(compose["kind_label"], "Compose")
+
+        legacy = parse_route("Home")
+        self.assertEqual(legacy["route"], "Home")
+        self.assertEqual(legacy["kind"], "unknown")
+
+    def test_substeps_are_not_added_into_their_parent(self):
+        """A sub-screen runs *inside* its parent, so summing both double-counts.
+
+        An onboarding flow whose steps were added to the route containing them
+        would report roughly twice its real wall time, which is worse than not
+        reporting the steps at all.
+        """
+        from swagperf.screens import screen_summary, parse_route
+
+        def visit(raw, ms, cpu):
+            return {**parse_route(raw), "duration_ms": ms, "cpu_ms": cpu,
+                    "frames": 0, "slow_frames": 0, "rss": None}
+
+        visits = [
+            visit("Onboarding#rn", 5000.0, 900.0),
+            visit("Onboarding.mobile#rn", 2000.0, 300.0),
+            visit("Onboarding.otp#rn", 3000.0, 600.0),
+            visit("Home#native_view", 4000.0, 1200.0),
+        ]
+
+        full = screen_summary(visits)
+        self.assertEqual({r["route"] for r in full},
+                         {"Onboarding", "Onboarding.mobile", "Onboarding.otp",
+                          "Home"})
+        otp = next(r for r in full if r["route"] == "Onboarding.otp")
+        self.assertEqual(otp["step"], "otp")
+        self.assertEqual(otp["kind_label"], "React Native")
+
+        top = screen_summary(visits, include_substeps=False)
+        self.assertEqual({r["route"] for r in top}, {"Onboarding", "Home"})
+        self.assertEqual(sum(r["total_ms"] for r in top), 9000.0)
+
+    def test_visits_are_kept_individually_with_spread_and_outliers(self):
+        """A total cannot distinguish steady visits from one pathological one.
+
+        Twelve even visits and eleven cheap ones plus a runaway twelfth sum to
+        the same number, and it is nearly always the twelfth that is the bug.
+        Each visit is therefore kept, with a mean to compare against and a flag
+        on anything more than two standard deviations away.
+        """
+        from swagperf.screens import screen_summary, parse_route
+
+        def visit(ms, cpu):
+            return {**parse_route("Home#compose"), "duration_ms": ms,
+                    "cpu_ms": cpu, "cpu_pct_of_wall": round(cpu / ms * 100, 1),
+                    "frames": 0, "slow_frames": 0, "rss": None}
+
+        # Eleven steady visits and one that costs an order of magnitude more.
+        visits = [visit(1000.0, 200.0) for _ in range(11)] + [visit(1000.0, 5000.0)]
+        home = screen_summary(visits)[0]
+
+        self.assertEqual(home["visits"], 12)
+        self.assertEqual(len(home["visit_list"]), 12)
+        # Order is preserved, so a trend across visits stays visible.
+        self.assertEqual([v["index"] for v in home["visit_list"]], list(range(1, 13)))
+
+        cpu = home["stats"]["cpu_ms"]
+        self.assertEqual(cpu["min"], 200.0)
+        self.assertEqual(cpu["max"], 5000.0)
+        self.assertGreater(cpu["stdev"], 0)
+
+        flagged = [v["index"] for v in home["visit_list"] if v["outlier"]["cpu_ms"]]
+        self.assertEqual(flagged, [12])
+
+    def test_a_single_visit_has_no_spread_rather_than_zero_spread(self):
+        """One visit cannot deviate from itself.
+
+        Reporting a standard deviation of 0 would read as "perfectly
+        consistent" instead of "nothing to compare against", and would make
+        every later comparison against it meaningless.
+        """
+        from swagperf.screens import screen_summary, parse_route
+        only = [{**parse_route("Pay#compose"), "duration_ms": 500.0,
+                 "cpu_ms": 120.0, "cpu_pct_of_wall": 24.0,
+                 "frames": 0, "slow_frames": 0, "rss": None}]
+        row = screen_summary(only)[0]
+        self.assertIsNone(row["stats"]["cpu_ms"]["stdev"])
+        self.assertFalse(row["visit_list"][0]["outlier"]["cpu_ms"])
+
+    def test_navigation_stack_is_replayed_from_push_pop_and_reset(self):
+        """The stack cannot be read from slice nesting, so it is replayed.
+
+        `ScreenTrace` keeps a single slot, so screen slices are strictly
+        sequential and never overlap -- there is no nesting to read a depth
+        from. The coordinator's nav markers are the stack operations, so
+        replaying them in order rebuilds the same back stack the app held.
+        """
+        from swagperf.screens import screen_stack
+        import swagperf.screens as sc
+
+        events = [
+            ("screen:Home#native_view", 0),
+            ("nav:open-Send", 100), ("screen:Send#compose", 101),
+            ("nav:open-Pay", 200), ("screen:Pay#compose", 201),
+            ("nav:back-Send", 300), ("screen:Send#compose", 301),
+            ("nav:tab-Store", 400), ("screen:Store#compose", 401),
+        ]
+        real = sc._rows
+        sc._rows = lambda tp, sql: [{"nm": n, "ts": t} for n, t in events]
+        try:
+            out = screen_stack(object())
+        finally:
+            sc._rows = real
+
+        self.assertEqual([(e["route"], e["depth"]) for e in out],
+                         [("Home", 1), ("Send", 2), ("Pay", 3), ("Send", 2),
+                          ("Store", 1)])
+        pay = out[2]
+        self.assertEqual(pay["stack"], ["Home", "Send", "Pay"])
+        # What is still alive underneath is the part a per-screen number cannot
+        # show, and is usually the reason RAM is high on a cheap screen.
+        self.assertEqual(pay["beneath"], ["Home", "Send"])
+        # A tab reset clears the stack rather than deepening it.
+        self.assertEqual(out[4]["stack"], ["Store"])
+
+    def test_back_never_pops_the_last_screen(self):
+        """A trace can begin mid-session, with a back and no recorded push.
+
+        Popping the root would leave an empty stack and a depth of zero, which
+        is not a state the app can be in -- something is always on screen.
+        """
+        from swagperf.screens import screen_stack
+        import swagperf.screens as sc
+        events = [("nav:back-Home", 0), ("screen:Home#native_view", 1),
+                  ("nav:back-Home", 2), ("screen:Home#native_view", 3)]
+        real = sc._rows
+        sc._rows = lambda tp, sql: [{"nm": n, "ts": t} for n, t in events]
+        try:
+            out = screen_stack(object())
+        finally:
+            sc._rows = real
+        self.assertTrue(all(e["depth"] >= 1 for e in out))
+
+    def test_stack_summary_groups_cost_by_depth(self):
+        """Depth is the grouping that explains a cheap screen holding RAM."""
+        from swagperf.screens import stack_summary, parse_route
+
+        def visit(raw, ms, cpu, stack):
+            return {**parse_route(raw), "duration_ms": ms, "cpu_ms": cpu,
+                    "frames": 0, "slow_frames": 0,
+                    "rss": {"min_mb": 400.0, "peak_mb": 480.0, "delta_mb": 80.0},
+                    "depth": len(stack), "stack": stack, "beneath": stack[:-1]}
+
+        rows = stack_summary([
+            visit("Home#native_view", 1000.0, 500.0, ["Home"]),
+            visit("Pay#compose", 1000.0, 100.0, ["Home", "Send", "Pay"]),
+            visit("Pay#compose", 1000.0, 120.0, ["Home", "Send", "Pay"]),
+        ])
+        self.assertEqual([r["depth"] for r in rows], [1, 3])
+        deep = rows[1]
+        self.assertEqual(deep["visits"], 2)
+        self.assertEqual(dict(deep["beneath"]), {"Home": 2, "Send": 2})
+        # Low CPU with high resident memory is the signature worth surfacing.
+        self.assertEqual(deep["mean_cpu_pct"], 11.0)
+        self.assertEqual(deep["peak_rss_mb"], 480.0)
+
     def test_uninstrumented_trace_says_so_rather_than_reporting_zeros(self):
         from swagperf.synth_android import gen_android_trace
         from swagperf.screens import extract_screens
