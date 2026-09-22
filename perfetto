@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Convenience alias for perfetto_init, so `perfetto init` and `perfetto` both
+# work alongside `perfetto_init`. The underscore is easy to mistype.
+#
+# Note this shadows Google's own `perfetto` binary if you ever install one on
+# PATH. That binary normally lives on the device, not the host, so the clash is
+# unlikely -- but if you do install it, drop this file and use perfetto_init.
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+# `perfetto init` means the same as a bare `perfetto`: start the dashboard.
+if [ "${1:-}" = "init" ]; then
+    shift
+fi
+exec "$ROOT/perfetto_init" "$@"
