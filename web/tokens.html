@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zalando+Sans+Expanded:wght@500;600;700;800&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Token Consumption</title>
+<style>
+:root{
+  color-scheme:light;
+  --surface-0:#f5f5f5; --surface-1:#ffffff; --surface-2:#ececec;
+  --border:#dcdcdc; --border-strong:#bcbcbc;
+  --text-primary:#000000; --text-secondary:#555555; --text-muted:#777777;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+  --good:#008300; --warn:#eda100; --crit:#e34948;
+  --grid:#e4e4e4; --brand-red:#f9423a;
+  --font-display:'Zalando Sans Expanded','Poppins',sans-serif;
+  --font-ui:'Poppins',ui-sans-serif,-apple-system,BlinkMacSystemFont,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --surface-0:#000000; --surface-1:#141414; --surface-2:#202020;
+  --border:#2e2e2e; --border-strong:#464646;
+  --text-primary:#ffffff; --text-secondary:#b5b5b5; --text-muted:#8a8a8a;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --good:#3ea23e; --warn:#c98500; --crit:#e66767;
+  --grid:#262626; --brand-red:#f9423a;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --surface-0:#000000; --surface-1:#141414; --surface-2:#202020;
+  --border:#2e2e2e; --border-strong:#464646;
+  --text-primary:#ffffff; --text-secondary:#b5b5b5; --text-muted:#8a8a8a;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --good:#3ea23e; --warn:#c98500; --crit:#e66767;
+  --grid:#262626; --brand-red:#f9423a;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-0);color:var(--text-primary);
+  font:14px/1.5 var(--font-ui);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1240px;margin:0 auto;padding:28px 16px 72px}
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+h1{font-family:var(--font-display);font-size:20px;font-weight:700;margin:0;letter-spacing:-.02em;color:var(--brand-red)}
+.sub{color:var(--text-secondary);font-size:13px;margin:0 0 22px}
+.ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button,select{font:inherit;font-size:13px;color:var(--text-primary);background:var(--surface-1);
+  border:1px solid var(--border);border-radius:7px;padding:5px 10px;cursor:pointer}
+button:hover,select:hover{border-color:var(--border-strong)}
+button[aria-pressed="true"]{background:var(--surface-2);border-color:var(--border-strong);font-weight:600}
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:11px;padding:16px 18px;margin-bottom:14px}
+.card h2{font-family:var(--font-display);font-size:14px;font-weight:700;margin:0 0 14px;letter-spacing:-.01em}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px;margin-bottom:14px}
+.tile{background:var(--surface-1);border:1px solid var(--border);border-radius:11px;padding:13px 15px}
+.tile .k{font-size:11.5px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.055em;font-weight:600}
+.tile .v{font-family:var(--font-display);font-size:23px;font-weight:700;margin-top:5px;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+.tile .n{font-size:12px;color:var(--text-muted);margin-top:3px}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--good)}
+.dot.off{background:var(--text-muted)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.dot.on{animation:pulse 2s ease-in-out infinite}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:right;padding:7px 9px;border-bottom:1px solid var(--border)}
+th:first-child,td:first-child{text-align:left}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);font-weight:600}
+td{font-variant-numeric:tabular-nums}
+tbody tr:last-child td{border-bottom:none}
+.bar{height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden;min-width:80px}
+.bar i{display:block;height:100%;border-radius:4px}
+.sw{display:inline-block;width:9px;height:9px;border-radius:2.5px;margin-right:7px;vertical-align:baseline}
+.note{font-size:12.5px;color:var(--text-secondary);margin:0;padding-left:18px}
+.note li{margin:4px 0}
+.mono{font-family:var(--mono);font-size:12px;color:var(--text-muted)}
+.spark{display:block;width:100%;height:70px}
+.empty{color:var(--text-muted);font-size:13px;padding:8px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Token Consumption</h1>
+      <p class="sub" id="sub">Loading transcripts&hellip;</p>
+    </div>
+    <div class="ctl">
+      <span class="live"><span class="dot off" id="dot"></span><span id="livetxt">idle</span></span>
+      <button id="toggle" aria-pressed="true">Auto-refresh</button>
+      <button id="theme">Theme</button>
+    </div>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="card">
+    <h2>Context intake by tool</h2>
+    <div id="buckets"></div>
+    <p class="mono" style="margin:12px 0 0">Fresh (uncached) input + cache writes, charged to the tool call that
+      pulled the content in. Cache reads are excluded: they are mostly the conversation replaying itself.</p>
+  </div>
+
+  <div class="card">
+    <h2>Per-API-call intake <span class="mono" id="turnmeta"></span></h2>
+    <svg class="spark" id="spark" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div class="card">
+    <h2>Sessions</h2>
+    <div id="sessions"></div>
+  </div>
+
+  <div class="card">
+    <h2>What these numbers are</h2>
+    <ul class="note" id="caveats"></ul>
+  </div>
+</div>
+
+<script>
+const F = n => n == null ? "—" : n.toLocaleString();
+const K = n => n == null ? "—" : n >= 1e6 ? (n/1e6).toFixed(2)+"M"
+              : n >= 1e3 ? (n/1e3).toFixed(1)+"k" : String(n);
+const COLORS = {graph:"var(--s3)", read:"var(--s1)", search:"var(--s4)", other:"var(--text-muted)"};
+const LABEL  = {graph:"graphify query", read:"file reads", search:"grep / glob", other:"other tools"};
+
+let auto = true, timer = null, lastSig = "";
+
+function tiles(d){
+  const t = d.all_time.totals, cr = d.all_time.cache_hit_rate;
+  const fresh = t.input + t.cache_write;
+  const el = document.getElementById("tiles");
+  el.innerHTML = [
+    ["Fresh input", K(fresh), "uncached tokens read in"],
+    ["Cache reads", K(t.cache_read), cr + "% hit rate"],
+    ["Output", K(t.output), "generated"],
+    ["API calls", F(d.sessions.reduce((a,s)=>a+s.api_calls,0)), d.all_time.sessions + " sessions"],
+  ].map(([k,v,n]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="n">${n}</div></div>`).join("");
+}
+
+function buckets(d){
+  const b = d.all_time.buckets, el = document.getElementById("buckets");
+  const rows = Object.entries(b).sort((x,y)=>y[1].tokens-x[1].tokens);
+  if(!rows.length){ el.innerHTML = '<p class="empty">No attributed tool calls yet.</p>'; return; }
+  const max = Math.max(...rows.map(r=>r[1].tokens)) || 1;
+  el.innerHTML = `<table><thead><tr><th>Tool</th><th>Tokens</th><th>Calls</th><th>Avg / call</th><th style="width:34%">Share</th></tr></thead><tbody>`
+    + rows.map(([k,v])=>{
+        const c = COLORS[k] || "var(--text-muted)";
+        return `<tr><td><span class="sw" style="background:${c}"></span>${LABEL[k]||k}</td>
+          <td>${F(v.tokens)}</td><td>${F(v.calls)}</td>
+          <td>${v.calls ? F(Math.round(v.tokens/v.calls)) : "—"}</td>
+          <td><div class="bar"><i style="width:${(v.tokens/max*100).toFixed(1)}%;background:${c}"></i></div></td></tr>`;
+      }).join("") + `</tbody></table>`;
+}
+
+function spark(d){
+  const s = d.sessions[0];
+  const svg = document.getElementById("spark");
+  document.getElementById("turnmeta").textContent = s ? "· newest session " + s.session.slice(0,8) : "";
+  if(!s || !s.turns.length){ svg.innerHTML = ""; return; }
+  const v = s.turns.map(t=>t.fresh), n = v.length;
+  const W = 1000, H = 70, max = Math.max(...v, 1), bw = W/n;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = v.map((x,i)=>{
+    const h = Math.max(1, x/max*(H-6));
+    return `<rect x="${(i*bw).toFixed(1)}" y="${(H-h).toFixed(1)}" width="${Math.max(1,bw-1.5).toFixed(1)}" height="${h.toFixed(1)}"
+      fill="var(--s1)" rx="1"><title>call ${i+1}: ${F(x)} fresh tokens</title></rect>`;
+  }).join("") + `<line x1="0" y1="${H-.5}" x2="${W}" y2="${H-.5}" stroke="var(--grid)" stroke-width="1"/>`;
+}
+
+function sessions(d){
+  const el = document.getElementById("sessions");
+  if(!d.sessions.length){ el.innerHTML = '<p class="empty">No sessions with recorded usage.</p>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Session</th><th>Model</th><th>Calls</th><th>Fresh in</th>
+      <th>Cache read</th><th>Out</th><th>Hit rate</th></tr></thead><tbody>`
+    + d.sessions.map(s=>{
+        const t = s.totals;
+        return `<tr><td class="mono">${s.session.slice(0,8)}</td>
+          <td class="mono">${(s.model||"—").replace("claude-","")}</td>
+          <td>${F(s.api_calls)}</td><td>${F(t.input + t.cache_write)}</td>
+          <td>${K(t.cache_read)}</td><td>${F(t.output)}</td><td>${s.cache_hit_rate}%</td></tr>`;
+      }).join("") + `</tbody></table>`;
+}
+
+function render(d){
+  if(d.error){
+    document.getElementById("sub").textContent = d.error;
+    document.getElementById("dot").className = "dot off";
+    return;
+  }
+  const sig = JSON.stringify(d.all_time.totals);
+  const changed = lastSig && sig !== lastSig;
+  lastSig = sig;
+  document.getElementById("sub").textContent =
+    `Real usage from Claude Code session transcripts · ${d.all_time.sessions} sessions · measured, not estimated`;
+  document.getElementById("dot").className = "dot " + (auto ? "on" : "off");
+  document.getElementById("livetxt").textContent = auto ? (changed ? "updated" : "watching") : "paused";
+  tiles(d); buckets(d); spark(d); sessions(d);
+  document.getElementById("caveats").innerHTML = (d.caveats||[]).map(c=>`<li>${c}</li>`).join("");
+}
+
+async function load(){
+  try{
+    const r = await fetch("/api/tokens", {cache:"no-store"});
+    render(await r.json());
+  }catch(e){
+    document.getElementById("sub").textContent = "Cannot reach /api/tokens — is the swagperf server running?";
+    document.getElementById("dot").className = "dot off";
+  }
+}
+
+document.getElementById("toggle").onclick = e => {
+  auto = !auto;
+  e.target.setAttribute("aria-pressed", String(auto));
+  clearInterval(timer);
+  if(auto){ timer = setInterval(load, 4000); load(); }
+  else { document.getElementById("dot").className = "dot off";
+         document.getElementById("livetxt").textContent = "paused"; }
+};
+document.getElementById("theme").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const dark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme:dark)").matches;
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+};
+
+load();
+timer = setInterval(load, 4000);
+</script>
+</body>
+</html>
