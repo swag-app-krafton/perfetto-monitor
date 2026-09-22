@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": ".cursor/hooks/graphify-query-first.py",
+        "matcher": "UserPromptSubmit",
+        "timeout": 3,
+        "failClosed": false
+      }
+    ]
+  }
+}
