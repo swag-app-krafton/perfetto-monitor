@@ -54,6 +54,7 @@ critical path differs per kind.
 cd ~/Documents/perfetto-monitor
 python3 -m venv .venv && ./.venv/bin/pip install perfetto anthropic
 ln -sf "$PWD/perfetto_init" ~/.local/bin/perfetto_init   # optional, puts it on PATH
+ln -sf "$PWD/perfetto" ~/.local/bin/perfetto             # optional, shorter alias
 ```
 
 `trace_processor_shell` downloads automatically on first run.
@@ -62,8 +63,12 @@ ln -sf "$PWD/perfetto_init" ~/.local/bin/perfetto_init   # optional, puts it on 
 
 A launcher so you do not have to remember the venv path or `cd` anywhere:
 
+All three of these are the same command:
+
 ```bash
 perfetto_init                  # start the dashboard on :8787
+perfetto                       # shorter alias
+perfetto init                  # also accepted
 perfetto_init -p 9000          # another port
 perfetto_init stop             # stop it
 perfetto_init doctor           # device, deps, tracing state, history size
