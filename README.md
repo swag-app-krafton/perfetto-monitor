@@ -53,9 +53,37 @@ critical path differs per kind.
 ```bash
 cd ~/Documents/perfetto-monitor
 python3 -m venv .venv && ./.venv/bin/pip install perfetto anthropic
+ln -sf "$PWD/perfetto_init" ~/.local/bin/perfetto_init   # optional, puts it on PATH
 ```
 
 `trace_processor_shell` downloads automatically on first run.
+
+### perfetto_init
+
+A launcher so you do not have to remember the venv path or `cd` anywhere:
+
+```bash
+perfetto_init                  # start the dashboard on :8787
+perfetto_init -p 9000          # another port
+perfetto_init stop             # stop it
+perfetto_init doctor           # device, deps, tracing state, history size
+perfetto_init --help
+```
+
+Anything that is a swagperf subcommand passes straight through:
+
+```bash
+perfetto_init capture --pkg com.phonepe.app --cold --analyse
+perfetto_init stress run --pkg com.swagpay -n 10
+perfetto_init manual start --pkg com.swagpay --cold
+perfetto_init screens traces/session.pftrace
+```
+
+It resolves the project root from the script's own location, following
+symlinks, so it works from any working directory — without that the dashboard
+cannot find `web/` or `history.db` and every relative trace path breaks. Known
+subcommands are detected by asking the CLI's own parser rather than from a
+hardcoded list, so a new swagperf subcommand works without editing the script.
 
 ## Use
 

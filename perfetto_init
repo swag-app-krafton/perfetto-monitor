@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Launcher for the swagperf Perfetto monitor.
+#
+# Resolves the project directory from this script's own location, so it works
+# through a symlink on PATH and from any working directory. Without that, the
+# dashboard cannot find web/ or history.db and every relative trace path breaks.
+set -euo pipefail
+
+# Follow symlinks to find the real project root.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+ROOT="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+cd "$ROOT"
+
+PY="$ROOT/.venv/bin/python"
+PORT="${SWAGPERF_PORT:-8787}"
+
+c_red=$'\033[31m'; c_grn=$'\033[32m'; c_yel=$'\033[33m'; c_dim=$'\033[90m'; c_off=$'\033[0m'
+
+die() { printf '%s\n' "${c_red}error${c_off} $*" >&2; exit 1; }
+
+[ -x "$PY" ] || die "no virtualenv at $ROOT/.venv
+  create it with:  python3 -m venv .venv && ./.venv/bin/pip install perfetto anthropic"
+
+usage() {
+    cat <<USAGE
+perfetto_init — swagperf launcher
+
+  perfetto_init                      start the dashboard (port ${PORT})
+  perfetto_init -p 9000              start on another port
+  perfetto_init --no-open            do not open a browser
+  perfetto_init stop                 stop a running dashboard
+  perfetto_init doctor               check device, deps and tracing state
+  perfetto_init <cmd> [args...]      pass anything else to swagperf
+
+Examples
+  perfetto_init capture --pkg com.phonepe.app --cold --analyse
+  perfetto_init stress run --pkg com.swagpay -n 10
+  perfetto_init manual start --pkg com.swagpay --cold
+  perfetto_init screens traces/session.pftrace
+
+  perfetto_init --help-swagperf      full swagperf command list
+USAGE
+}
+
+pidfile="${TMPDIR:-/tmp}/swagperf-dashboard.pid"
+
+# ---- subcommands this wrapper handles itself ---------------------------------
+case "${1:-}" in
+    -h|--help)
+        usage; exit 0 ;;
+    --help-swagperf)
+        exec "$PY" -m swagperf.cli --help ;;
+    stop)
+        if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+            kill "$(cat "$pidfile")" && rm -f "$pidfile"
+            printf '%s\n' "${c_grn}stopped${c_off} dashboard"
+        else
+            # A dashboard started in the foreground leaves no pidfile, so fall
+            # back to matching the process. pgrep is checked first because
+            # pkill's own exit status counts any match -- including this
+            # script's own command line -- and would report success when
+            # nothing was actually running.
+            rm -f "$pidfile"
+            if pgrep -f "swagperf\.cli dashboard" >/dev/null 2>&1; then
+                pkill -f "swagperf\.cli dashboard" 2>/dev/null || true
+                printf '%s\n' "${c_grn}stopped${c_off} dashboard"
+            else
+                printf '%s\n' "${c_dim}no dashboard running${c_off}"
+            fi
+        fi
+        exit 0 ;;
+    doctor)
+        printf '%s\n' "${c_dim}project${c_off}  $ROOT"
+        "$PY" -c 'import perfetto, anthropic' 2>/dev/null \
+            && printf '%s\n' "${c_grn}ok${c_off}       python deps (perfetto, anthropic)" \
+            || printf '%s\n' "${c_red}missing${c_off}  python deps — ./.venv/bin/pip install perfetto anthropic"
+        if command -v adb >/dev/null 2>&1; then
+            n=$(adb devices 2>/dev/null | sed '1d' | grep -c 'device$' || true)
+            if [ "${n:-0}" -gt 0 ]; then
+                printf '%s\n' "${c_grn}ok${c_off}       adb — $n device(s)"
+                "$PY" - <<'PYEOF'
+from swagperf.capture import device_info, manual_status
+i = device_info()
+print(f"         {i.get('model','?')} ({i.get('device','?')})  Android {i.get('release','?')} / API {i.get('sdk','?')}")
+st = manual_status()
+print("         manual trace: " + ("RECORDING — perfetto_init manual stop" if st.get("recording") else "idle"))
+PYEOF
+            else
+                printf '%s\n' "${c_yel}none${c_off}     adb found, no device — enable USB debugging and reconnect"
+            fi
+        else
+            printf '%s\n' "${c_red}missing${c_off}  adb not on PATH"
+        fi
+        runs=$("$PY" -c "from swagperf import store; c=store.connect(); print(list(c.execute('select count(*) from runs'))[0][0]); c.close()" 2>/dev/null || echo '?')
+        printf '%s\n' "${c_dim}history${c_off}  $runs run(s) in history.db"
+        exit 0 ;;
+esac
+
+# ---- anything that is a swagperf subcommand goes straight through ------------
+# Checked against the CLI's own parser rather than a hardcoded list, so a new
+# swagperf subcommand works here without editing this script.
+if [ $# -gt 0 ] && [[ "$1" != -* ]]; then
+    if "$PY" -c "
+import sys
+from swagperf.cli import main
+import argparse, io, contextlib
+# Ask argparse whether '$1' is a known subcommand, without running it.
+buf = io.StringIO()
+try:
+    with contextlib.redirect_stderr(buf), contextlib.redirect_stdout(buf):
+        main(['$1', '--help'])
+except SystemExit as e:
+    sys.exit(0 if e.code == 0 else 1)
+except Exception:
+    sys.exit(1)
+sys.exit(0)
+" 2>/dev/null; then
+        exec "$PY" -m swagperf.cli "$@"
+    fi
+fi
+
+# ---- default: the dashboard --------------------------------------------------
+open_browser=1
+args=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -p|--port) PORT="$2"; shift 2 ;;
+        --no-open) open_browser=0; shift ;;
+        *) args+=("$1"); shift ;;
+    esac
+done
+
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    die "port $PORT is already in use
+  the dashboard may already be running:  open http://127.0.0.1:$PORT
+  or stop it:                            perfetto_init stop
+  or pick another port:                  perfetto_init -p $((PORT+1))"
+fi
+
+printf '%s\n' "${c_grn}swagperf${c_off} dashboard on ${c_grn}http://127.0.0.1:$PORT${c_off}  ${c_dim}(ctrl-c to stop)${c_off}"
+if [ "${#args[@]}" -gt 0 ]; then
+    printf '%s\n' "${c_dim}passing through: ${args[*]}${c_off}"
+fi
+
+dash=(-m swagperf.cli dashboard -p "$PORT")
+[ "$open_browser" -eq 1 ] || dash+=(--no-open)
+
+"$PY" "${dash[@]}" "${args[@]+"${args[@]}"}" &
+child=$!
+echo "$child" > "$pidfile"
+# Clean up the pidfile on exit so `stop` never chases a dead pid.
+trap 'rm -f "$pidfile"; kill $child 2>/dev/null || true' EXIT INT TERM
+wait $child
