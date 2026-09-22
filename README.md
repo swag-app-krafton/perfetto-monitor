@@ -39,8 +39,8 @@ Each metric maps to a constraint or risk named in the shell architecture.
 | Deferred-work ordering | hard fail | RN / Cronet / analytics / remote config must not run before the camera is usable |
 | Slow / janky frames | 5% / 0.5% | Frame pacing at the CMP × RN interop seam |
 | Thermal drift | 15% | Sustained-scan throttling on mid-range devices |
-| Peak RSS | 320 MB | Three runtimes resident simultaneously |
-| RSS growth | 60 MB | Orphaned RN surfaces — a Surface started and never stopped |
+| Peak RAM usage | 320 MB | Three runtimes resident simultaneously |
+| RAM growth | 60 MB | Orphaned RN surfaces — a Surface started and never stopped |
 | Per-step duration | see `budgets.py` | Trailing-baseline regression per step |
 
 **Two startup paths, two budgets.** A returning user puts the camera on the critical
@@ -198,7 +198,7 @@ Six tabs, one per concern the architecture names:
 | **Overview** | Verdict, all six budgets, every finding, verdict-per-run strip |
 | **Startup** | Time to first camera frame, ordering violations, critical-path composition |
 | **Frame pacing** | Slow/janky frames and thermal drift — kept apart because progressive drift means throttling while scattered spikes mean the interop seam |
-| **Memory** | Peak RSS and Hermes heap on one axis, session growth, JS share of growth |
+| **Memory** | Peak RAM usage and Hermes heap on one axis, session growth, JS share of growth |
 | **Steps** | Per-step table with trailing-baseline deltas; click a step for its history and child breakdown |
 | **Compare** | Diff any two runs, defaulting to the pinned benchmark; child slices expand under any step that got worse |
 | **History** | Every run, sortable on any column, filterable by verdict/device/text; pin a benchmark or jump to a comparison per row |
@@ -445,7 +445,43 @@ attributes cost to named screens and actions:
 ./.venv/bin/python -m swagperf.cli screens traces/session.pftrace
 ```
 
-Or the dashboard's **Screens** tab, which reads any recorded run's trace.
+Or the dashboard's **Screens** tab, which reads any recorded run's trace. That
+tab has two views over the same run:
+
+- **Screen usage** — per-screen attribution plus the navigation stack.
+  Selecting a row charts every visit to that screen separately.
+- **Launch metrics** — the startup steps from the same trace. A manual session
+  records both halves at once, and this view exists because the **Startup** tab
+  reads the *globally* selected run: after a manual capture the launch numbers
+  were a tab switch and a re-pick away, which read as them not being recorded.
+
+### Navigation stack
+
+A per-screen number says what the screen on *top* cost. It cannot say what was
+still held open underneath — and a screen pushed onto two others has not
+replaced them: those are still alive, still holding their views and bitmaps, and
+sometimes still doing work. That is usually the answer when a screen's own work
+looks cheap but RAM is high while it is showing.
+
+The stack cannot be read from slice nesting, because `ScreenTrace` keeps a
+single slot: screen slices are strictly sequential and never overlap. It is
+instead replayed from the coordinator's own markers, which *are* the stack
+operations — `nav:open-` pushes, `nav:back-` pops, `nav:tab-` resets — so the
+result is the same back stack the app held rather than an inference.
+
+Each visit carries its `depth`, `stack` and what was `beneath` it, and the
+Screens tab groups cost by depth. On a real session this surfaced a screen at
+depth 3 running at 11% CPU while 485MB was resident: the screen itself was
+nearly idle, and the memory belonged to the two screens held open below it.
+
+Visits are charted individually because a per-screen total cannot distinguish
+twelve even visits from eleven cheap ones and a pathological twelfth — and it is
+usually the twelfth that is the bug. Bars are drawn in the order the visits
+happened, so a screen that gets more expensive each time it is opened shows up
+as a slope rather than disappearing into a sum. The dashed line is the mean;
+a bar more than two standard deviations from it is drawn in red, and hovering
+gives that visit's CPU and RAM against the mean and its deviation in standard
+deviations.
 
 | Marker | Meaning |
 |---|---|
@@ -453,6 +489,53 @@ Or the dashboard's **Screens** tab, which reads any recorded run's trace.
 | `action:<name>` | a discrete user action |
 | `nav:<From>-><To>` | the navigation transition itself |
 | `step:<name>` | startup milestones, matching the existing step model |
+
+Screen markers carry two extra pieces of structure:
+
+| Form | Meaning |
+|---|---|
+| `screen:Home#compose` | what rendered it: `compose`, `rn`, `native_view` |
+| `screen:Onboarding.otp#rn` | a step *inside* a route, as `Parent.Step` |
+
+The kind matters because this app is a hybrid and the mix is not obvious from
+the outside: Onboarding is a React Native surface, Home is Compose but dominated
+by a camera preview, everything else is Compose. Without the tag, "is the React
+Native screen slower than the native ones?" cannot be answered from a profile.
+
+Sub-screens exist because a route can be one screen natively and several to the
+user. Onboarding is the clear case: nine React Native steps under a single
+`screen:Onboarding` slice, so the whole first-run experience used to profile as
+one undifferentiated span. A sub-screen slice is open *inside* its parent's, so
+`screen_summary` reports it as its own row and never adds it to the parent --
+`include_substeps=False` gives the top-level view that sums correctly.
+
+An untagged `screen:Home` from an older build still parses; its kind is reported
+as unknown rather than the visit being dropped.
+
+A screen that is still on display when tracing stops has no closing event, so
+Perfetto records it as an unfinished slice (`dur = -1`). Those are reported as
+visits, clamped to the end of the trace and flagged `open_ended`, because that
+screen is usually the one the session was about — dropping it reported "0
+visits" for a session that plainly had one. CPU, RAM and frames are all scoped
+to the process that owns the slice; matching RSS counters across every process
+once summed the whole device into a single screen's "peak".
+
+### Live markers while recording
+
+The Manual tab shows markers as they land, filterable by kind
+(screens / actions / navigations / steps), with the currently-open screen
+marked. It reads the partial trace the manual config is already draining to
+the device, so nothing about the recording session is disturbed:
+
+```
+GET /api/manual/live
+```
+
+The response is cached briefly server-side, since each refresh costs an adb
+pull and a parse. If this stays empty while the app is being used, the build
+being traced is not emitting markers — check the package is the instrumented
+one, and note that a marker missing because the flow never reached that screen
+is not the same as a marker that was never instrumented.
 
 Two things worth knowing about the numbers:
 
