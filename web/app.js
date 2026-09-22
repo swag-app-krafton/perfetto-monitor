@@ -846,11 +846,16 @@ async function loadScreens(runId) {
    sum. The mean is drawn as a reference line, and any visit more than two
    standard deviations from it is called out. */
 const METRICS = {
-  cpu_pct_of_wall: { label: 'CPU % of wall', unit: '%', dp: 1 },
-  cpu_ms: { label: 'CPU time', unit: ' ms', dp: 1 },
-  peak_rss_mb: { label: 'Peak RAM', unit: ' MB', dp: 1 },
-  rss_delta_mb: { label: 'RAM growth', unit: ' MB', dp: 1 },
-  duration_ms: { label: 'Wall time', unit: ' ms', dp: 1 },
+  cpu_pct_of_wall: { label: 'CPU busy %', unit: '%', dp: 1,
+    help: 'Share of this visit\'s time on screen that a CPU core was actually working, rather than the screen just being open.' },
+  cpu_ms: { label: 'CPU time', unit: ' ms', dp: 1,
+    help: 'Time a CPU core was actually scheduled doing work during this visit.' },
+  peak_rss_mb: { label: 'Peak RAM', unit: ' MB', dp: 1,
+    help: 'Highest resident memory seen while this visit was on screen.' },
+  rss_delta_mb: { label: 'RAM growth', unit: ' MB', dp: 1,
+    help: 'How much resident memory grew from when this visit opened to its peak.' },
+  duration_ms: { label: 'Time on screen', unit: ' ms', dp: 1,
+    help: 'Wall-clock duration of this visit, from open to close.' },
 };
 
 function visitBars(row, metric) {
@@ -904,9 +909,9 @@ function visitBars(row, metric) {
         (stat.mean != null ? `<div class="r"><span>mean of ${row.visits} visits</span><b>${fmt(stat.mean, m.dp)}${m.unit}</b></div>` : '') +
         (dev != null ? `<div class="r"><span>deviation</span><b>${dev >= 0 ? '+' : ''}${fmt(dev, 1)} sd</b></div>` : '') +
         ((v.outlier || {})[metric] ? '<div class="r"><span>flagged</span><b>outlier, &gt;2 sd from mean</b></div>' : '') +
-        `<div class="r"><span>avg CPU</span><b>${v.cpu_pct_of_wall == null ? '–' : fmt(v.cpu_pct_of_wall, 1) + '%'} of wall</b></div>` +
-        `<div class="r"><span>avg RAM</span><b>${v.peak_rss_mb == null ? '–' : fmt(v.peak_rss_mb, 1) + ' MB peak'}</b></div>` +
-        `<div class="r"><span>wall time</span><b>${fmt(v.duration_ms, 1)} ms</b></div>` +
+        `<div class="r"><span>CPU busy</span><b>${v.cpu_pct_of_wall == null ? '–' : fmt(v.cpu_pct_of_wall, 1) + '%'} of time on screen</b></div>` +
+        `<div class="r"><span>peak RAM</span><b>${v.peak_rss_mb == null ? '–' : fmt(v.peak_rss_mb, 1) + ' MB'}</b></div>` +
+        `<div class="r"><span>time on screen</span><b>${fmt(v.duration_ms, 1)} ms</b></div>` +
         (v.stack && v.stack.length > 1
           ? `<div class="r"><span>stack</span><b>${esc(v.stack.join(' \u203a '))}</b></div>` +
             `<div class="r"><span>held beneath</span><b>${esc((v.beneath || []).join(', '))}</b></div>`
@@ -950,8 +955,12 @@ function stackViewHTML(d) {
         overlapping slices (screen slices never overlap; only one is open at a time).
         Deepest stack reached: <b>${d.max_depth}</b>.</p>
       <div class="scroll"><table>
-        <thead><tr><th>Depth</th><th class="num">Visits</th><th class="num">Wall ms</th>
-          <th class="num">CPU % of wall</th><th class="num">Peak RAM</th>
+        <thead><tr>
+          <th>Depth${qh('How far down the navigation stack: 1 is the root screen, each level deeper is one more screen pushed on top and still alive underneath.')}</th>
+          <th class="num">Visits</th>
+          <th class="num">Time on screen${qh('Total wall-clock time spent at this depth, summed across every visit.')}</th>
+          <th class="num">CPU busy %${qh('Share of that time a CPU core was actually working, rather than the screen just being open. Low CPU with high RAM at depth means the memory belongs to what is held beneath, not to the screen doing work.')}</th>
+          <th class="num">Peak RAM${qh('The highest resident memory seen while any screen was open at this depth.')}</th>
           <th>Screens at this depth</th><th>Held open beneath</th></tr></thead>
         <tbody>${rows.map(r => `<tr>
           <td><b>${r.depth}</b></td>
@@ -1029,6 +1038,14 @@ function launchViewHTML(run) {
 }
 
 /* ---------- render ---------- */
+/* A small "?" next to a header, with the explanation in its title attribute.
+   A column name has to stay short, but "short" and "self-explanatory" often
+   trade off against each other -- "CPU busy %" still needs to say what it is a
+   percentage *of*. This gives that room without lengthening the header. */
+function qh(text) {
+  return `<span class="qh" title="${esc(text)}">?</span>`;
+}
+
 function tabBar() {
   return `<nav class="tabs" role="tablist">${TABS.map(t => `
     <button role="tab" class="tab${TAB === t.id ? ' on' : ''}" data-tab="${t.id}"
@@ -1781,8 +1798,8 @@ function render() {
         </div>
         <p class="hint" style="margin-top:10px">Screen attribution needs the app to emit
           <code>screen:</code> and <code>action:</code> markers via SwagTrace. CPU here is
-          scheduled CPU time overlapped with each visit, not wall time — a screen that is
-          merely open while the device idles has not cost anything.</p>
+          scheduled CPU time overlapped with each visit, not how long the screen was open —
+          a screen that is merely open while the device idles has not cost anything.</p>
         <div class="ctl" style="margin-top:12px">
           <span class="flabel">View</span><div id="scrview"></div>
         </div>
@@ -1805,9 +1822,17 @@ function render() {
             cheap on its own can still be expensive three deep, because everything beneath it
             is still alive.</p>
           <div class="scroll"><table>
-            <thead><tr><th>Route</th><th>Rendered by</th><th class="num">Depth</th><th class="num">Visits</th><th class="num">Total ms</th>
-              <th class="num">CPU ms</th><th class="num">CPU % of wall</th>
-              <th class="num">Slow frames</th><th class="num">Worst RAM growth</th></tr></thead>
+            <thead><tr>
+              <th>Route</th>
+              <th>Rendered by${qh('What actually drew the screen: Compose, a React Native surface, or a native platform view (e.g. camera preview).')}</th>
+              <th class="num">Depth${qh('How far down the navigation stack the screen sat. 1 is the root; each level deeper means more screens are still open underneath it.')}</th>
+              <th class="num">Visits</th>
+              <th class="num">Time on screen${qh('Total wall-clock time this screen was visible, summed across every visit.')}</th>
+              <th class="num">CPU time${qh('Total time a CPU core was actually scheduled doing work for this screen, summed across every visit. Not the same as time on screen -- a screen can be open a long time while mostly idle.')}</th>
+              <th class="num">CPU busy %${qh('CPU time as a share of time on screen. Answers "was it actually working, or just open?" Over 100% means work spread across more than one CPU core at once.')}</th>
+              <th class="num">Slow frames${qh('Share of frames on this screen that took longer than 16.6ms to render (missed 60fps).')}</th>
+              <th class="num">Worst RAM growth${qh('The largest increase in resident memory seen during any single visit to this screen, from when it opened to its peak.')}</th>
+            </tr></thead>
             <tbody>${d.screen_summary.map(r => {
               const cpuPct = r.total_ms ? (r.total_cpu_ms / r.total_ms * 100) : null;
               const isOpen = SCR.open === r.route;
@@ -1889,7 +1914,7 @@ function render() {
         const row = (d.screen_summary || []).find(r => r.route === SCR.open);
         if (mb && row) {
           mb.innerHTML = Object.entries(METRICS)
-            .map(([k, m]) => `<button class="seg${SCR.metric === k ? ' on' : ''}" data-scrm="${k}">${m.label}</button>`).join('');
+            .map(([k, m]) => `<button class="seg${SCR.metric === k ? ' on' : ''}" data-scrm="${k}" title="${esc(m.help || '')}">${m.label}</button>`).join('');
           mb.querySelectorAll('.seg').forEach(b => b.onclick = e => {
             e.stopPropagation(); SCR.metric = b.dataset.scrm; render();
           });
