@@ -167,6 +167,24 @@ def main(argv=None):
     c.add_argument("--analyse", action="store_true")
     c.add_argument("--label")
 
+    mn = sub.add_parser("manual", help="drive the app by hand; start/stop tracing yourself")
+    mnx = mn.add_subparsers(dest="mcmd", required=True)
+    mst = mnx.add_parser("start", help="begin an open-ended trace")
+    mst.add_argument("--pkg", default="com.swagpay")
+    mst.add_argument("--cold", action="store_true",
+                     help="force-stop and launch the app once tracing is live")
+    msp = mnx.add_parser("stop", help="stop tracing, pull and analyse the trace")
+    msp.add_argument("-o", "--out", default=None)
+    msp.add_argument("--label")
+    msp.add_argument("--app")
+    msp.add_argument("--no-analyse", action="store_true")
+    mnx.add_parser("status", help="is a manual trace recording?")
+    mnx.add_parser("abort", help="stop and discard without analysing")
+
+    sc = sub.add_parser("screens", help="per-screen CPU/RAM from SwagTrace markers")
+    sc.add_argument("trace")
+    sc.add_argument("--json", action="store_true")
+
     stp = sub.add_parser("stress", help="repeat cold starts and report the spread")
     stx = stp.add_subparsers(dest="scmd", required=True)
     sr = stx.add_parser("run", help="capture N sessions of one app")
@@ -302,6 +320,77 @@ def main(argv=None):
                                app_version=f"2.{i//5}.{i%5}", device="pixel7", trace_path=p)
             res, regs = _analyse_run(rid, m, use_llm=False)
             print(f"  run {rid:>3}  {m['startup']['time_to_first_camera_frame_ms']:>7}ms  {res['verdict']}")
+        return 0
+
+    if n.cmd == "manual":
+        from .capture import (manual_start, manual_stop, manual_status,
+                              manual_abort, device_info)
+        if n.mcmd == "status":
+            st = manual_status()
+            if not st["device"]:
+                print("  no adb device connected")
+                return 2
+            print(f"  device {st['serial']}: "
+                  + ("\033[32mrecording\033[0m" if st["recording"] else "idle"))
+            return 0
+        if n.mcmd == "start":
+            try:
+                r = manual_start(pkg=n.pkg, cold=n.cold)
+            except RuntimeError as e:
+                print(f"  \033[31mERROR\033[0m {e}")
+                return 1
+            print(f"  recording (detached session '{r['key']}') for {r['pkg']}")
+            if n.cold and not r["launched"]:
+                print("  note: could not launch the app automatically; open it by hand.")
+            print("  drive the app now, then: swagperf manual stop")
+            return 0
+        if n.mcmd == "abort":
+            print("  discarded" if manual_abort() else "  nothing was recording")
+            return 0
+        # stop
+        out = n.out or f"traces/manual_{int(__import__('time').time())}.pftrace"
+        try:
+            p = manual_stop(out)
+        except RuntimeError as e:
+            print(f"  \033[31mERROR\033[0m {e}")
+            return 1
+        print(f"  trace saved -> {p}")
+        if n.no_analyse:
+            return 0
+        return main(["analyse", p, "--label", n.label or "manual-session"]
+                    + (["--app", n.app] if n.app else [])
+                    + (["--device", (device_info().get("model") or "")]
+                       if device_info().get("model") else []))
+
+    if n.cmd == "screens":
+        from .screens import extract_screens
+        d = extract_screens(n.trace)
+        if n.json:
+            print(json.dumps(d, indent=2))
+            return 0
+        if not d["instrumented"]:
+            print(f"\n  {d['note']}\n")
+            return 0
+        print(f"\n  screens ({len(d['screens'])} visit(s))")
+        print(f"  {'route':<20}{'visits':>7}{'total ms':>10}{'cpu ms':>9}"
+              f"{'slow %':>8}{'RAM delta':>11}")
+        for s2 in d["screen_summary"]:
+            print(f"  {s2['route']:<20}{s2['visits']:>7}{s2['total_ms']:>10.1f}"
+                  f"{s2['total_cpu_ms']:>9.1f}"
+                  f"{(s2['slow_frame_pct'] or 0):>8.2f}"
+                  f"{(s2['max_rss_delta_mb'] if s2['max_rss_delta_mb'] is not None else 0):>10.1f}M")
+        if d["navigations"]:
+            print("\n  transitions")
+            for nv in d["navigations"]:
+                print(f"  {nv['transition']:<30} x{nv['count']:<4} "
+                      f"worst {nv['max_ms'] or 0:.1f}ms")
+        if d["actions"]:
+            print("\n  actions")
+            for a in d["actions"]:
+                extra = (f"  mean {a['mean_ms']}ms  worst {a['max_ms']}ms"
+                         if a["mean_ms"] else "")
+                print(f"  {a['action']:<34} x{a['count']}{extra}")
+        print()
         return 0
 
     if n.cmd == "stress":

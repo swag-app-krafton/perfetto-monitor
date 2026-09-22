@@ -37,6 +37,9 @@ let CAP = { device: null, loading: false, pkg: '', cold: true, duration: 8000,
             q: '', job: null, polling: false };
 let STR = { list: null, open: null, detail: null, job: null, polling: false,
             pkg: '', sessions: 5, cold: true, duration: 8000, q: '' };
+let MAN = { status: null, pkg: 'com.swagpay', cold: false, job: null,
+            polling: false, since: null, q: '' };
+let SCR = { runId: null, data: null, loading: false };
 
 const TABS = [
   { id: 'overview', label: 'Overview',  blurb: 'Verdict, budgets and findings for the latest run.' },
@@ -46,6 +49,8 @@ const TABS = [
   { id: 'steps',    label: 'Steps',     blurb: 'Per-step durations, trailing baselines and child-slice breakdown.' },
   { id: 'capture',  label: 'Capture',   blurb: 'Pick an app installed on the connected device and profile it.' },
   { id: 'stress',   label: 'Stress',    blurb: 'Repeat cold starts to separate a real regression from run-to-run noise.' },
+  { id: 'manual',   label: 'Manual',    blurb: 'Drive the app by hand. Start tracing, use it, stop and analyse.' },
+  { id: 'screens',  label: 'Screens',   blurb: 'Per-screen CPU and RAM, from the app\u2019s own screen and action markers.' },
   { id: 'compare',  label: 'Compare',   blurb: 'Diff any two runs, or any run against the pinned benchmark.' },
   { id: 'history',  label: 'History',   blurb: 'Every recorded run, sortable and filterable. Pin a run as the benchmark here.' },
 ];
@@ -664,6 +669,108 @@ function sessionPlot(sessions, key, budget, label, color) {
   return svg;
 }
 
+/* ---------- manual mode ---------- */
+async function loadManualStatus(force) {
+  if (MAN.status && !force) return;
+  try { MAN.status = await (await fetch('/api/manual/status')).json(); }
+  catch (e) { MAN.status = { device: false, recording: false }; }
+}
+
+async function manualStart() {
+  const r = await postJSON('/api/manual/start', { pkg: MAN.pkg, cold: MAN.cold });
+  if (r.error) { MAN.job = { state: 'error', error: r.error, log: [] }; render(); return; }
+  MAN.since = Date.now();
+  MAN.job = null;
+  await loadManualStatus(true);
+  render();
+}
+
+async function manualStop() {
+  const r = await postJSON('/api/manual/stop', { pkg: MAN.pkg });
+  if (r.error) { MAN.job = { state: 'error', error: r.error, log: [] }; render(); return; }
+  MAN.job = { id: r.job_id, state: 'queued', log: [] };
+  MAN.since = null;
+  render();
+  pollManual(r.job_id);
+}
+
+async function manualAbort() {
+  await postJSON('/api/manual/abort', {});
+  MAN.since = null; MAN.job = null;
+  await loadManualStatus(true);
+  render();
+}
+
+async function pollManual(jid) {
+  if (MAN.polling) return;
+  MAN.polling = true;
+  while (true) {
+    await new Promise(r => setTimeout(r, 1200));
+    let j;
+    try { j = await (await fetch(`/api/jobs?id=${encodeURIComponent(jid)}`)).json(); }
+    catch (e) { break; }
+    MAN.job = j;
+    render();
+    if (j.state === 'done' || j.state === 'error') break;
+  }
+  MAN.polling = false;
+  await loadManualStatus(true);
+  if (MAN.job && MAN.job.state === 'done' && MAN.job.result) {
+    const res = MAN.job.result;
+    await load();
+    // A manual session usually carries screen markers; if it does, that view
+    // is more informative than the startup one, so land there.
+    if (res.screens) { SCR.runId = res.run_id; SCR.data = null; TAB = 'screens'; }
+    else if (res.path_kind) { PATH = res.path_kind; }
+    render();
+  }
+}
+
+async function loadScreens(runId) {
+  SCR.loading = true; render();
+  try { SCR.data = await (await fetch(`/api/screens?run=${runId}`)).json(); }
+  catch (e) { SCR.data = { error: String(e) }; }
+  SCR.loading = false;
+}
+
+/* Horizontal bars: one screen per row, so total cost is comparable at a glance.
+   A stacked or pie form would hide that these are independent magnitudes. */
+function screenBars(rows, key, unit, label, color) {
+  const W = 1180, rowH = 30, L = 170, R = 90, T = 8;
+  const H = T + rows.length * rowH + 26;
+  const iw = W - L - R;
+  const max = Math.max(...rows.map(r => r[key] || 0), 1);
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': label });
+  const g = el('g');
+  rows.forEach((r, i) => {
+    const y = T + i * rowH;
+    const w = Math.max(((r[key] || 0) / max) * iw, 1);
+    g.appendChild(el('text', { x: L - 10, y: y + 15, class: 'ax', 'text-anchor': 'end',
+      fill: 'var(--text-primary)' }, [document.createTextNode(r.route)]));
+    // 4px rounded data-end, anchored to the baseline at x=L
+    g.appendChild(el('path', {
+      d: `M${L},${y + 4} h${Math.max(w - 4, 0)} q4,0 4,4 v${rowH - 16} q0,4 -4,4 h${-Math.max(w - 4, 0)} Z`,
+      fill: color }));
+    g.appendChild(el('text', { x: L + w + 8, y: y + 15, class: 'ax',
+      fill: 'var(--text-secondary)' },
+      [document.createTextNode(fmt(r[key] || 0, 1) + unit)]));
+    const hit = el('rect', { x: L, y, width: iw, height: rowH, class: 'hit' });
+    hit.addEventListener('mousemove', e => showTip(
+      `<b>${esc(r.route)}</b>` +
+      `<div class="r"><span>visits</span><b>${r.visits}</b></div>` +
+      `<div class="r"><span>total on screen</span><b>${fmt(r.total_ms, 1)} ms</b></div>` +
+      `<div class="r"><span>CPU</span><b>${fmt(r.total_cpu_ms, 1)} ms</b></div>` +
+      (r.slow_frame_pct != null ? `<div class="r"><span>slow frames</span><b>${fmt(r.slow_frame_pct, 2)}%</b></div>` : '') +
+      (r.max_rss_delta_mb != null ? `<div class="r"><span>worst RAM growth</span><b>${fmt(r.max_rss_delta_mb, 1)} MB</b></div>` : ''), e));
+    hit.addEventListener('mouseleave', hideTip);
+    g.appendChild(hit);
+  });
+  g.appendChild(el('text', { x: L + iw / 2, y: H - 6, class: 'ax', 'text-anchor': 'middle' },
+    [document.createTextNode(label)]));
+  svg.appendChild(g);
+  return svg;
+}
+
 /* ---------- render ---------- */
 function tabBar() {
   return `<nav class="tabs" role="tablist">${TABS.map(t => `
@@ -1250,6 +1357,207 @@ function render() {
         });
       });
     }
+  }
+
+  /* ---------------- MANUAL ---------------- */
+  if (TAB === 'manual') {
+    const st = MAN.status;
+    const job = MAN.job;
+    const busy = job && (job.state === 'running' || job.state === 'queued');
+    const dev = CAP.device;
+
+    if (!st) {
+      app.innerHTML = head + '<div class="card"><p class="empty">Checking session state…</p></div>';
+      post.push(() => Promise.all([loadManualStatus(), loadDevice()]).then(render));
+    } else if (!st.device) {
+      app.innerHTML = head + `<div class="card"><h2>No device connected</h2>
+        <p class="hint">Connect a device over USB with USB debugging enabled, then re-check.</p>
+        <div class="ctl"><button id="manrecheck">Check again</button></div></div>`;
+      post.push(() => { const b = $('#manrecheck');
+        if (b) b.onclick = () => loadManualStatus(true).then(render); });
+    } else {
+      const installed = ((dev && dev.packages) || []).filter(p => p.installed);
+      const q = MAN.q.trim().toLowerCase();
+      const pkgs = installed.filter(p => !q || p.pkg.toLowerCase().includes(q)
+                                      || (p.name || '').toLowerCase().includes(q));
+      app.innerHTML = head + `
+        <div class="card">
+          <h2>Manual tracing session</h2>
+          <p class="hint">Tracing runs as a <b>detached</b> perfetto session, so it keeps
+            recording between requests and has no fixed duration — you decide when to stop.
+            The buffer is a ring, so a long session keeps the most recent data rather than
+            failing. Use this to trace a flow no script can reproduce: a real payment, a
+            biometric unlock, a specific sequence of screens.</p>
+          <div class="ctl" style="margin-bottom:10px">
+            <span class="pill ${st.recording ? 'fail' : 'pass'}">${st.recording ? 'recording' : 'idle'}</span>
+            <span style="font-size:12.5px;color:var(--text-muted)">${esc(st.serial || '')}</span>
+            ${st.recording && MAN.since ? `<span class="count" id="mantimer">elapsed ${Math.round((Date.now() - MAN.since) / 1000)}s</span>` : ''}
+          </div>
+          ${!st.recording ? `
+            <div class="ctl" style="margin-bottom:10px">
+              <span class="flabel">App</span>
+              <input id="manpkg" type="search" value="${esc(MAN.pkg)}" aria-label="Package to trace"
+                     style="min-width:280px" ${busy ? 'disabled' : ''}>
+              <span class="flabel">Start</span><div id="mancold"></div>
+              <button id="manstart" ${busy ? 'disabled' : ''}>Start tracing</button>
+            </div>
+            <p class="hint">Cold force-stops the app and launches it once tracing is live.
+              Warm traces whatever is already running — open the app yourself first.</p>
+            <div class="scroll" style="max-height:190px"><table><tbody>
+              ${pkgs.slice(0, 30).map(p => `<tr>
+                <td>${esc(p.name || p.pkg)}</td>
+                <td style="color:var(--text-secondary);font-size:12px">${esc(p.pkg)}</td>
+                <td><button class="mini-btn" data-manpick="${esc(p.pkg)}">Use</button></td>
+              </tr>`).join('') || '<tr><td class="empty">No installed apps match.</td></tr>'}
+            </tbody></table></div>`
+          : `<div class="ctl">
+              <button id="manstop" ${busy ? 'disabled' : ''}>${busy ? 'Stopping…' : 'Stop and analyse'}</button>
+              <button id="manabort" class="mini-btn" ${busy ? 'disabled' : ''}>Discard</button>
+            </div>
+            <p class="hint" style="margin-top:10px">Drive the app on the device now.
+              Stop when you are done and the trace will be pulled, analysed and recorded.</p>`}
+        </div>
+        ${job ? `<div class="card" style="${job.state === 'error' ? 'border-color:var(--crit)' : job.state === 'done' ? 'border-color:var(--good)' : ''}">
+          <h2>${busy ? 'Processing the session…' : job.state === 'done' ? 'Session recorded' : 'Failed'}</h2>
+          <div class="joblog">${(job.log || []).map(l => `<div class="jl ${/^ERROR/.test(l.text) ? 'bad' : /^note/.test(l.text) ? 'warn' : ''}">
+            <span class="jt">${l.t}s</span>${esc(l.text)}</div>`).join('') || '<div class="jl">starting</div>'}</div>
+          ${job.error ? `<div class="find high" style="margin-top:10px"><div class="t">Failed</div><div class="e">${esc(job.error)}</div></div>` : ''}
+          ${job.state === 'done' && job.result ? `<div class="readout" style="margin-top:12px">
+            <div class="ro"><span class="rok">Run</span><b>${job.result.run_id}</b><em>${esc(job.result.app_pkg || '')}</em></div>
+            <div class="ro"><span class="rok">Screens seen</span><b>${job.result.screens || 0}</b>
+              <em>${job.result.screens ? 'SwagTrace markers found' : 'no screen markers in this trace'}</em></div>
+          </div>` : ''}
+        </div>` : ''}`;
+
+      post.push(() => {
+        const rb = $('#manrecheck');
+        if (rb) rb.onclick = () => loadManualStatus(true).then(render);
+        const pk = $('#manpkg');
+        if (pk) pk.oninput = () => { MAN.pkg = pk.value; };
+        const cb = $('#mancold');
+        if (cb) {
+          cb.innerHTML = [[true, 'Cold'], [false, 'Warm']].map(([v, l]) =>
+            `<button class="seg${MAN.cold === v ? ' on' : ''}" data-mc="${v}">${l}</button>`).join('');
+          cb.querySelectorAll('.seg').forEach(b => b.onclick = () => { MAN.cold = b.dataset.mc === 'true'; render(); });
+        }
+        document.querySelectorAll('[data-manpick]').forEach(b => b.onclick = () => {
+          MAN.pkg = b.dataset.manpick; render();
+        });
+        const s1 = $('#manstart'); if (s1) s1.onclick = () => manualStart();
+        const s2 = $('#manstop'); if (s2) s2.onclick = () => manualStop();
+        const s3 = $('#manabort'); if (s3) s3.onclick = () => manualAbort();
+        // Live elapsed counter while recording, without re-rendering the page.
+        const tm = $('#mantimer');
+        if (tm && MAN.since) {
+          clearInterval(window.__manTimer);
+          window.__manTimer = setInterval(() => {
+            const n = $('#mantimer');
+            if (!n || !MAN.since) { clearInterval(window.__manTimer); return; }
+            n.textContent = `elapsed ${Math.round((Date.now() - MAN.since) / 1000)}s`;
+          }, 1000);
+        }
+      });
+    }
+  }
+
+  /* ---------------- SCREENS ---------------- */
+  if (TAB === 'screens') {
+    const withTraces = DATA.runs.filter(r => r.trace_path);
+    if (SCR.runId == null && withTraces.length) SCR.runId = withTraces.at(-1).id;
+    const d = SCR.data;
+
+    app.innerHTML = head + `
+      <div class="card">
+        <div class="ctl">
+          <span class="flabel">Run</span>
+          <select id="scrrun" aria-label="Run to inspect">
+            ${withTraces.map(r => `<option value="${r.id}"${r.id === SCR.runId ? ' selected' : ''}>
+              run ${r.id} · ${esc(r.app_name || r.app_pkg || '')} · ${esc(r.label || '')}</option>`).join('')
+              || '<option>no runs with a trace file</option>'}
+          </select>
+          <button id="scrload">Load</button>
+        </div>
+        <p class="hint" style="margin-top:10px">Screen attribution needs the app to emit
+          <code>screen:</code> and <code>action:</code> markers via SwagTrace. CPU here is
+          scheduled CPU time overlapped with each visit, not wall time — a screen that is
+          merely open while the device idles has not cost anything.</p>
+      </div>
+      ${SCR.loading ? '<div class="card"><p class="empty">Reading the trace…</p></div>' : ''}
+      ${d && d.error ? `<div class="card"><p class="empty">${esc(d.error)}</p></div>` : ''}
+      ${d && !d.error && !d.instrumented ? `<div class="card">
+        <h2>No screen markers in this trace</h2>
+        <p class="hint">${esc(d.note || '')}</p></div>` : ''}
+      ${d && d.instrumented ? `
+        <div class="card"><h2>CPU by screen</h2>
+          ${d.screen_summary.some(r => (r.total_cpu_ms || 0) > 0)
+            ? `<p class="hint">Scheduled CPU time attributed to each screen, summed across visits.</p>
+               <div id="scb1"></div>`
+            : `<p class="empty">No scheduler data in this trace, so CPU cannot be attributed.
+               CPU attribution needs the <code>sched/sched_switch</code> ftrace event, which a
+               real device capture includes but a synthetic trace does not. Every other figure
+               on this page is unaffected.</p>`}</div>
+        <div class="card"><h2>Time on screen</h2>
+          <p class="hint">Wall time the screen was visible. Compare against CPU above:
+            a screen high here but low there was idle, not expensive.</p>
+          <div id="scb2"></div></div>
+        <div class="card"><h2>Screens</h2>
+          <div class="scroll"><table>
+            <thead><tr><th>Route</th><th class="num">Visits</th><th class="num">Total ms</th>
+              <th class="num">CPU ms</th><th class="num">CPU % of wall</th>
+              <th class="num">Slow frames</th><th class="num">Worst RAM growth</th></tr></thead>
+            <tbody>${d.screen_summary.map(r => {
+              const cpuPct = r.total_ms ? (r.total_cpu_ms / r.total_ms * 100) : null;
+              return `<tr>
+                <td>${esc(r.route)}</td>
+                <td class="num">${r.visits}</td>
+                <td class="num">${fmt(r.total_ms, 1)}</td>
+                <td class="num">${fmt(r.total_cpu_ms, 1)}</td>
+                <td class="num" style="color:var(--text-secondary)">${cpuPct == null ? '–' : fmt(cpuPct, 1) + '%'}</td>
+                <td class="num ${(r.slow_frame_pct || 0) > 5 ? 'up' : ''}">${r.slow_frame_pct == null ? '–' : fmt(r.slow_frame_pct, 2) + '%'}</td>
+                <td class="num ${(r.max_rss_delta_mb || 0) > 10 ? 'up' : ''}">${r.max_rss_delta_mb == null ? '–' : fmt(r.max_rss_delta_mb, 1) + ' MB'}</td>
+              </tr>`; }).join('')}</tbody>
+          </table></div>
+          <p class="hint" style="margin-top:9px">RAM growth is min-to-peak within a single
+            visit. A screen that repeatedly leaves RAM higher than it found it is the
+            orphaned-surface signature the shell architecture names.</p>
+        </div>
+        ${d.navigations.length ? `<div class="card"><h2>Transitions</h2>
+          <p class="hint">Cost of the navigation itself, separate from the screens either side.</p>
+          <div class="scroll"><table>
+            <thead><tr><th>From</th><th>To</th><th class="num">Count</th><th class="num">Worst ms</th></tr></thead>
+            <tbody>${d.navigations.map(n2 => `<tr>
+              <td>${esc(n2.from || '')}</td><td>${esc(n2.to || '')}</td>
+              <td class="num">${n2.count}</td>
+              <td class="num ${(n2.max_ms || 0) > 32 ? 'up' : ''}">${n2.max_ms == null ? '–' : fmt(n2.max_ms, 1)}</td>
+            </tr>`).join('')}</tbody>
+          </table></div></div>` : ''}
+        ${d.actions.length ? `<div class="card"><h2>Actions</h2>
+          <p class="hint">Discrete user actions the app marked. Counts alone are meaningful
+            for instant markers; spans also carry timing.</p>
+          <div class="scroll"><table>
+            <thead><tr><th>Action</th><th class="num">Count</th><th class="num">Mean ms</th><th class="num">Worst ms</th></tr></thead>
+            <tbody>${d.actions.map(a => `<tr>
+              <td>${esc(a.action)}</td><td class="num">${a.count}</td>
+              <td class="num">${a.mean_ms == null ? '–' : fmt(a.mean_ms, 2)}</td>
+              <td class="num">${a.max_ms == null ? '–' : fmt(a.max_ms, 2)}</td>
+            </tr>`).join('')}</tbody>
+          </table></div></div>` : ''}` : ''}`;
+
+    post.push(() => {
+      const sel = $('#scrrun');
+      if (sel) sel.onchange = () => { SCR.runId = +sel.value; SCR.data = null; render(); };
+      const lb = $('#scrload');
+      if (lb) lb.onclick = () => loadScreens(SCR.runId).then(render);
+      if (d && d.instrumented) {
+        const b1 = $('#scb1'), b2 = $('#scb2');
+        if (b1 && d.screen_summary.some(r => (r.total_cpu_ms || 0) > 0))
+          b1.appendChild(screenBars(d.screen_summary, 'total_cpu_ms', ' ms',
+                                    'CPU ms by screen', 'var(--s2)'));
+        if (b2) b2.appendChild(screenBars([...d.screen_summary].sort((x, y) => y.total_ms - x.total_ms),
+                                          'total_ms', ' ms', 'time on screen (ms)', 'var(--s1)'));
+      }
+      if (!d && !SCR.loading && SCR.runId != null) loadScreens(SCR.runId).then(render);
+    });
   }
 
   /* ---------------- COMPARE ---------------- */
