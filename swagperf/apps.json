@@ -25,7 +25,7 @@
       "pkg": "net.one97.paytm", "name": "Paytm", "role": "competitor",
       "category": "upi_payments", "vendor": "One97", "region": "IN",
       "instrumented": false, "verified": false,
-      "notes": "Large superapp. Expect slow cold start and high RSS; useful as an upper bound."
+      "notes": "Large superapp. Expect slow cold start and high RAM usage; useful as an upper bound."
     },
     {
       "pkg": "in.org.npci.upiapp", "name": "BHIM", "role": "competitor",

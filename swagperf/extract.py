@@ -193,10 +193,10 @@ def _frames(tp):
 
 
 def _memory(tp):
-    """RSS and, where present, the Hermes heap.
+    """RAM usage (resident set size) and, where present, the Hermes heap.
 
     `mem.rss` is the counter this project's own captures emit. A trace from
-    `process_stats` instead exposes per-process RSS, so that is used as a
+    `process_stats` instead exposes per-process resident size, so that is used as a
     fallback -- otherwise memory would silently read as zero on any trace not
     produced by our own capture config.
     """
