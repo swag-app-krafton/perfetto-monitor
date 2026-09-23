@@ -69,7 +69,14 @@ def _payload(limit=100):
             GLOBAL_BUDGETS["time_to_first_camera_frame_ms"] if not d.get("derived")
             else (app or {}).get("budgets", {}).get("ttid_ms"))
         out.append(d)
+    from .budgets import CRITICAL_PATH_FIRST_RUN, CRITICAL_PATH_RETURNING, DEFERRED_STEPS
     return {"runs": out, "step_budgets": STEP_BUDGETS_MS,
+            # The instrumented app's stated startup architecture: which steps a
+            # user waits through on each path, and which work must wait for the
+            # first frame. Published so the UI does not keep its own copy.
+            "startup_model": {"critical_path": {"returning_user": CRITICAL_PATH_RETURNING,
+                                                "first_run": CRITICAL_PATH_FIRST_RUN},
+                              "deferred_steps": DEFERRED_STEPS},
             "global_budgets": GLOBAL_BUDGETS, "risk_map": RISK_MAP,
             "benchmarks": store.benchmarks(),
             "metric_direction": store.METRIC_DIRECTION,
