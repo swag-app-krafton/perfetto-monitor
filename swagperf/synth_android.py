@@ -186,3 +186,142 @@ def gen_swagpay_trace(seed=0, *, pkg="com.swag.pay", flow=None, regress=None):
         prev = route
 
     return bytes(out), {"pkg": pkg, "flow": flow}
+
+
+# ---------------------------------------------------------- device-shaped trace
+#
+# gen_swagpay_trace models the app in isolation. Real device traces broke the
+# extractors in ways it could not show: they carry every process on the phone
+# (an unscoped RAM "peak" was system_server's 803MB), Android 12+ suffixes
+# doFrame with a vsync id (an exact match counted zero frames), and the
+# per-screen jank split, CPU timeline and transition costs read tables the
+# generator never wrote. This one writes them, with a noisy system_server
+# alongside, and returns the answers it built in so tests can check the
+# numbers rather than just that something came out.
+
+from .synth import _len, _str, _varint
+
+
+def _process_tree(procs, threads):
+    body = b"".join(_len(1, _varint(1, pid) + _varint(2, 1) + _str(3, name))
+                    for pid, name in procs)
+    # ProcessTree.Thread: tid = 1, name = 2, tgid = 3.
+    body += b"".join(_len(2, _varint(1, tid) + _str(2, name) + _varint(3, tgid))
+                     for tid, tgid, name in threads)
+    return _len(2, body)
+
+
+def _process_stats(rows):
+    """ProcessStats: per-process vm_rss_kb, which becomes `mem.rss`."""
+    return _len(9, b"".join(_len(1, _varint(1, pid) + _varint(3, int(kb))) for pid, kb in rows))
+
+
+def _sched(cpu, ts, prev, nxt):
+    """One sched_switch on `cpu`: (pid, comm) -> (pid, comm)."""
+    sw = (_str(1, prev[1]) + _varint(2, prev[0]) + _varint(3, 120) + _varint(4, 1)
+          + _str(5, nxt[1]) + _varint(6, nxt[0]) + _varint(7, 120))
+    return _len(1, _varint(1, cpu) + _len(2, _varint(1, ts) + _varint(2, prev[0]) + _len(4, sw)))
+
+
+# FrameTimeline jank_type bits, as SurfaceFlinger reports them.
+JANK_NONE, JANK_APP, JANK_STUFFING, JANK_DROPPED = 1, 64, 128, 1024
+
+
+def _frame_timeline(cookie, token, pid, jank):
+    exp = _varint(1, cookie) + _varint(2, token) + _varint(3, token) + _varint(4, pid) + _str(5, "app")
+    act = (_varint(1, cookie + 1) + _varint(2, token) + _varint(3, token) + _varint(4, pid)
+           + _str(5, "app") + _varint(6, 1) + _varint(7, 1) + _varint(9, jank) + _varint(10, 1))
+    return _len(76, _len(3, exp)), _len(76, _len(4, act)), \
+        _len(76, _len(5, _varint(1, cookie))), _len(76, _len(5, _varint(1, cookie + 1)))
+
+
+def gen_device_session(seed=0, *, pkg="com.swag.pay", process_name=None):
+    """A manual session as a real device records it, with the answers.
+
+    Flow: Home -> Send -> Home -> Store -> History, via push/pop/tab markers
+    and kind-tagged screen slices. Built-in facts the returned dict exposes:
+
+    * app RSS climbs 200 -> ~320MB; system_server sits at 800MB throughout
+    * app frames are named `Choreographer#doFrame <vsync>`; system_server
+      renders its own, much slower, frames the whole time
+    * Send misses app deadlines, History only buffer-stuffs
+    * the first app frame after navigating into Home lands 90ms later,
+      into anything else 30ms later
+    """
+    rnd = random.Random(seed)
+    APP, SYS = 7100, 1500
+    T_MAIN, T_SYS = 900, 901
+    out = bytearray()
+    # process_name models a capture that missed the app's rename: on a V2514
+    # the app stayed `zygote64` for its whole life without the task events.
+    out += packet(1, _process_tree([(APP, process_name or pkg), (SYS, "system_server")],
+                                   [(APP, APP, "swag.pay"), (APP + 1, APP, "RenderThread"),
+                                    (SYS, SYS, "system_server")]))
+    out += packet(1, track_desc(T_MAIN, process_name or pkg, pid=APP, tid=APP))
+    out += packet(1, track_desc(T_SYS, "system_server", pid=SYS, tid=SYS))
+
+    flow = [("Home", "native_view", None, 3000), ("Send", "compose", "open", 2000),
+            ("Home", "native_view", "back", 1500), ("Store", "compose", "tab", 1500),
+            ("History", "compose", "tab", 1200)]
+    jank_for = {"Send": JANK_APP, "History": JANK_STUFFING}
+    busy_for = {"Home": 0.6, "Send": 0.4, "Store": 0.2, "History": 0.2}
+
+    t, vsync, cookie, rss = 10 * MS, 1000, 1, 200.0
+    prev = None
+    expect = {"transitions": {}, "app_jank": {}, "stuffing": {}, "frames": 0, "slow": 0}
+    for route, kind, op, dwell_ms in flow:
+        nav_t = t
+        if prev:
+            out += slice_begin(t, T_MAIN, f"nav:{op}-{route}")
+            out += slice_end(t + 20_000, T_MAIN)
+            # The same transition, emitted twice as the app does: plain and tagged.
+            for name in (f"nav:{prev[0]}->{route}", f"nav:{prev[0]}#{prev[1]}->{route}#{kind}"):
+                out += slice_begin(t + 30_000, T_MAIN, name)
+                out += slice_end(t + 40_000, T_MAIN)
+        out += slice_begin(t + 50_000, T_MAIN, f"screen:{route}#{kind}")
+        start, end = t + 50_000, t + dwell_ms * MS
+
+        # First frame lands after the transition delay, then every 16.7ms.
+        ft = nav_t + (90 if route == "Home" else 30) * MS - 4 * MS if prev else start + MS
+        if prev:
+            expect["transitions"][(prev[0], route)] = 90.0 if route == "Home" else 30.0
+        n = 0
+        while ft < end - 20 * MS:
+            fdur = 22 * MS if n % 10 == 5 else 4 * MS   # every 10th frame is slow
+            out += slice_begin(ft, T_MAIN, f"Choreographer#doFrame {vsync}")
+            out += slice_end(ft + fdur, T_MAIN)
+            jank = jank_for.get(route, JANK_NONE) if n % 5 == 0 else JANK_NONE
+            for pkt in _frame_timeline(cookie, vsync, APP, jank):
+                out += packet(ft, pkt)
+            if jank == JANK_APP:
+                expect["app_jank"][route] = expect["app_jank"].get(route, 0) + 1
+            if jank == JANK_STUFFING:
+                expect["stuffing"][route] = expect["stuffing"].get(route, 0) + 1
+            expect["frames"] += 1
+            expect["slow"] += fdur > 16_666_667
+            vsync += 1; cookie += 2; n += 1
+            ft += int(16_666_667)
+
+        # CPU: the app's main thread runs `busy` of each 100ms on cpu0.
+        b = busy_for[route]
+        for s in range(start, end - 100 * MS, 100 * MS):
+            out += packet(s, _sched(0, s, (0, "swapper"), (APP, "swag.pay")))
+            out += packet(s + int(b * 100 * MS), _sched(0, s + int(b * 100 * MS),
+                                                       (APP, "swag.pay"), (0, "swapper")))
+        # RAM: the app grows on every screen; system_server does not move.
+        for s in range(start, end, 250 * MS):
+            rss += 1.6 + rnd.uniform(-0.2, 0.2)
+            out += packet(s, _process_stats([(APP, rss * 1024), (SYS, 800 * 1024)]))
+
+        out += slice_end(end, T_MAIN)
+        t, prev = end + 5 * MS, (route, kind)
+
+    # system_server renders slowly for the whole session: counting its frames
+    # as the app's would make the app look janky.
+    for ft in range(10 * MS, t, 50 * MS):
+        out += slice_begin(ft, T_SYS, f"Choreographer#doFrame {ft}")
+        out += slice_end(ft + 40 * MS, T_SYS)
+
+    expect.update({"pkg": pkg, "app_rss_peak_mb": round(rss, 1), "sys_rss_mb": 800.0,
+                   "routes": [f[0] for f in flow]})
+    return bytes(out), expect

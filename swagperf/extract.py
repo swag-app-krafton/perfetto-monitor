@@ -191,17 +191,32 @@ def _app_upids(tp, pkg):
         select upid from process where name = '{pkg.replace("'", "''")}'""")]
     if ids:
         return ids
+    # These markers are SwagTrace's, emitted only by apps the catalogue marks
+    # instrumented. For any other package, a marker-emitting process belongs
+    # to some other app, so there is nothing to fall back to.
+    from . import catalogue
+    if not catalogue.is_instrumented(pkg):
+        return []
     # A process's name is not always recorded: on a V2514, a capture without the
     # gfx atrace category never named the app's process at all. The app still
     # identifies itself through the markers it emits (screen:/step:/action:
     # via atrace_apps), so the process that owns those is the app.
+    #
+    # Only processes without an app name of their own qualify: unnamed, or
+    # still wearing the name of the zygote they were forked from (run B's app
+    # was `zygote64` for its whole life, because the rename event was never
+    # captured). A process that carries a different package's name emitted
+    # those markers for that package; accepting it reported one app's frames
+    # under another's name.
     return [r["upid"] for r in _rows(tp, """
         select distinct coalesce(pt.upid, th.upid) as upid from slice s
         left join process_track pt on s.track_id = pt.id
         left join thread_track tt on s.track_id = tt.id
         left join thread th on tt.utid = th.utid
+        join process p on p.upid = coalesce(pt.upid, th.upid)
         where (s.name like 'screen:%' or s.name like 'step:%' or s.name like 'action:%')
-          and coalesce(pt.upid, th.upid) is not null""")]
+          and (p.name is null or p.name like 'zygote%' or p.name like 'usap%'
+               or p.name = '<pre-initialized>')""")]
 
 
 def _unmeasured_frames():
