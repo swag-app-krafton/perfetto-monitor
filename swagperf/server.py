@@ -150,11 +150,17 @@ class H(SimpleHTTPRequestHandler):
 
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # The page went away before a slow answer (a live poll, a trace
+            # extraction) was ready -- a tab switch or a closed window. Normal,
+            # and not worth a traceback in the server log every time.
+            pass
 
     def do_GET(self):
         u = urlparse(self.path)
