@@ -1,0 +1,160 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  color: var(--tx);
+}
+.legend {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: transparent;
+  color: var(--tx2);
+  font: 500 12px var(--font-ui);
+  cursor: pointer;
+}
+.chip:hover {
+  border-color: var(--tx3);
+}
+.chip[aria-pressed='false'] {
+  opacity: 0.4;
+}
+.swatch {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+}
+.plot {
+  position: relative;
+  margin: 6px 52px 0 44px;
+  outline-offset: 6px;
+}
+.tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--grid);
+}
+.tickLabel {
+  position: absolute;
+  right: calc(100% + 10px);
+  top: -8px;
+  font-size: 11px;
+  color: var(--tx3);
+  white-space: nowrap;
+}
+.budget {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1.5px dashed var(--accent);
+}
+.budgetLabel {
+  position: absolute;
+  left: 0;
+  top: -19px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-tx);
+  white-space: nowrap;
+}
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.end {
+  position: absolute;
+  left: calc(100% + 8px);
+  transform: translateY(-50%);
+  font: 600 11px var(--font-ui);
+  white-space: nowrap;
+}
+.guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--line2);
+}
+.dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--s1);
+}
+.hits {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+.hit {
+  flex: 1;
+  height: 100%;
+}
+.tip {
+  position: absolute;
+  top: 8px;
+  min-width: 140px;
+  padding: 10px 12px;
+  background: var(--s2);
+  border: 1px solid var(--line2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: var(--z-raised);
+  transform: translateX(12px);
+}
+/* Past two thirds of the width the card opens to the left of the guide. */
+.flip {
+  transform: translateX(calc(-100% - 12px));
+}
+.tipTitle {
+  font: 700 12px var(--font-display);
+  margin-bottom: 6px;
+}
+.tipRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.tipKey {
+  flex: 1;
+  color: var(--tx2);
+}
+.tipValue {
+  font-weight: 600;
+}
+.xAxis {
+  position: relative;
+  height: 14px;
+  margin: 0 52px 0 44px;
+}
+.xLabel {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--tx3);
+  white-space: nowrap;
+}
+.none {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--tx3);
+}

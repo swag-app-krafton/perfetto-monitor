@@ -1,0 +1,40 @@
+.pkgList {
+  max-height: 360px;
+  overflow-y: auto;
+}
+/* One installed package, a radio in the "Package to profile" group. */
+.pkg {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--tx);
+  cursor: pointer;
+  text-align: left;
+}
+.pkg[aria-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.radio {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--line2);
+}
+.pkg[aria-checked='true'] .radio {
+  border-color: var(--accent);
+}
+.noMatch {
+  padding: 8px;
+}
+
+.jobCard {
+  align-self: start;
+}

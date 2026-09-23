@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, type ReactNode } from 'react'
+import { Suspense, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router'
-import { Toast } from '@/design/components'
+import { Spinner, Toast } from '@/design'
 import { useScope } from '@/domain/scope'
 import { useHighlightTarget } from '@/lib/highlight'
 import { useIsNarrow, useIsWide } from '@/lib/useMediaQuery'
@@ -9,13 +9,15 @@ import { screenByPath } from './routes'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { useUi } from './store'
+import { useApplyTheme } from './useApplyTheme'
 import s from './Shell.module.css'
 
 /** Layout: [sidebar] [main column] [copilot]. Only <main> scrolls, and the
  *  Copilot is a flex sibling, so opening it reflows the page instead of
  *  covering what the user is reading. */
 export function AppShell({ copilot }: { copilot?: ReactNode }) {
-  const { theme, railPinned, drawerOpen, copilot: cp, toggleRail, setDrawer } = useUi()
+  const { railPinned, drawerOpen, copilot: cp, toast, toggleRail, setDrawer } = useUi()
+  const dismissToast = useCallback(() => useUi.setState({ toast: null }), [])
   const narrow = useIsNarrow()
   const wide = useIsWide()
   const { scope } = useScope()
@@ -24,9 +26,7 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
   const mainRef = useRef<HTMLElement>(null)
   useHighlightTarget(useCallback(() => mainRef.current, []))
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-  }, [theme])
+  useApplyTheme()
 
   // A tab change starts at the top of the page (a deep link then scrolls itself).
   useEffect(() => {
@@ -54,12 +54,14 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
         <main ref={mainRef} className={s.main} id="main">
           <div className={s.page}>
             <PageHeader group={screen.group} title={screen.label} hint={screen.hint} run={scope?.latest ?? null} />
-            <Outlet />
+            <Suspense fallback={<Spinner />}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>
       {copilot}
-      <Toast />
+      <Toast message={toast?.text ?? null} id={toast?.id} onDismiss={dismissToast} />
     </div>
   )
 }

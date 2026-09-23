@@ -1,0 +1,74 @@
+/* DockPanel: a full-height column docked on the right, beside the page. */
+.dock {
+  position: relative;
+  flex: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--s1);
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-panel);
+  border-left: 0;
+}
+
+.header {
+  flex: none;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.headerText {
+  flex: 1;
+  min-width: 0;
+}
+.title {
+  font: 700 15px var(--font-display);
+}
+.subtitle {
+  font-size: 11px;
+  color: var(--tx3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 14px 10px 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.compact {
+  padding: 16px 12px;
+  gap: 4px;
+}
+
+.footer {
+  flex: none;
+  position: relative;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+}

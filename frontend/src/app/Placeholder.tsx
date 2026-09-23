@@ -1,4 +1,4 @@
-import { EmptyState } from '@/design/components'
+import { EmptyState } from '@/design'
 
 /** Temporary content for screens not yet rebuilt. */
 export function Placeholder({ id }: { id: string }) {

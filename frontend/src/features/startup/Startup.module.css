@@ -1,0 +1,57 @@
+/* The latest TTID, large, in the chart card's header. */
+.ttid {
+  font: 700 28px/1 var(--font-display);
+}
+
+/* The ordering card lays its body out as a column under the header. */
+.ordering {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Ordering timeline: the time before the first frame is shaded, the first
+   frame is a rule, and each deferred task is a bar placed by its start. */
+.track {
+  position: relative;
+  height: 56px;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--line2);
+}
+.preFrame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--s2);
+}
+.frameMark {
+  position: absolute;
+  top: -16px;
+  bottom: 0;
+  border-left: 2px solid var(--tx);
+}
+.frameLabel {
+  position: absolute;
+  left: 6px;
+  top: -2px;
+}
+.taskBar {
+  position: absolute;
+  bottom: 8px;
+  height: 14px;
+}
+
+.noTasks {
+  padding-top: 8px;
+}
+.task {
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.taskName {
+  flex: 1;
+}
+.taskWhen {
+  width: 124px;
+}

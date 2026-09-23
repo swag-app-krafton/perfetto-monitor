@@ -1,5 +1,5 @@
 import type { GlobalBudgets, Run } from '@/api/types'
-import type { Tone } from '@/design/components'
+import type { Tone } from '@/design'
 
 /** One definition per headline metric. Gates, KPI tiles, History columns and
  *  Compare rows all read from this table, so a metric is described once. */

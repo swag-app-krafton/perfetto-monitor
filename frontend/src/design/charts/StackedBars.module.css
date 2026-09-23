@@ -1,0 +1,61 @@
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* Label, bar, total: shared by every row and the axis, so the axis lines up. */
+.grid {
+  display: grid;
+  grid-template-columns: 44px 1fr 64px;
+  gap: 10px;
+  align-items: center;
+}
+.label {
+  font-size: 12px;
+  font-weight: 400;
+}
+.bold {
+  font-weight: 700;
+}
+.track {
+  position: relative;
+  height: 16px;
+  display: flex;
+  background: var(--s2);
+}
+.segment {
+  height: 100%;
+  border-right: 1px solid var(--s1);
+}
+.budget {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  border-left: 1.5px dashed var(--accent);
+}
+.total {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+  color: var(--tx);
+}
+.over {
+  color: var(--fail);
+}
+.axis {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--tx3);
+}
+.ticks {
+  position: relative;
+  height: 14px;
+}
+.tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.budgetTick {
+  color: var(--accent-tx);
+}

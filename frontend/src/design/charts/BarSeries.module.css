@@ -1,0 +1,110 @@
+/* The plot and the x axis share margins; the left one holds the y labels. */
+.plot,
+.xAxis {
+  position: relative;
+  margin-left: 52px;
+  margin-right: 8px;
+}
+.xAxis {
+  height: 16px;
+}
+.tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--grid);
+}
+.tickLabel {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: -8px;
+  font-size: 11px;
+  color: var(--tx3);
+}
+/* One slot per bar: the hover target, full plot height. */
+.slot {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  padding: 0 3px;
+}
+.noData {
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: var(--tx3);
+  font-size: 11px;
+}
+.bar {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 0;
+  background: var(--c2);
+  border-radius: 3px 3px 0 0;
+}
+.flagged {
+  background: var(--fail);
+}
+/* Another bar is hovered. */
+.dim {
+  opacity: 0.55;
+}
+.mean {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1.5px dashed var(--tx2);
+  pointer-events: none;
+}
+.meanLabel {
+  position: absolute;
+  right: 0;
+  top: -17px;
+  font-size: 11px;
+  color: var(--tx2);
+}
+.tip {
+  position: absolute;
+  top: 8px;
+  min-width: 190px;
+  padding: 10px 12px;
+  background: var(--s2);
+  border: 1px solid var(--line2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: var(--z-raised);
+  font-size: 12px;
+  line-height: 1.7;
+  transform: translateX(12px);
+}
+/* Past two thirds of the width the card opens to the left of the bar. */
+.flip {
+  transform: translateX(calc(-100% - 12px));
+}
+.tipTitle {
+  font: 700 12px var(--font-display);
+  margin-bottom: 4px;
+}
+.tipRow {
+  display: flex;
+  gap: 10px;
+}
+.tipKey {
+  flex: 1;
+  color: var(--tx2);
+}
+.xLabel {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--tx3);
+}
+.caption {
+  margin-top: 4px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--tx3);
+}

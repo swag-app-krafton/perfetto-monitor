@@ -1,0 +1,66 @@
+.intro {
+  flex: 1 1 260px;
+}
+
+/* Distribution: label | strip + box plot | median. Positions along the axis
+   and series colours are set inline from the data. */
+.row {
+  display: grid;
+  grid-template-columns: 120px 1fr 80px;
+  gap: 12px;
+  align-items: center;
+}
+.track {
+  position: relative;
+  height: 48px;
+  background: var(--bg);
+}
+.box {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  background: var(--s2);
+  border: 1.5px solid;
+}
+.median {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  margin-left: -1.5px;
+}
+.dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  opacity: 0.85;
+}
+.budget {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  border-left: 1.5px dashed var(--accent);
+}
+.axis {
+  position: relative;
+  height: 14px;
+}
+.axisStart {
+  position: absolute;
+  left: 0;
+}
+.axisEnd {
+  position: absolute;
+  right: 0;
+}
+.axisBudget {
+  position: absolute;
+  transform: translateX(-50%);
+}
+.verdict {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}

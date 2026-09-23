@@ -2,17 +2,18 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, startStress, useDevice, useJob, useRecentJobs, useStress, useStressList } from '@/api/hooks'
 import type { StressTest } from '@/api/types'
-import { Banner, Button, Card, EmptyState, Progress, Segmented, Spinner, StatusPill, TableCard, numCell } from '@/design/components'
+import { Banner, Button, Card, EmptyState, Progress, Row, Segmented, Spinner, Stack, StatusPill, TableCard, Text, numCell, selectedRow } from '@/design'
 import { fmt, shortDate, signed } from '@/domain/format'
 import { useScope } from '@/domain/scope'
 import { compareSamples, quartiles } from '@/domain/stats'
 import { useUi } from '@/app/store'
+import s from './Stress.module.css'
 
-const values = (t: StressTest | undefined) => (t?.sessions ?? []).map((s) => s.ttid_ms).filter((v): v is number => v != null && v > 0)
+const values = (t: StressTest | undefined) => (t?.sessions ?? []).map((x) => x.ttid_ms).filter((v): v is number => v != null && v > 0)
 
 export function StressPage() {
   const { scope } = useScope()
-  const app = useUi((s) => s.app)
+  const app = useUi((st) => st.app)
   const qc = useQueryClient()
   const dev = useDevice()
   const list = useStressList()
@@ -51,34 +52,39 @@ export function StressPage() {
   const appName = scope?.apps.find((a) => a.pkg === app)?.name ?? app
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <Stack as="section" gap={20}>
       <Card>
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          <span style={{ font: '600 10.5px var(--font-ui)', letterSpacing: '.16em', color: 'var(--tx3)' }}>COLD STARTS</span>
-          <Segmented label="Cold starts" value={n} onChange={setN} options={[5, 10, 20].map((v) => ({ value: v, label: String(v) }))} />
-          <span style={{ flex: '1 1 260px', fontSize: 13, color: 'var(--tx2)' }}>
-            {appName} is force-stopped and cold-launched {n} times back to back. The spread across sessions decides whether a change is real or noise.
-          </span>
-          <Button variant="primary" disabled={running || !dev.data?.connected} onClick={run}>
-            Run {n} cold starts
-          </Button>
-        </div>
-        {!dev.data?.connected && <div style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 10 }}>Connect a device to run a stress test.</div>}
-        {running && job?.progress && (
-          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13 }}>
-              <Spinner /> Session {job.progress.current} of {job.progress.total}
-            </div>
-            <Progress pct={(Math.max(0, job.progress.current - 1) / job.progress.total) * 100} />
-          </div>
-        )}
-        {err && (
-          <div style={{ marginTop: 12 }}>
+        <Stack gap={16}>
+          <Stack gap={10}>
+            <Row gap={16} wrap>
+              <Text variant="label">COLD STARTS</Text>
+              <Segmented label="Cold starts" value={n} onChange={setN} options={[5, 10, 20].map((v) => ({ value: v, label: String(v) }))} />
+              <Text variant="body" className={s.intro}>
+                {appName} is force-stopped and cold-launched {n} times back to back. The spread across sessions decides whether a change is real or noise.
+              </Text>
+              <Button variant="primary" disabled={running || !dev.data?.connected} onClick={run}>
+                Run {n} cold starts
+              </Button>
+            </Row>
+            {!dev.data?.connected && <Text variant="meta">Connect a device to run a stress test.</Text>}
+          </Stack>
+          {running && job?.progress && (
+            <Stack gap={8}>
+              <Row gap={10}>
+                <Spinner />
+                <Text variant="body" tone="primary">
+                  Session {job.progress.current} of {job.progress.total}
+                </Text>
+              </Row>
+              <Progress pct={(Math.max(0, job.progress.current - 1) / job.progress.total) * 100} />
+            </Stack>
+          )}
+          {err && (
             <Banner tone="fail" title="Could not start">
               {err}
             </Banner>
-          </div>
-        )}
+          )}
+        </Stack>
       </Card>
 
       {!cur ? (
@@ -105,13 +111,19 @@ export function StressPage() {
             {tests.map((t) => {
               const st = t.stats?.ttid_ms
               return (
-                <tr key={t.id} data-hl={`stress:${t.id}`} style={t.id === curId ? { background: 'var(--s2)' } : undefined}>
-                  <td style={{ fontWeight: 700 }}>#{t.id}</td>
-                  <td style={{ color: 'var(--tx2)' }}>{shortDate(t.ts, true)}</td>
+                <tr key={t.id} data-hl={`stress:${t.id}`} className={t.id === curId ? selectedRow : undefined}>
+                  <Text as="td" variant="body" tone="primary" weight={700}>
+                    #{t.id}
+                  </Text>
+                  <Text as="td" variant="body">
+                    {shortDate(t.ts, true)}
+                  </Text>
                   <td className={numCell}>
                     {t.completed ?? '–'} / {t.sessions_requested}
                   </td>
-                  <td style={{ color: 'var(--tx2)' }}>{t.device ?? '–'}</td>
+                  <Text as="td" variant="body">
+                    {t.device ?? '–'}
+                  </Text>
                   <td className={numCell}>{st ? `${fmt(st.median)} ms` : '–'}</td>
                   <td className={numCell}>{st ? `± ${fmt(st.spread_pct, 1)}%` : '–'}</td>
                   <td>
@@ -128,7 +140,7 @@ export function StressPage() {
           </tbody>
         </TableCard>
       )}
-    </section>
+    </Stack>
   )
 }
 
@@ -147,49 +159,67 @@ function Distribution({ cur, base, budget }: { cur: StressTest; base: StressTest
 
   return (
     <Card title="TTID distribution" hint={`${a.length} session${a.length === 1 ? '' : 's'} in test #${cur.id}${base ? ` against the previous completed test, #${base.id}` : ''}. One dot per cold start; the box is the middle half.`}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, position: 'relative' }}>
+      <Stack gap={14}>
         {rows.map((r) => {
           const q = quartiles(r.vals)
           return (
-            <div key={r.label} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px', gap: 12, alignItems: 'center' }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{r.label}</span>
-              <div style={{ position: 'relative', height: 48, background: 'var(--bg)' }}>
-                <div style={{ position: 'absolute', top: 10, bottom: 10, left: X(q.q1), width: `calc(${X(q.q3)} - ${X(q.q1)})`, background: 'var(--s2)', border: `1.5px solid ${r.color}` }} />
-                <div style={{ position: 'absolute', top: 6, bottom: 6, left: X(q.median), width: 3, marginLeft: -1.5, background: r.color }} />
+            <div key={r.label} className={s.row}>
+              <Text variant="body" tone="primary" weight={600}>
+                {r.label}
+              </Text>
+              <div className={s.track}>
+                <div className={s.box} style={{ left: X(q.q1), width: `calc(${X(q.q3)} - ${X(q.q1)})`, borderColor: r.color }} />
+                <div className={s.median} style={{ left: X(q.median), background: r.color }} />
                 {r.vals.map((v, i) => (
-                  <span key={i} title={`${fmt(v, 1)} ms`} style={{ position: 'absolute', left: X(v), top: 10 + ((i * 7) % 28), width: 7, height: 7, marginLeft: -3.5, borderRadius: '50%', background: r.color, opacity: 0.85 }} />
+                  <span key={i} title={`${fmt(v, 1)} ms`} className={s.dot} style={{ left: X(v), top: 10 + ((i * 7) % 28), background: r.color }} />
                 ))}
-                {budget != null && <div style={{ position: 'absolute', top: -4, bottom: -4, left: X(budget), borderLeft: '1.5px dashed var(--accent)' }} />}
+                {budget != null && <div className={s.budget} style={{ left: X(budget) }} />}
               </div>
-              <span style={{ textAlign: 'right', fontWeight: 700 }}>{fmt(q.median)} ms</span>
+              <Text variant="ui" weight={700} align="right">
+                {fmt(q.median)} ms
+              </Text>
             </div>
           )
         })}
-        <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px', gap: 12, fontSize: 11, color: 'var(--tx3)' }}>
+        <div className={s.row}>
           <span />
-          <div style={{ position: 'relative', height: 14 }}>
-            <span style={{ position: 'absolute', left: 0 }}>{fmt(lo - pad)} ms</span>
-            {budget != null && <span style={{ position: 'absolute', left: X(budget), transform: 'translateX(-50%)', color: 'var(--accent-tx)', whiteSpace: 'nowrap' }}>budget {budget}</span>}
-            <span style={{ position: 'absolute', right: 0 }}>{fmt(hi + pad)} ms</span>
+          <div className={s.axis}>
+            <Text variant="caption" className={s.axisStart}>
+              {fmt(lo - pad)} ms
+            </Text>
+            {budget != null && (
+              <Text variant="caption" tone="accent" nowrap className={s.axisBudget} style={{ left: X(budget) }}>
+                budget {budget}
+              </Text>
+            )}
+            <Text variant="caption" className={s.axisEnd}>
+              {fmt(hi + pad)} ms
+            </Text>
           </div>
           <span />
         </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--line)' }}>
+      </Stack>
+      <Row gap={12} wrap className={s.verdict}>
         {cmp ? (
           <>
             <StatusPill tone={cmp.verdict === 'regression' ? 'fail' : 'pass'}>
               {cmp.verdict === 'regression' ? 'Real regression' : cmp.verdict === 'improvement' ? 'Real improvement' : 'Within noise'}
             </StatusPill>
-            <span style={{ fontSize: 13, color: 'var(--tx2)' }}>
+            <Text variant="body">
               Median shift {signed(cmp.shift, 0, ' ms')} · {fmt(cmp.noiseMultiple, 1)}× the previous test's spread · p {cmp.p != null && cmp.p < 0.001 ? '< 0.001' : `= ${fmt(cmp.p, 3)}`}
-            </span>
-            {cmp.lowConfidence && <span style={{ fontSize: 12, color: 'var(--warn)' }}>! Fewer than 10 sessions: low confidence.</span>}
+            </Text>
+            {cmp.lowConfidence && (
+              <Text variant="meta" tone="warn">
+                ! Fewer than 10 sessions: low confidence.
+              </Text>
+            )}
           </>
         ) : (
-          <span style={{ fontSize: 13, color: 'var(--tx3)' }}>No earlier completed test for this app to compare against.</span>
+          <Text variant="body" tone="muted">
+            No earlier completed test for this app to compare against.
+          </Text>
         )}
-      </div>
+      </Row>
     </Card>
   )
 }

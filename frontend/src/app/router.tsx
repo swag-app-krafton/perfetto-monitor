@@ -1,40 +1,47 @@
+import { lazy, Suspense, type ComponentType } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router'
+import { Copilot } from '@/features/copilot/Copilot'
 import { AppShell } from './AppShell'
-import { SCREENS } from './routes'
 import { Placeholder } from './Placeholder'
-import { OverviewPage } from '@/features/overview/OverviewPage'
-import { StartupPage } from '@/features/startup/StartupPage'
-import { FramesPage } from '@/features/frames/FramesPage'
-import { MemoryPage } from '@/features/memory/MemoryPage'
-import { StepsPage } from '@/features/steps/StepsPage'
-import { ScreensPage } from '@/features/screens/ScreensPage'
-import { ComparePage } from '@/features/compare/ComparePage'
-import { HistoryPage } from '@/features/history/HistoryPage'
-import { CapturePage } from '@/features/capture/CapturePage'
-import { StressPage } from '@/features/stress/StressPage'
-import { ManualPage } from '@/features/manual/ManualPage'
+import { SCREENS } from './routes'
 
-const PAGES: Record<string, React.ReactNode> = {
-  overview: <OverviewPage />,
-  startup: <StartupPage />,
-  frames: <FramesPage />,
-  memory: <MemoryPage />,
-  steps: <StepsPage />,
-  screens: <ScreensPage />,
-  compare: <ComparePage />,
-  history: <HistoryPage />,
-  capture: <CapturePage />,
-  stress: <StressPage />,
-  manual: <ManualPage />,
+/** Each screen is its own chunk, loaded on first visit. */
+const page = <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })))
+
+const PAGES: Record<string, ComponentType> = {
+  overview: page(() => import('@/features/overview/OverviewPage'), 'OverviewPage'),
+  startup: page(() => import('@/features/startup/StartupPage'), 'StartupPage'),
+  frames: page(() => import('@/features/frames/FramesPage'), 'FramesPage'),
+  memory: page(() => import('@/features/memory/MemoryPage'), 'MemoryPage'),
+  steps: page(() => import('@/features/steps/StepsPage'), 'StepsPage'),
+  screens: page(() => import('@/features/screens/ScreensPage'), 'ScreensPage'),
+  compare: page(() => import('@/features/compare/ComparePage'), 'ComparePage'),
+  history: page(() => import('@/features/history/HistoryPage'), 'HistoryPage'),
+  capture: page(() => import('@/features/capture/CapturePage'), 'CapturePage'),
+  stress: page(() => import('@/features/stress/StressPage'), 'StressPage'),
+  manual: page(() => import('@/features/manual/ManualPage'), 'ManualPage'),
 }
+const DesignSystemPage = page(() => import('@/features/design-system/DesignSystemPage'), 'DesignSystemPage')
 
 export const router = createBrowserRouter([
+  // The design system's living reference stands outside the app shell.
+  {
+    path: '/design-system',
+    element: (
+      <Suspense>
+        <DesignSystemPage />
+      </Suspense>
+    ),
+  },
   {
     path: '/',
-    element: <AppShell />,
+    element: <AppShell copilot={<Copilot />} />,
     children: [
       { index: true, element: <Navigate to="/overview" replace /> },
-      ...SCREENS.map((sc) => ({ path: sc.path.slice(1), element: PAGES[sc.id] ?? <Placeholder id={sc.id} /> })),
+      ...SCREENS.map((sc) => {
+        const Page = PAGES[sc.id]
+        return { path: sc.path.slice(1), element: Page ? <Page /> : <Placeholder id={sc.id} /> }
+      }),
       { path: '*', element: <Navigate to="/overview" replace /> },
     ],
   },

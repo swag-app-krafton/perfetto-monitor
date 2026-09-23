@@ -1,0 +1,42 @@
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--tx2);
+  font: 500 12px var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.switch:hover {
+  color: var(--tx);
+}
+.track {
+  position: relative;
+  width: 30px;
+  height: 16px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--s3);
+  transition: background var(--dur-fast);
+}
+.knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left var(--dur-fast);
+}
+.switch[aria-checked='true'] .track {
+  background: var(--accent);
+}
+.switch[aria-checked='true'] .knob {
+  left: 16px;
+}

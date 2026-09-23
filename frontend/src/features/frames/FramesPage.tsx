@@ -1,4 +1,4 @@
-import { Card, EmptyState, Grid, KpiTile, LineChart } from '@/design/components'
+import { Card, EmptyState, Grid, KpiTile, LineChart, Stack } from '@/design'
 import { fmt, signed } from '@/domain/format'
 import { metricByKey, valueOf, type MetricDef } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
@@ -41,7 +41,7 @@ export function FramesPage() {
   }
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <Stack as="section" gap={20}>
       <Grid min={200} gap={12}>
         {tile('slow_pct', 'Slow frames · >16.67 ms')}
         {tile('janky_pct', 'Janky frames · >3× budget')}
@@ -67,6 +67,6 @@ export function FramesPage() {
       >
         {chart('thermal_drift_pct', 'var(--c1)')}
       </Card>
-    </section>
+    </Stack>
   )
 }

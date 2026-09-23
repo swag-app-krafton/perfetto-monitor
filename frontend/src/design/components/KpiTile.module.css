@@ -44,3 +44,16 @@
   font-weight: 600;
   white-space: nowrap;
 }
+.same {
+  color: var(--tx2);
+}
+.worse {
+  color: var(--fail);
+}
+.better {
+  color: var(--pass);
+}
+/* What the delta is compared with, or the note shown in its place. */
+.aside {
+  color: var(--tx3);
+}

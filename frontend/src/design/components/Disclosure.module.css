@@ -1,0 +1,24 @@
+.summary {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tx3);
+  font: 500 11.5px var(--font-ui);
+  cursor: pointer;
+  text-align: left;
+}
+.summary:hover {
+  color: var(--tx2);
+}
+.panel {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--tx2);
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}

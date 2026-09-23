@@ -2,11 +2,10 @@ import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useBenchmarkMutations } from '@/api/hooks'
 import type { Run } from '@/api/types'
-import { Button, EmptyState, Grid, SearchInput, Segmented, SectionTitle, SortHeader, StatusPill, TableCard, numCell } from '@/design/components'
+import { Badge, Button, Card, EmptyState, Grid, Row, SearchInput, Segmented, SectionTitle, SortHeader, Stack, StatusPill, TableCard, TableEmptyRow, Text, numCell, useSort } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
 import { valueOf, verdictTone } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
-import { useSort } from '@/lib/useSort'
 import { useUi } from '@/app/store'
 
 type Key = 'id' | 'ts' | 'build' | 'device' | 'verdict' | 'ttid' | 'slow' | 'janky' | 'peak'
@@ -68,8 +67,8 @@ export function HistoryPage() {
     pin.mutate({ runId: r.id }, { onSuccess: () => showToast(`Pinned run #${r.id} as the benchmark`), onError: (e) => showToast(`Could not pin: ${e.message}`) })
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+    <Stack as="section" gap={28}>
+      <Row gap={10} wrap>
         <SearchInput label="Search runs" placeholder="Search run, build, device or date" value={q} onChange={setQ} />
         <Segmented
           label="Verdict"
@@ -82,10 +81,10 @@ export function HistoryPage() {
             { value: 'fail', label: 'Fail' },
           ]}
         />
-        <span style={{ fontSize: 12.5, color: 'var(--tx3)' }}>
+        <Text variant="small" tone="muted">
           {filtered.length} of {runs.length} runs
-        </span>
-      </div>
+        </Text>
+      </Row>
 
       <TableCard minWidth={1120}>
         <thead>
@@ -99,37 +98,45 @@ export function HistoryPage() {
           </tr>
         </thead>
         <tbody>
-          {sorted.length === 0 && (
-            <tr>
-              <td colSpan={COLS.length + 1} style={{ textAlign: 'center', color: 'var(--tx3)', padding: 28 }}>
-                No runs match these filters.
-              </td>
-            </tr>
-          )}
+          {sorted.length === 0 && <TableEmptyRow colSpan={COLS.length + 1}>No runs match these filters.</TableEmptyRow>}
           {sorted.map((r) => {
             const tone = verdictTone(r.analysis?.verdict)
             const ttid = valueOf(r, 'ttff_ms')
             const over = ttid != null && r.ttid_budget_ms != null && ttid > r.ttid_budget_ms
             return (
               <tr key={r.id} data-hl={`run:${r.id}`}>
-                <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
-                  #{r.id}
-                  {pinnedIds.has(r.id) && <span style={{ marginLeft: 8, padding: '1px 6px', borderRadius: 999, background: 'var(--s2)', color: 'var(--c4)', font: '700 10px var(--font-display)' }}>B</span>}
+                <td>
+                  <Row gap={8}>
+                    <Text variant="body" tone="primary" weight={700} nowrap>
+                      #{r.id}
+                    </Text>
+                    {pinnedIds.has(r.id) && <Badge tone="c4">B</Badge>}
+                  </Row>
                 </td>
-                <td style={{ whiteSpace: 'nowrap', color: 'var(--tx2)' }}>{shortDate(r.ts, true)}</td>
-                <td style={{ color: 'var(--tx2)' }}>{build(r) || '–'}</td>
-                <td style={{ color: 'var(--tx2)' }}>{r.device ?? '–'}</td>
+                <td>
+                  <Text variant="body" nowrap>
+                    {shortDate(r.ts, true)}
+                  </Text>
+                </td>
+                <td>
+                  <Text variant="body">{build(r) || '–'}</Text>
+                </td>
+                <td>
+                  <Text variant="body">{r.device ?? '–'}</Text>
+                </td>
                 <td>
                   <StatusPill tone={tone}>{tone === 'neutral' ? 'NONE' : undefined}</StatusPill>
                 </td>
-                <td className={numCell} style={{ color: over ? 'var(--fail)' : undefined, fontWeight: 600 }}>
-                  {ttid == null ? '–' : `${fmt(ttid)} ms`}
+                <td className={numCell}>
+                  <Text variant="body" tone={over ? 'fail' : 'primary'} weight={600}>
+                    {ttid == null ? '–' : `${fmt(ttid)} ms`}
+                  </Text>
                 </td>
                 <td className={numCell}>{fmt(valueOf(r, 'slow_pct'), 2)}</td>
                 <td className={numCell}>{fmt(valueOf(r, 'janky_pct'), 2)}</td>
                 <td className={numCell}>{valueOf(r, 'peak_rss_mb') == null ? '–' : `${fmt(valueOf(r, 'peak_rss_mb'))} MB`}</td>
                 <td>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <Row gap={6}>
                     <Button variant="mini" onClick={() => navigate(`/overview?run=${r.id}`)}>
                       Open
                     </Button>
@@ -141,7 +148,7 @@ export function HistoryPage() {
                     <Button variant="mini" disabled={pinnedIds.has(r.id) || pin.isPending} onClick={() => doPin(r)}>
                       {pinnedIds.has(r.id) ? 'Pinned' : 'Pin as benchmark'}
                     </Button>
-                  </div>
+                  </Row>
                 </td>
               </tr>
             )
@@ -149,7 +156,7 @@ export function HistoryPage() {
         </tbody>
       </TableCard>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Stack gap={14}>
         <SectionTitle aside="One per app, path and device. Regressions are measured against the active one.">Pinned benchmarks</SectionTitle>
         {benchmarks.length === 0 && <EmptyState>No benchmark is pinned. Pin a known-good run above to compare every new run against it.</EmptyState>}
         <Grid min={300}>
@@ -157,47 +164,51 @@ export function HistoryPage() {
             const r = scope.byId(b.run_id)
             const active = b.run_id === activeId
             return (
-              <div key={b.scope} style={{ background: 'var(--s1)', border: '1px solid var(--line)', borderTop: '3px solid var(--c4)', padding: 20, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-                  <span style={{ font: '800 22px var(--font-display)' }}>#{b.run_id}</span>
-                  <span style={{ fontSize: 12, color: active ? 'var(--c4)' : 'var(--tx3)', fontWeight: 600 }}>{active ? 'Active benchmark' : 'Pinned'}</span>
-                </div>
-                {b.note && <div style={{ fontSize: 13, color: 'var(--tx2)' }}>{b.note}</div>}
-                <div style={{ fontSize: 12, color: 'var(--tx3)' }}>
-                  {shortDate(b.ts)} · {b.device ?? 'any device'} · {b.app_version ?? b.label ?? 'no build'} · pinned {shortDate(b.set_at)}
-                </div>
-                {r && (
-                  <div style={{ display: 'flex', gap: 16, fontSize: 12.5 }}>
-                    <span>
-                      TTID <b>{fmt(valueOf(r, 'ttff_ms'))} ms</b>
-                    </span>
-                    <span>
-                      Slow <b>{fmt(valueOf(r, 'slow_pct'), 2)}%</b>
-                    </span>
-                    <span>
-                      Peak <b>{fmt(valueOf(r, 'peak_rss_mb'))} MB</b>
-                    </span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                  {latest && latest.id !== b.run_id && (
-                    <Button variant="mini" onClick={() => navigate(`/compare?mode=run&a=${latest.id}&b=${b.run_id}`)}>
-                      Compare with #{latest.id}
+              <Card key={b.scope} edge={{ side: 'top', color: 'var(--c4)', width: 3 }}>
+                <Stack gap={14}>
+                  <Stack gap={10}>
+                    <Row gap={10} align="baseline">
+                      <Text variant="display">#{b.run_id}</Text>
+                      <Badge tone={active ? 'c4' : 'neutral'}>{active ? 'Active benchmark' : 'Pinned'}</Badge>
+                    </Row>
+                    {b.note && <Text variant="body">{b.note}</Text>}
+                    <Text variant="meta">
+                      {shortDate(b.ts)} · {b.device ?? 'any device'} · {b.app_version ?? b.label ?? 'no build'} · pinned {shortDate(b.set_at)}
+                    </Text>
+                    {r && (
+                      <Row gap={16}>
+                        <Text variant="small" tone="primary">
+                          TTID <b>{fmt(valueOf(r, 'ttff_ms'))} ms</b>
+                        </Text>
+                        <Text variant="small" tone="primary">
+                          Slow <b>{fmt(valueOf(r, 'slow_pct'), 2)}%</b>
+                        </Text>
+                        <Text variant="small" tone="primary">
+                          Peak <b>{fmt(valueOf(r, 'peak_rss_mb'))} MB</b>
+                        </Text>
+                      </Row>
+                    )}
+                  </Stack>
+                  <Row gap={6}>
+                    {latest && latest.id !== b.run_id && (
+                      <Button variant="mini" onClick={() => navigate(`/compare?mode=run&a=${latest.id}&b=${b.run_id}`)}>
+                        Compare with #{latest.id}
+                      </Button>
+                    )}
+                    <Button
+                      variant="mini"
+                      onClick={() => unpin.mutate(b.run_id, { onSuccess: () => showToast(`Unpinned run #${b.run_id}`) })}
+                      title={active ? 'Unpinning leaves this app and path with no benchmark until another run is pinned.' : undefined}
+                    >
+                      Unpin
                     </Button>
-                  )}
-                  <Button
-                    variant="mini"
-                    onClick={() => unpin.mutate(b.run_id, { onSuccess: () => showToast(`Unpinned run #${b.run_id}`) })}
-                    title={active ? 'Unpinning leaves this app and path with no benchmark until another run is pinned.' : undefined}
-                  >
-                    Unpin
-                  </Button>
-                </div>
-              </div>
+                  </Row>
+                </Stack>
+              </Card>
             )
           })}
         </Grid>
-      </div>
-    </section>
+      </Stack>
+    </Stack>
   )
 }

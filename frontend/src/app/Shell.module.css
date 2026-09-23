@@ -8,6 +8,7 @@
 
 /* ---------------------------------------------------------------- sidebar */
 .nav {
+  width: 232px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -15,9 +16,13 @@
   border-right: 1px solid var(--line);
   overflow-y: auto;
   height: 100%;
-  z-index: 60;
+  z-index: var(--z-sidebar);
+}
+.navRail {
+  width: 72px;
 }
 .navDrawer {
+  width: 264px;
   position: fixed;
   top: 0;
   bottom: 0;
@@ -27,14 +32,11 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
-  z-index: 59;
+  z-index: calc(var(--z-sidebar) - 1);
 }
 .brand {
   height: 72px;
   flex: none;
-  display: flex;
-  align-items: center;
-  gap: 12px;
   padding: 0 20px;
   border-bottom: 1px solid var(--line);
 }
@@ -57,15 +59,6 @@
 }
 .groupLabel {
   padding: 0 10px 8px;
-  font: 600 10.5px var(--font-ui);
-  letter-spacing: 0.18em;
-  color: var(--tx3);
-  white-space: nowrap;
-}
-.items {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 .item {
   position: relative;
@@ -111,9 +104,6 @@
 .navFoot {
   padding: 16px 12px;
   border-top: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 .railBtn {
   width: 36px;
@@ -129,9 +119,7 @@
 .railBtn:hover {
   border-color: var(--tx3);
 }
-.footNote {
-  font-size: 11px;
-  line-height: 1.5;
+.footLink {
   color: var(--tx3);
 }
 
@@ -227,26 +215,10 @@
 }
 
 /* ------------------------------------------------------------ page header */
-.header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
 .h1 {
-  margin: 12px 0 0;
-  font: 800 clamp(28px, 3.4vw, 44px) / 1.02 var(--font-display);
-  letter-spacing: -0.015em;
+  margin-top: 12px;
 }
 .hint {
-  margin: 10px 0 0;
-  color: var(--tx2);
-  font-size: 14px;
+  margin-top: 10px;
   text-wrap: pretty;
-}
-.runMeta {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--tx3);
 }

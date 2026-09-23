@@ -1,4 +1,5 @@
-import { Icon, Segmented, SelectField } from '@/design/components'
+import { Link } from 'react-router'
+import { Icon, Segmented, SelectField } from '@/design'
 import { pathLabel } from '@/domain/format'
 import type { Scope } from '@/domain/scope'
 import { useUi, type RangeKey } from './store'
@@ -41,9 +42,9 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
           />
         )}
         <SelectField label="Range" value={range} options={RANGES} onChange={(v) => setFilters({ range: v })} />
-        <a className={s.tokensLink} href="/design-system">
+        <Link className={s.tokensLink} to="/design-system">
           Tokens
-        </a>
+        </Link>
         <button type="button" className={s.themeBtn} onClick={toggleTheme} aria-label="Toggle colour theme">
           <span className={s.themeGlyph} aria-hidden="true" />
           {theme === 'dark' ? 'Dark' : 'Light'}

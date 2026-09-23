@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import type { Run } from '@/api/types'
-import { Card, EmptyState, Grid, LineChart, Segmented, SectionTitle, StackedBars, StatusPill, StatusSquare, type StackRow } from '@/design/components'
+import { Card, EmptyState, Grid, Legend, LineChart, Row, Segmented, SectionTitle, Stack, StackedBars, StatusPill, StatusSquare, Text, type StackRow } from '@/design'
 import { fmt, signed, stepName } from '@/domain/format'
 import { valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
 import { useUi } from '@/app/store'
 import { FindingCard } from '@/features/shared/FindingCard'
 import { findingArea, findingId } from '@/features/shared/findings'
+import s from './Startup.module.css'
 
 const SERIES = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)']
 
@@ -27,23 +28,26 @@ export function StartupPage() {
   const critical = model.critical_path[latest.path_kind] ?? null
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <Stack as="section" gap={20}>
       <Card
         data-hl="ttidChart"
         title="TTID over runs"
         hint={`Time to initial display${latest.app_role === 'own' ? ' (the first usable camera frame)' : ''}.${budget ? ` Dashed line is the ${budget} ms budget.` : ' No budget is set for this app.'}`}
         actions={
           ttid != null && (
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ font: '700 28px/1 var(--font-display)', color: budget && ttid > budget ? 'var(--fail)' : 'var(--tx)' }}>
-                {fmt(ttid)} <span style={{ fontSize: 13, color: 'var(--tx3)' }}>ms</span>
+            <Stack gap={4} align="end">
+              <div className={s.ttid} style={{ color: budget && ttid > budget ? 'var(--fail)' : 'var(--tx)' }}>
+                {fmt(ttid)}{' '}
+                <Text as="span" variant="heading-xs" tone="muted">
+                  ms
+                </Text>
               </div>
               {base && baseTtid != null && (
-                <div style={{ fontSize: 12, marginTop: 4, color: ttid > baseTtid ? 'var(--fail)' : 'var(--pass)' }}>
+                <Text variant="meta" tone={ttid > baseTtid ? 'fail' : 'pass'}>
                   {ttid > baseTtid ? '▲' : '▼'} {signed(ttid - baseTtid, 0, ' ms')} vs #{base.id}
-                </div>
+                </Text>
               )}
-            </div>
+            </Stack>
           )
         }
       >
@@ -67,7 +71,7 @@ export function StartupPage() {
       {findings.map(({ f, i }) => (
         <FindingCard key={i} compact finding={f} id={findingId(i)} area="Startup" onAsk={() => askCopilot(`Explain finding ${findingId(i)} on run #${latest.id}: ${f.title}`)} />
       ))}
-    </section>
+    </Stack>
   )
 }
 
@@ -96,21 +100,10 @@ function Composition({ runs, latestId, budget, critical }: { runs: Run[]; latest
 
   return (
     <Card data-hl="compose" title="Critical-path composition" hint={`Last ${runs.length} runs, each split by its startup steps. Time no step accounts for is left as a gap.`}>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '0 0 14px' }}>
-        {top.map((k) => (
-          <span key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tx2)' }}>
-            <span style={{ width: 10, height: 10, background: colors[k] }} />
-            {stepName(k)}
-          </span>
-        ))}
-        {hasOther && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--tx2)' }}>
-            <span style={{ width: 10, height: 10, background: 'var(--tx3)' }} />
-            Other
-          </span>
-        )}
-      </div>
-      {rows.length ? <StackedBars rows={rows} colors={colors} budget={budget} unit="ms" /> : <EmptyState>No runs in range.</EmptyState>}
+      <Stack gap={14}>
+        <Legend items={[...top.map((k) => ({ label: stepName(k), color: colors[k]! })), ...(hasOther ? [{ label: 'Other', color: 'var(--tx3)' }] : [])]} />
+        {rows.length ? <StackedBars rows={rows} colors={colors} budget={budget} unit="ms" /> : <EmptyState>No runs in range.</EmptyState>}
+      </Stack>
     </Card>
   )
 }
@@ -144,36 +137,51 @@ function Ordering({ run, benchmark, critical, deferred }: { run: Run; benchmark:
     const bad = items.filter((t) => t.before).length
     return (
       <>
-        <span style={{ alignSelf: 'flex-start' }}>
-          <StatusPill tone={bad ? 'fail' : 'pass'}>{bad ? `${bad} violation${bad === 1 ? '' : 's'}` : 'No violations'}</StatusPill>
-        </span>
-        <div style={{ position: 'relative', height: 56, marginTop: 14, borderBottom: '1px solid var(--line2)' }}>
-          <div style={{ position: 'absolute', left: 0, width: X(ff), top: 0, bottom: 0, background: 'var(--s2)' }} />
-          <div style={{ position: 'absolute', left: X(ff), top: -16, bottom: 0, borderLeft: '2px solid var(--tx)' }}>
-            <span style={{ position: 'absolute', left: 6, top: -2, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>First frame {fmt(ff)} ms</span>
-          </div>
-          {items.map((t) => (
-            <div key={t.name} title={t.name} style={{ position: 'absolute', left: X(t.at), width: X(Math.max(t.dur, span / 200)), bottom: 8, height: 14, background: t.before ? 'var(--fail)' : 'var(--pass)' }} />
-          ))}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--tx3)', marginTop: -8 }}>
-          <span>0 ms</span>
-          <span>{fmt(span / 2)}</span>
-          <span>{fmt(span)} ms</span>
-        </div>
         <div>
-          {items.length === 0 && <div style={{ fontSize: 13, color: 'var(--tx3)', paddingTop: 8 }}>No deferred work recorded in this run.</div>}
-          {items.map((t) => (
-            <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: '1px solid var(--line)', fontSize: 13 }}>
-              <StatusSquare tone={t.before ? 'fail' : 'pass'} size={18} fontSize={10} />
-              <span style={{ flex: 1, fontWeight: 500, minWidth: 0 }}>{t.name}</span>
-              <span style={{ color: 'var(--tx2)', fontSize: 12 }}>
-                starts {fmt(t.at)} ms · {fmt(t.dur)} ms
-              </span>
-              <span style={{ width: 124, textAlign: 'right', fontSize: 12, color: t.before ? 'var(--fail)' : 'var(--pass)' }}>
-                {t.before ? 'Before first frame' : 'After first frame'}
-              </span>
+          <StatusPill tone={bad ? 'fail' : 'pass'}>{bad ? `${bad} violation${bad === 1 ? '' : 's'}` : 'No violations'}</StatusPill>
+        </div>
+        <Stack gap={8}>
+          <div className={s.track}>
+            <div className={s.preFrame} style={{ width: X(ff) }} />
+            <div className={s.frameMark} style={{ left: X(ff) }}>
+              <Text variant="caption" tone="primary" weight={600} nowrap className={s.frameLabel}>
+                First frame {fmt(ff)} ms
+              </Text>
             </div>
+            {items.map((t) => (
+              <div
+                key={t.name}
+                title={t.name}
+                className={s.taskBar}
+                style={{ left: X(t.at), width: X(Math.max(t.dur, span / 200)), background: t.before ? 'var(--fail)' : 'var(--pass)' }}
+              />
+            ))}
+          </div>
+          <Row justify="between">
+            <Text variant="caption">0 ms</Text>
+            <Text variant="caption">{fmt(span / 2)}</Text>
+            <Text variant="caption">{fmt(span)} ms</Text>
+          </Row>
+        </Stack>
+        <div>
+          {items.length === 0 && (
+            <Text variant="body" tone="muted" className={s.noTasks}>
+              No deferred work recorded in this run.
+            </Text>
+          )}
+          {items.map((t) => (
+            <Row key={t.name} gap={10} className={s.task}>
+              <StatusSquare tone={t.before ? 'fail' : 'pass'} size={18} fontSize={10} />
+              <Text variant="body" tone="primary" weight={500} className={s.taskName}>
+                {t.name}
+              </Text>
+              <Text variant="meta" tone="secondary">
+                starts {fmt(t.at)} ms · {fmt(t.dur)} ms
+              </Text>
+              <Text variant="meta" tone={t.before ? 'fail' : 'pass'} align="right" className={s.taskWhen}>
+                {t.before ? 'Before first frame' : 'After first frame'}
+              </Text>
+            </Row>
           ))}
         </div>
       </>
@@ -198,7 +206,7 @@ function Ordering({ run, benchmark, critical, deferred }: { run: Run; benchmark:
           />
         ) : undefined
       }
-      style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+      className={s.ordering}
     >
       {body()}
     </Card>
