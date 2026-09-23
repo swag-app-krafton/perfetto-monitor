@@ -232,6 +232,23 @@ class H(SimpleHTTPRequestHandler):
             # and not worth a traceback in the server log every time.
             pass
 
+    def _sse_start(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+    def _sse(self, kind, data):
+        """One server-sent event. Returns False once the client has gone (Stop
+        in the panel aborts the request), so the producer can stop early."""
+        try:
+            self.wfile.write(f"event: {kind}\ndata: {json.dumps(data)}\n\n".encode())
+            self.wfile.flush()
+            return True
+        except (BrokenPipeError, ConnectionResetError):
+            return False
+
     def do_GET(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
@@ -278,6 +295,15 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(extract_screens(row["trace_path"]))
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
+        if u.path == "/api/copilot/threads":
+            tid = q.get("id", [None])[0]
+            if tid:
+                t = store.copilot_thread(int(tid))
+                return self._json(t) if t else self._json({"error": "unknown thread"}, 404)
+            return self._json({"threads": store.copilot_threads()})
+        if u.path == "/api/copilot/pins":
+            rid = q.get("run", [None])[0]
+            return self._json({"pins": store.copilot_pins(int(rid) if rid else None)})
         if u.path.startswith("/api/stress"):
             sid = q.get("id", [None])[0]
             if sid:
@@ -303,6 +329,24 @@ class H(SimpleHTTPRequestHandler):
         # The dashboard is bound to loopback only, so these mutate local history
         # without auth. That is deliberate for a dev/CI tool; do not expose the
         # server on a routable interface.
+        if u.path == "/api/copilot/ask":
+            return self._copilot_ask(payload)
+        if u.path == "/api/copilot/pin":
+            try:
+                return self._json({"ok": True, "pin": store.copilot_pin(int(payload["message_id"]))})
+            except (KeyError, ValueError, TypeError) as e:
+                return self._json({"error": str(e)}, 400)
+        if u.path == "/api/copilot/unpin":
+            try:
+                return self._json({"ok": bool(store.copilot_unpin(int(payload["id"])))})
+            except (KeyError, ValueError, TypeError) as e:
+                return self._json({"error": str(e)}, 400)
+        if u.path == "/api/copilot/feedback":
+            try:
+                n = store.copilot_feedback(int(payload["message_id"]), payload.get("value"))
+            except (KeyError, ValueError, TypeError) as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"ok": bool(n)})
         if u.path == "/api/benchmark/set":
             try:
                 res = store.set_benchmark(int(payload["run_id"]), note=payload.get("note"))
@@ -362,6 +406,44 @@ class H(SimpleHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
             return self._json({"ok": True, "job_id": jid})
         return self._json({"error": "unknown endpoint"}, 404)
+
+    def _copilot_ask(self, payload):
+        """Stream a Copilot answer as server-sent events.
+
+        The question and the finished answer are saved to the thread, so it
+        reopens as it was. A client that stops mid-stream simply stops
+        receiving: nothing half-finished is saved as an answer.
+        """
+        from . import copilot
+        from .screens import extract_screens
+        text = (payload.get("text") or "").strip()
+        if not text:
+            return self._json({"error": "empty question"}, 400)
+        tid = payload.get("thread_id") or store.copilot_thread_new(text)
+        store.copilot_message_add(tid, "user", {"text": text, "context": payload.get("context") or []})
+        self._sse_start()
+        self._sse("thread", {"id": tid})
+        blocks, final = [], {}
+        alive = [True]
+
+        def emit(kind, data):
+            if not alive[0]:
+                return
+            if kind == "block":
+                blocks.append(data)
+            elif kind in ("done", "error"):
+                final.update({"kind": kind, **data})
+            alive[0] = self._sse(kind, data)
+
+        services = {"stress_tests": lambda: [store.stress_get(t["id"]) for t in store.stress_list()],
+                    "compare": store.compare, "extract_screens": extract_screens,
+                    "trace_path": lambda r: r["trace_path"]}
+        copilot.answer(text, history=_payload(), scope=payload.get("scope") or {},
+                       chips=payload.get("context") or [], deep=bool(payload.get("deep")),
+                       emit=emit, services=services)
+        if alive[0] and final:
+            mid = store.copilot_message_add(tid, "assistant", {"blocks": blocks, "result": final})
+            self._sse("saved", {"message_id": mid})
 
     def log_message(self, *a):
         pass

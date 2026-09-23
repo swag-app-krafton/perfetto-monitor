@@ -69,6 +69,34 @@ create table if not exists stress_sessions (
 );
 create index if not exists idx_stress on stress_sessions(stress_id);
 
+-- Copilot conversations. Messages keep the rendered answer blocks, so a
+-- thread reopens exactly as it was, and a model-backed engine can later read
+-- earlier turns as context.
+create table if not exists copilot_threads (
+  id integer primary key autoincrement,
+  title text not null,
+  created text not null,
+  updated text not null
+);
+create table if not exists copilot_messages (
+  id integer primary key autoincrement,
+  thread_id integer not null references copilot_threads(id) on delete cascade,
+  role text not null,
+  json text not null,
+  created text not null,
+  feedback text
+);
+-- A Copilot answer pinned to the Overview as a finding on the run it is about.
+create table if not exists copilot_pins (
+  id integer primary key autoincrement,
+  message_id integer not null unique references copilot_messages(id) on delete cascade,
+  run_id integer not null references runs(id) on delete cascade,
+  title text not null,
+  severity text not null,
+  evidence text not null,
+  created text not null
+);
+
 create table if not exists benchmarks (
   scope text primary key,
   run_id integer not null references runs(id) on delete cascade,
@@ -592,3 +620,105 @@ def history(limit=100, db=None):
     for r in runs:
         r["steps"] = sorted(per.get(r["id"], []), key=lambda x: x["start_ms"] or 0)
     return list(reversed(runs))
+
+
+# ---------------------------------------------------------------- copilot
+
+def _now():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def copilot_thread_new(title, db=None):
+    c = connect(db)
+    tid = c.execute("insert into copilot_threads (title, created, updated) values (?,?,?)",
+                    (title[:120], _now(), _now())).lastrowid
+    c.commit(); c.close()
+    return tid
+
+
+def copilot_message_add(thread_id, role, payload, db=None):
+    c = connect(db)
+    mid = c.execute("insert into copilot_messages (thread_id, role, json, created) values (?,?,?,?)",
+                    (thread_id, role, json.dumps(payload), _now())).lastrowid
+    c.execute("update copilot_threads set updated=? where id=?", (_now(), thread_id))
+    c.commit(); c.close()
+    return mid
+
+
+def copilot_threads(limit=30, db=None):
+    c = connect(db)
+    rows = [dict(r) for r in c.execute(
+        "select id, title, created, updated from copilot_threads order by updated desc limit ?", (limit,))]
+    c.close()
+    return rows
+
+
+def copilot_thread(thread_id, db=None):
+    c = connect(db)
+    t = c.execute("select id, title, created, updated from copilot_threads where id=?", (thread_id,)).fetchone()
+    if not t:
+        c.close()
+        return None
+    msgs = [{"id": r["id"], "role": r["role"], "feedback": r["feedback"], **json.loads(r["json"])}
+            for r in c.execute("select * from copilot_messages where thread_id=? order by id", (thread_id,))]
+    c.close()
+    return {**dict(t), "messages": msgs}
+
+
+def copilot_pin(message_id, db=None):
+    """Pin a saved Copilot answer as a finding on the run it answered about.
+
+    The finding is built from the saved answer (its verdict and the question
+    that prompted it), not from anything the client sends. Pinning the same
+    answer twice returns the existing pin.
+    """
+    c = connect(db)
+    try:
+        m = c.execute("select * from copilot_messages where id=? and role='assistant'", (message_id,)).fetchone()
+        if not m:
+            raise ValueError(f"no saved answer {message_id}")
+        if old := c.execute("select * from copilot_pins where message_id=?", (message_id,)).fetchone():
+            return dict(old)
+        body = json.loads(m["json"])
+        run_id = (body.get("result") or {}).get("run_id")
+        if run_id is None:
+            raise ValueError("that answer is not about a run")
+        q = c.execute("select json from copilot_messages where thread_id=? and id<? and role='user' "
+                      "order by id desc limit 1", (m["thread_id"], message_id)).fetchone()
+        title = json.loads(q["json"])["text"] if q else "Copilot answer"
+        verdict = next((b for b in body.get("blocks", []) if b.get("type") == "verdict"), None)
+        paras = [b["text"] for b in body.get("blocks", []) if b.get("type") == "para"]
+        severity = {"fail": "high", "warn": "medium"}.get((verdict or {}).get("tone"), "low")
+        evidence = (verdict or {}).get("text") or (paras[0] if paras else "See the Copilot thread.")
+        pid = c.execute("insert into copilot_pins (message_id, run_id, title, severity, evidence, created) "
+                        "values (?,?,?,?,?,?)", (message_id, run_id, title[:200], severity, evidence, _now())).lastrowid
+        c.commit()
+        return dict(c.execute("select * from copilot_pins where id=?", (pid,)).fetchone())
+    finally:
+        c.close()
+
+
+def copilot_pins(run_id=None, db=None):
+    c = connect(db)
+    sql, args = "select * from copilot_pins", ()
+    if run_id is not None:
+        sql, args = sql + " where run_id=?", (run_id,)
+    rows = [dict(r) for r in c.execute(sql + " order by id", args)]
+    c.close()
+    return rows
+
+
+def copilot_unpin(pin_id, db=None):
+    c = connect(db)
+    n = c.execute("delete from copilot_pins where id=?", (pin_id,)).rowcount
+    c.commit(); c.close()
+    return n
+
+
+def copilot_feedback(message_id, value, db=None):
+    if value not in ("up", "down", None):
+        raise ValueError("feedback must be 'up', 'down' or null")
+    c = connect(db)
+    n = c.execute("update copilot_messages set feedback=? where id=?", (value, message_id)).rowcount
+    c.commit(); c.close()
+    return n
