@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { EmptyState, KpiTile, SectionTitle } from '@/design/components'
+import { Button, EmptyState, Grid, KpiTile, SectionTitle, Stack } from '@/design'
 import { fmt, signed } from '@/domain/format'
 import { METRICS, valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
@@ -7,13 +7,15 @@ import { stepDeltas, worstRegression } from '@/domain/steps'
 import { useUi } from '@/app/store'
 import { FindingCard } from '@/features/shared/FindingCard'
 import { findingArea, findingId, summariseSeverity } from '@/features/shared/findings'
+import { usePinMutations, usePins } from '@/features/copilot/api'
 import { VerdictHero } from './VerdictHero'
 import { VerdictStrip } from './VerdictStrip'
-import s from './Overview.module.css'
 
 export function OverviewPage() {
   const { scope, isLoading, error } = useScope()
   const askCopilot = useUi((st) => st.askCopilot)
+  const pins = usePins()
+  const { unpin } = usePinMutations()
   if (isLoading) return <EmptyState>Loading runs…</EmptyState>
   if (error) return <EmptyState title="Could not load runs">{error.message}</EmptyState>
   if (!scope?.latest) {
@@ -34,9 +36,10 @@ export function OverviewPage() {
   const worst = worstRegression(deltas, ttid != null && ttidBase != null ? ttid - ttidBase : null)
   const trendRuns = runs.slice(-12)
   const findings = latest.analysis?.findings ?? []
+  const pinned = (pins.data ?? []).filter((p) => p.run_id === latest.id)
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+    <Stack as="section" gap={28}>
       <VerdictHero
         run={latest}
         benchmark={benchmarkRun}
@@ -45,7 +48,7 @@ export function OverviewPage() {
         budgets={history.global_budgets}
       />
 
-      <div className={s.kpis}>
+      <Grid min={160} gap={12}>
         {METRICS.map((m) => {
           const v = valueOf(latest, m.key)
           const b = valueOf(base, m.key)
@@ -66,13 +69,13 @@ export function OverviewPage() {
             />
           )
         })}
-      </div>
+      </Grid>
 
       <VerdictStrip runs={runs} latest={latest} benchmarkId={benchmarkRun?.id ?? null} />
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <SectionTitle aside={summariseSeverity(findings)}>Findings</SectionTitle>
-        {findings.length === 0 && <EmptyState>No findings. Every measured metric is within budget and baseline.</EmptyState>}
+      <Stack gap={12}>
+        <SectionTitle aside={summariseSeverity(findings) + (pinned.length ? ` · ${pinned.length} pinned from Copilot` : '')}>Findings</SectionTitle>
+        {findings.length === 0 && pinned.length === 0 && <EmptyState>No findings. Every measured metric is within budget and baseline.</EmptyState>}
         {findings.map((f, i) => (
           <FindingCard
             key={i}
@@ -82,7 +85,20 @@ export function OverviewPage() {
             onAsk={() => askCopilot(`Explain finding ${findingId(i)} on run #${latest.id}: ${f.title}`)}
           />
         ))}
-      </div>
-    </section>
+        {pinned.map((p) => (
+          <FindingCard
+            key={`pin-${p.id}`}
+            finding={{ title: p.title, severity: p.severity, evidence: p.evidence, recommendation: 'Confirm this in the trace before acting on it; the answer was computed from the run data.' }}
+            id={`C-${p.id}`}
+            area="Pinned from Copilot"
+            actions={
+              <Button variant="mini" onClick={() => unpin.mutate(p.id)} disabled={unpin.isPending}>
+                Unpin
+              </Button>
+            }
+          />
+        ))}
+      </Stack>
+    </Stack>
   )
 }

@@ -5,9 +5,10 @@ export const HIGHLIGHT_MS = 2800
 const OFFSET = 96
 
 /** Link target for "go to X on screen Y and ring it": `/steps?focus=step:foo`.
+ *  `path` may carry its own query (`/screens?run=81`).
  *  Screens mark targets with `data-hl="<id>"`; screens that need to *open*
  *  something first (a step's drill-down) read `focus` themselves. */
-export const focusHref = (path: string, id: string) => `${path}?focus=${encodeURIComponent(id)}`
+export const focusHref = (path: string, id: string) => `${path}${path.includes('?') ? '&' : '?'}focus=${encodeURIComponent(id)}`
 
 export function useFocusParam(): string | null {
   const { search } = useLocation()

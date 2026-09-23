@@ -1,14 +1,6 @@
 import { useEffect, useRef } from 'react'
-
-export interface LogLine {
-  t: number
-  text: string
-}
-export type LogLevel = 'INFO' | 'WARN' | 'ERROR'
-
-/** Level from the line's own prefix, as the job runner writes them. */
-export const levelOf = (text: string): LogLevel =>
-  /^(ERROR|FATAL)\b/i.test(text) ? 'ERROR' : /^(warning|note|WARN)\b/i.test(text) ? 'WARN' : 'INFO'
+import { levelOf, type LogLine } from './logLevel'
+import s from './LogConsole.module.css'
 
 const fmtT = (t: number) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${(t % 60).toFixed(2).padStart(5, '0')}`
 
@@ -31,25 +23,25 @@ export function LogConsole({ lines, running, label = 'Job log' }: { lines: LogLi
         const el = e.currentTarget
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
       }}
-      style={{ background: 'var(--con-bg)', padding: '10px 0', font: '12px/1.7 var(--font-mono)', color: 'var(--con-tx)', minHeight: 280, maxHeight: 420, overflowY: 'auto' }}
+      className={s.console}
     >
       {lines.map((l, i) => {
         const lv = levelOf(l.text)
-        const tint = lv === 'WARN' ? { background: 'rgba(245,184,61,.08)', color: 'var(--con-warn)' } : lv === 'ERROR' ? { background: 'rgba(255,87,115,.10)', color: 'var(--con-err)' } : {}
+        const tint = lv === 'WARN' ? s.warn : lv === 'ERROR' ? s.error : null
         return (
-          <div key={i} style={{ display: 'flex', gap: 12, padding: '0 14px', ...tint }}>
-            <span style={{ color: 'var(--con-dim)', flex: 'none' }}>{fmtT(l.t)}</span>
-            <span style={{ width: 40, flex: 'none', fontWeight: 700 }}>{lv === 'INFO' ? '' : lv}</span>
-            <span style={{ overflowWrap: 'anywhere' }}>{l.text.replace(/^(ERROR|FATAL|warning|note):\s*/i, '')}</span>
+          <div key={i} className={tint ? `${s.line} ${tint}` : s.line}>
+            <span className={s.time}>{fmtT(l.t)}</span>
+            <span className={s.level}>{lv === 'INFO' ? '' : lv}</span>
+            <span className={s.text}>{l.text.replace(/^(ERROR|FATAL|warning|note):\s*/i, '')}</span>
           </div>
         )
       })}
       {running && (
-        <div style={{ padding: '0 14px' }}>
-          <span className="sp-pulse" style={{ display: 'inline-block', width: 7, height: 14, background: 'var(--con-tx)', animation: 'sp-pulse 1.2s ease-in-out infinite', verticalAlign: 'middle' }} />
+        <div className={s.pad}>
+          <span className={s.cursor} />
         </div>
       )}
-      {!lines.length && !running && <div style={{ padding: '0 14px', color: 'var(--con-dim)' }}>No output yet.</div>}
+      {!lines.length && !running && <div className={s.empty}>No output yet.</div>}
     </div>
   )
 }

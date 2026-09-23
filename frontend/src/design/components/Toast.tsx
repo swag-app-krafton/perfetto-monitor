@@ -1,41 +1,17 @@
 import { useEffect } from 'react'
-import { useUi } from '@/app/store'
+import s from './Toast.module.css'
 
-/** Bottom-centre, inverted, auto-hides after 2.4s. Driven by useUi().showToast. */
-export function Toast() {
-  const toast = useUi((s) => s.toast)
+/** A brief confirmation: bottom-centre, inverted, gone after `duration`.
+ *  Pass a new `id` to show the same text again. */
+export function Toast({ message, id, onDismiss, duration = 2400 }: { message: string | null; id?: number; onDismiss: () => void; duration?: number }) {
   useEffect(() => {
-    if (!toast) return
-    const t = setTimeout(() => useUi.setState({ toast: null }), 2400)
+    if (!message) return
+    const t = setTimeout(onDismiss, duration)
     return () => clearTimeout(t)
-  }, [toast])
+  }, [message, id, onDismiss, duration])
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      style={{
-        position: 'fixed',
-        left: '50%',
-        bottom: 28,
-        transform: 'translateX(-50%)',
-        zIndex: 300,
-        pointerEvents: 'none',
-      }}
-    >
-      {toast && (
-        <div
-          style={{
-            padding: '10px 16px',
-            background: 'var(--tx)',
-            color: 'var(--bg)',
-            font: '500 13px var(--font-ui)',
-            borderRadius: 4,
-            boxShadow: 'var(--shadow)',
-          }}
-        >
-          {toast.text}
-        </div>
-      )}
+    <div role="status" aria-live="polite" className={s.region}>
+      {message && <div className={s.toast}>{message}</div>}
     </div>
   )
 }

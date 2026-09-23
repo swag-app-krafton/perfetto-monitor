@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import type { Run } from '@/api/types'
-import { Button, Card, GLYPH, StatusPill, toneColor } from '@/design/components'
+import { Button, Card, GLYPH, Legend, Row, Spacer, Stack, StatusPill, Text, toneColor } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
 import { verdictTone } from '@/domain/metrics'
 import s from './Overview.module.css'
@@ -26,23 +26,14 @@ export function VerdictStrip({ runs, latest, benchmarkId }: { runs: Run[]; lates
       data-hl="strip"
       title="Verdict by run"
       hint={`${runs.length === 1 ? 'One run' : `Last ${runs.length} runs`}, oldest to newest. Select a run to see its numbers.`}
-      actions={
-        <div className={s.legend}>
-          {(['pass', 'warn', 'fail'] as const).map((k) => (
-            <span key={k}>
-              <span className={s.swatch} style={{ background: `var(--${k})` }} />
-              {counts[k]} {k}
-            </span>
-          ))}
-        </div>
-      }
+      actions={<Legend label="Verdict counts" items={(['pass', 'warn', 'fail'] as const).map((k) => ({ label: `${counts[k]} ${k}`, color: `var(--${k})` }))} />}
     >
-      <div className={s.strip}>
+      <Row gap={4} align="stretch" className={s.strip}>
         {runs.map((r) => {
           const t = verdictTone(r.analysis?.verdict)
           const label = `Run #${r.id}, ${shortDate(r.ts)}, ${t === 'neutral' ? 'no verdict' : t.toUpperCase()}, TTID ${fmt(r.ttff_ms)} ms`
           return (
-            <div key={r.id} className={s.cellCol}>
+            <Stack key={r.id} gap={6} align="stretch" grow>
               <button
                 type="button"
                 className={s.cell}
@@ -55,36 +46,38 @@ export function VerdictStrip({ runs, latest, benchmarkId }: { runs: Run[]; lates
                 {t === 'warn' || t === 'fail' ? GLYPH[t] : ''}
               </button>
               <span className={s.bMark}>{r.id === benchmarkId ? 'B' : ''}</span>
-            </div>
+            </Stack>
           )
         })}
-      </div>
-      <div className={s.stripFoot}>
-        <span>
+      </Row>
+      <Row gap={8} justify="between" className={s.stripFoot}>
+        <Text variant="caption">
           #{first.id} · {shortDate(first.ts)}
-        </span>
-        {benchmarkId != null && <span>B = pinned benchmark</span>}
-        <span>
+        </Text>
+        {benchmarkId != null && <Text variant="caption">B = pinned benchmark</Text>}
+        <Text variant="caption">
           #{last.id} · {shortDate(last.ts)}
-        </span>
-      </div>
-      <div className={s.detail}>
+        </Text>
+      </Row>
+      <Row gap={14} wrap className={s.detail}>
         <StatusPill tone={selTone}>{selTone === 'neutral' ? 'NO VERDICT' : undefined}</StatusPill>
-        <span className={s.detailId}>Run #{sel.id}</span>
-        <span style={{ fontSize: 13, color: 'var(--tx2)' }}>
+        <Text variant="heading-sm" as="span">
+          Run #{sel.id}
+        </Text>
+        <Text variant="body" as="span">
           {shortDate(sel.ts)} · {sel.device ?? 'unknown device'} · {sel.app_version ?? sel.label ?? 'no build'}
-        </span>
-        <span style={{ fontSize: 13 }}>
+        </Text>
+        <Text variant="body" tone="primary" as="span">
           TTID <b>{fmt(sel.ttff_ms)} ms</b> · Slow <b>{fmt(sel.slow_pct, 2)} %</b> · Janky <b>{fmt(sel.janky_pct, 2)} %</b> · Peak{' '}
           <b>{fmt(sel.peak_rss_mb)} MB</b>
-        </span>
-        <div style={{ flex: 1 }} />
+        </Text>
+        <Spacer />
         {sel.id !== latest.id && (
           <Button variant="mini" onClick={() => navigate(`/compare?a=${latest.id}&b=${sel.id}`)}>
             Compare with #{latest.id}
           </Button>
         )}
-      </div>
+      </Row>
     </Card>
   )
 }

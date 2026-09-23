@@ -1,0 +1,92 @@
+.page {
+  min-height: 100%;
+  background: var(--bg);
+  overflow-y: auto;
+  height: 100%;
+}
+.inner {
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding: 40px var(--page-pad) 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 48px;
+}
+.title {
+  margin: 8px 0 0;
+  font: 800 clamp(28px, 3.4vw, 44px) / 1.02 var(--font-display);
+  letter-spacing: -0.015em;
+}
+.themes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  gap: 20px;
+}
+.themeBox {
+  padding: 20px;
+  background: var(--bg);
+  color: var(--tx);
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+.chip {
+  height: 44px;
+  border: 1px solid var(--line2);
+  border-radius: var(--radius);
+}
+.spec {
+  display: grid;
+  grid-template-columns: minmax(140px, 220px) 1fr;
+  gap: 16px;
+  align-items: baseline;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.spaceLabel {
+  width: 40px;
+  flex: none;
+}
+.space {
+  height: 12px;
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent);
+}
+.radius {
+  width: 72px;
+  height: 48px;
+  background: var(--s2);
+  border: 1px solid var(--line2);
+}
+.demoPanel {
+  position: relative;
+  height: 560px;
+  display: flex;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.demoPage {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+.specimen {
+  align-self: start;
+}
+.menuHost {
+  position: relative;
+  width: 320px;
+  max-width: 100%;
+  height: 170px;
+}
+.flushBody {
+  padding: 16px 24px;
+}

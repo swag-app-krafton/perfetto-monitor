@@ -53,3 +53,36 @@
   color: var(--tx);
   font: 13px var(--font-ui);
 }
+.area {
+  border: 1px solid var(--line2);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  transition: border-color var(--dur-fast);
+}
+.area:focus-within {
+  border-color: var(--accent);
+}
+.textarea {
+  display: block;
+  width: 100%;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--tx);
+  font: 400 13.5px/1.5 var(--font-ui);
+  padding: 12px 12px 4px;
+}
+.textarea::placeholder {
+  color: var(--tx3);
+}
+.areaFooter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 8px 10px;
+}
+/* The field's accent border is the focus cue; no second ring inside it. */
+.textarea:focus-visible {
+  outline: none;
+}

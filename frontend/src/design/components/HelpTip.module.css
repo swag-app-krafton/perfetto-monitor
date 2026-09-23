@@ -29,7 +29,7 @@
 }
 .tip {
   position: fixed;
-  z-index: 200;
+  z-index: var(--z-tooltip);
   width: 240px;
   padding: 10px 12px;
   background: var(--tx);

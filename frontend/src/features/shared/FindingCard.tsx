@@ -1,5 +1,6 @@
+import type { ReactNode } from 'react'
 import type { Finding } from '@/api/types'
-import { Button, Icon, SeverityPill } from '@/design/components'
+import { Button, Icon, Row, SeverityPill, Spacer, Stack, Text } from '@/design'
 import s from './FindingCard.module.css'
 
 const EDGE = { high: 'var(--fail)', medium: 'var(--warn)', low: 'var(--c1)' } as const
@@ -9,54 +10,64 @@ export function FindingCard({
   id,
   area,
   onAsk,
+  actions,
   compact,
 }: {
   finding: Finding
   id: string
   area: string
   onAsk?: () => void
+  /** Extra actions beside "Ask Copilot" (Unpin). */
+  actions?: ReactNode
   compact?: boolean
 }) {
   const sev = finding.severity in EDGE ? finding.severity : 'low'
   return (
-    <article data-hl={id} className={`${s.card} ${compact ? s.compact : ''}`}>
+    <Stack as="article" direction="row" data-hl={id} className={`${s.card} ${compact ? s.compact : ''}`}>
       <div className={s.edge} style={{ background: EDGE[sev] }} />
-      <div className={s.body}>
-        <div className={s.meta}>
+      <Stack gap={compact ? 10 : 14} grow className={s.body}>
+        <Row gap={10} wrap>
           <SeverityPill level={sev} />
-          <span className={s.id}>
+          <Text variant="meta">
             {id} · {area}
-          </span>
-          <div style={{ flex: 1 }} />
+          </Text>
+          <Spacer />
+          {actions}
           {onAsk && (
             <Button variant="mini" onClick={onAsk}>
-              <Icon name="sparkle" size={11} style={{ color: 'var(--accent)' }} />
+              <Icon name="sparkle" size={11} tone="accent" />
               Ask Copilot
             </Button>
           )}
-        </div>
-        <h3 className={s.title}>{finding.title}</h3>
+        </Row>
+        <Text as="h3" variant={compact ? 'heading-sm' : 'heading'}>
+          {finding.title}
+        </Text>
         <div className={s.cols}>
-          <div>
-            <div className={s.colLabel}>EVIDENCE</div>
-            <div className={s.colText}>{finding.evidence}</div>
-          </div>
+          <Stack gap={6}>
+            <Text variant="label">EVIDENCE</Text>
+            <Text variant="body" breakAnywhere>
+              {finding.evidence}
+            </Text>
+          </Stack>
           {finding.recommendation && (
-            <div>
-              <div className={s.colLabel}>RECOMMENDATION</div>
-              <div className={s.colText} style={{ color: 'var(--tx)' }}>
+            <Stack gap={6}>
+              <Text variant="label">RECOMMENDATION</Text>
+              <Text variant="body" tone="primary" breakAnywhere>
                 {finding.recommendation}
-              </div>
-            </div>
+              </Text>
+            </Stack>
           )}
           {finding.architectural_risk && (
-            <div>
-              <div className={s.colLabel}>RISK</div>
-              <div className={s.colText}>{finding.architectural_risk}</div>
-            </div>
+            <Stack gap={6}>
+              <Text variant="label">RISK</Text>
+              <Text variant="body" breakAnywhere>
+                {finding.architectural_risk}
+              </Text>
+            </Stack>
           )}
         </div>
-      </div>
-    </article>
+      </Stack>
+    </Stack>
   )
 }

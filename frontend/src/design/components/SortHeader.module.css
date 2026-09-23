@@ -1,0 +1,21 @@
+.btn {
+  display: flex;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tx3);
+  font: 600 11px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.active {
+  color: var(--tx);
+}
+.right {
+  justify-content: flex-end;
+}

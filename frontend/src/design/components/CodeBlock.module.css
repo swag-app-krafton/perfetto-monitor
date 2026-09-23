@@ -1,0 +1,47 @@
+.block {
+  border: 1px solid var(--line);
+  background: var(--con-bg);
+  min-width: 0;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px 0 10px;
+}
+.toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--con-tx);
+  font: 500 12px var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.copy {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #333;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--con-tx);
+  font: 500 11px var(--font-ui);
+  cursor: pointer;
+}
+.copy:hover {
+  border-color: #666;
+}
+.code {
+  margin: 0;
+  padding: 12px 14px;
+  border-top: 1px solid #262626;
+  overflow-x: auto;
+  font: 12px/1.6 var(--font-mono);
+  color: var(--con-tx);
+  white-space: pre;
+}

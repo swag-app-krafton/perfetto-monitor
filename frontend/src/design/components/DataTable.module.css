@@ -58,7 +58,51 @@
 .table td:last-child {
   padding-right: 24px;
 }
+.table td.empty {
+  padding: 28px 24px;
+  text-align: center;
+  color: var(--tx3);
+}
+.table tbody tr.selected td {
+  background: var(--s2);
+}
 .num {
   text-align: right !important;
+  white-space: nowrap;
+}
+
+.compactScroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+}
+.compact {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.compact thead th {
+  padding: 8px 12px;
+  background: var(--bg);
+  font: 600 10.5px var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tx3);
+  text-align: right;
+  vertical-align: bottom;
+}
+.compact thead th:first-child {
+  text-align: left;
+}
+.compact tbody th {
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  font-weight: 500;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.compact td {
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  text-align: right;
   white-space: nowrap;
 }

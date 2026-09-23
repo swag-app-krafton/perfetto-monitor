@@ -1,0 +1,27 @@
+.sessionCard {
+  align-self: start;
+}
+/* Full-size high-contrast stop action (Button's inverse variant is toolbar-sized). */
+.stop,
+.stop:disabled {
+  border: 0;
+  background: var(--tx);
+  color: var(--bg);
+}
+.result {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.feed {
+  max-height: 520px;
+  overflow-y: auto;
+}
+.event {
+  display: grid;
+  grid-template-columns: 64px 110px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}

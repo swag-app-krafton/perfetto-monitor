@@ -7,13 +7,20 @@ import {
   BarSeries,
   Card,
   EmptyState,
+  FlushCard,
   Grid,
   HelpTip,
   KpiTile,
+  Meter,
+  Row,
   Segmented,
   SelectField,
   Spinner,
-} from '@/design/components'
+  Stack,
+  Stat,
+  StatGrid,
+  Text,
+} from '@/design'
 import { fmt, shortDate, stepName } from '@/domain/format'
 import { valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
@@ -58,9 +65,9 @@ export function ScreensPage() {
   if (!traced.length) return <EmptyState title="No traced runs">Record a manual session or capture a trace to attribute cost to screens.</EmptyState>
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <Stack as="section" gap={20}>
       <Card>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Row gap={12} wrap>
           <SelectField
             label="Run"
             value={String(runId)}
@@ -76,7 +83,7 @@ export function ScreensPage() {
               { value: 'launch', label: 'Launch metrics' },
             ]}
           />
-        </div>
+        </Row>
       </Card>
       {view === 'launch' && run ? (
         <LaunchView run={run} />
@@ -91,7 +98,7 @@ export function ScreensPage() {
       ) : (
         <Usage d={q.data} />
       )}
-    </section>
+    </Stack>
   )
 }
 
@@ -105,27 +112,21 @@ function Usage({ d }: { d: Instrumented }) {
 
   return (
     <>
-      <div className={s.tableCard}>
-        <div className={s.tableHead}>
-          <div style={{ font: '700 16px var(--font-display)' }}>Per-screen cost</div>
-          <div style={{ fontSize: 12.5, color: 'var(--tx3)', marginTop: 4 }}>Select a screen to chart each of its visits separately.</div>
-        </div>
-        <div className={s.scroll}>
-          <div className={s.table} role="table" aria-label="Per-screen cost">
-            <div className={`${s.cols} ${s.hrow}`} role="row">
-              {HEAD.map((h) => (
-                <span key={h.label} role="columnheader" className={`${s.hcell} ${h.right ? s.right : ''}`}>
-                  {h.label}
-                  {h.help && <HelpTip text={h.help} label={h.label} />}
-                </span>
-              ))}
-            </div>
-            {d.screen_summary.map((r) => (
-              <ScreenRow key={r.route} r={r} maxCpu={maxCpu} open={open === r.route} onToggle={() => setOpen(open === r.route ? null : r.route)} metric={metric} setMetric={setMetric} />
+      <FlushCard title="Per-screen cost" hint="Select a screen to chart each of its visits separately.">
+        <div className={s.table} role="table" aria-label="Per-screen cost">
+          <div className={`${s.cols} ${s.hrow}`} role="row">
+            {HEAD.map((h) => (
+              <span key={h.label} role="columnheader" className={`${s.hcell} ${h.right ? s.right : ''}`}>
+                {h.label}
+                {h.help && <HelpTip text={h.help} label={h.label} />}
+              </span>
             ))}
           </div>
+          {d.screen_summary.map((r) => (
+            <ScreenRow key={r.route} r={r} maxCpu={maxCpu} open={open === r.route} onToggle={() => setOpen(open === r.route ? null : r.route)} metric={metric} setMetric={setMetric} />
+          ))}
         </div>
-      </div>
+      </FlushCard>
 
       {d.timeline.rss.length > 0 && (
         <Card data-hl="timeline" title="Session timeline" hint="The app's own RAM and CPU across the whole session, each screen visit a band behind. RAM that steps up and never comes back down, on the same screen each time, is where to look first.">
@@ -142,37 +143,55 @@ function Usage({ d }: { d: Instrumented }) {
 
       <Grid min={380}>
         <Card title="Navigation stack" hint="The screens in the order they were visited, with how long each transition took to draw.">
-          {d.screens.slice(0, 14).map((v, i) => {
-            const next = d.screens[i + 1]
-            const tr = next ? navCost.get(`${v.route}->${next.route}`) : undefined
-            const slow = tr?.median_ms != null && tr.median_ms > 350
-            return (
-              <div key={i}>
-                <div className={s.node} style={{ marginLeft: (v.depth - 1) * 18 }}>
-                  <span className={s.nodeName}>{v.route}</span>
-                  <span style={{ fontSize: 11.5, color: 'var(--tx3)' }}>
-                    {v.kind_label}
-                    {v.depth > 1 ? ` · depth ${v.depth}` : ''}
-                  </span>
-                </div>
-                {next && (
-                  <div className={s.link} style={{ color: slow ? 'var(--warn)' : 'var(--tx3)', marginLeft: (v.depth - 1) * 18 }}>
-                    <span className={s.linkBar} />↓ {slow ? 'Slow transition' : 'Transition'}
-                    {tr?.median_ms != null ? ` · ${fmt(tr.median_ms)} ms` : ''}
+          <Stack gap={10}>
+            <div>
+              {d.screens.slice(0, 14).map((v, i) => {
+                const next = d.screens[i + 1]
+                const tr = next ? navCost.get(`${v.route}->${next.route}`) : undefined
+                const slow = tr?.median_ms != null && tr.median_ms > 350
+                return (
+                  // Indented by how deep in the stack the screen sat.
+                  <div key={i} style={{ marginLeft: (v.depth - 1) * 18 }}>
+                    <div className={s.node}>
+                      <span className={s.nodeName}>{v.route}</span>
+                      <Text variant="meta">
+                        {v.kind_label}
+                        {v.depth > 1 ? ` · depth ${v.depth}` : ''}
+                      </Text>
+                    </div>
+                    {next && (
+                      <div className={s.link}>
+                        <span className={s.linkBar} />
+                        <Text variant="meta" tone={slow ? 'warn' : 'muted'}>
+                          ↓ {slow ? 'Slow transition' : 'Transition'}
+                          {tr?.median_ms != null ? ` · ${fmt(tr.median_ms)} ms` : ''}
+                        </Text>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )
-          })}
-          {d.screens.length > 14 && <div style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 10 }}>+ {d.screens.length - 14} more visits</div>}
+                )
+              })}
+            </div>
+            {d.screens.length > 14 && <Text variant="meta">+ {d.screens.length - 14} more visits</Text>}
+          </Stack>
         </Card>
         <Card title="User actions" hint="Every action the app marked, in order, with the screen it happened on.">
-          {d.action_events.length === 0 && <div style={{ fontSize: 13, color: 'var(--tx3)' }}>No actions were marked in this session.</div>}
+          {d.action_events.length === 0 && (
+            <Text variant="body" tone="muted">
+              No actions were marked in this session.
+            </Text>
+          )}
           {d.action_events.slice(0, 40).map((a, i) => (
             <div key={i} className={s.action}>
-              <span style={{ color: 'var(--tx3)' }}>{((a.at_ms - t0) / 1000).toFixed(1)}s</span>
-              <span style={{ fontWeight: 500, overflowWrap: 'anywhere' }}>{a.action}</span>
-              <span style={{ fontSize: 12, color: 'var(--tx2)' }}>{a.screen ?? '–'}</span>
+              <Text variant="body" tone="muted">
+                {((a.at_ms - t0) / 1000).toFixed(1)}s
+              </Text>
+              <Text variant="body" tone="primary" weight={500} breakAnywhere>
+                {a.action}
+              </Text>
+              <Text variant="meta" tone="secondary">
+                {a.screen ?? '–'}
+              </Text>
             </div>
           ))}
         </Card>
@@ -180,17 +199,31 @@ function Usage({ d }: { d: Instrumented }) {
 
       {d.stack_summary.length > 1 && (
         <Card title="Cost by stack depth" hint="A screen that is cheap on its own can still hold a lot of memory when two others are still open beneath it.">
-          <Grid min={200} gap={12}>
+          <StatGrid variant="boxes" min={200}>
             {d.stack_summary.map((r) => (
-              <KpiTile
+              <Stat
                 key={r.depth}
+                size="lg"
                 label={`Depth ${r.depth}`}
-                value={r.peak_rss_mb == null ? null : fmt(r.peak_rss_mb)}
-                unit="MB peak"
-                note={`${fmt(r.mean_cpu_pct, 1)}% CPU busy · ${r.routes.map(([k]) => k).join(', ')}${r.beneath.length ? ` · beneath: ${r.beneath.map(([k]) => k).join(', ')}` : ''}`}
+                value={
+                  r.peak_rss_mb == null ? (
+                    <Text variant="ui" tone="muted">
+                      not measured
+                    </Text>
+                  ) : (
+                    fmt(r.peak_rss_mb)
+                  )
+                }
+                unit={r.peak_rss_mb == null ? undefined : 'MB peak'}
+                note={
+                  <Text variant="meta">
+                    {fmt(r.mean_cpu_pct, 1)}% CPU busy · {r.routes.map(([k]) => k).join(', ')}
+                    {r.beneath.length ? ` · beneath: ${r.beneath.map(([k]) => k).join(', ')}` : ''}
+                  </Text>
+                }
               />
             ))}
-          </Grid>
+          </StatGrid>
         </Card>
       )}
     </>
@@ -205,40 +238,49 @@ function ScreenRow({ r, maxCpu, open, onToggle, metric, setMetric }: { r: Screen
   return (
     <div data-hl={`screen:${r.route}`}>
       <button type="button" className={`${s.cols} ${s.row}`} aria-expanded={open} onClick={onToggle}>
-        <span style={{ fontWeight: 600, paddingLeft: r.step ? 16 : 0 }}>
+        <Text as="span" variant="body" tone="primary" weight={600} className={r.step ? s.substep : undefined}>
           {r.step ? '↳ ' : ''}
           {r.route}
-        </span>
-        <span style={{ color: 'var(--tx2)', fontSize: 12 }}>{r.kind_label}</span>
-        <span style={{ textAlign: 'right' }}>{r.depth_label ?? '–'}</span>
-        <span style={{ textAlign: 'right' }}>{r.visits}</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
-          <span style={{ flex: 1, maxWidth: 110, height: 6, background: 'var(--s3)' }}>
-            <span style={{ display: 'block', height: '100%', width: `${cpu == null ? 0 : Math.min(100, (cpu / maxCpu) * 100)}%`, background: 'var(--c1)' }} />
+        </Text>
+        <Text variant="meta" tone="secondary">
+          {r.kind_label}
+        </Text>
+        <span className={s.right}>{r.depth_label ?? '–'}</span>
+        <span className={s.right}>{r.visits}</span>
+        <Row as="span" gap={10} justify="end">
+          <span className={s.cpuBar}>
+            <Meter value={cpu ?? 0} max={maxCpu} height={6} label={`CPU busy on ${r.route}`} />
           </span>
-          <span style={{ width: 48, textAlign: 'right', fontWeight: 600 }}>{cpu == null ? '–' : `${fmt(cpu, 1)}%`}</span>
-        </span>
-        <span style={{ textAlign: 'right' }}>{fmt(r.total_cpu_ms)} ms</span>
-        <span style={{ textAlign: 'right' }}>{r.peak_rss_mb == null ? '–' : `${fmt(r.peak_rss_mb)} MB`}</span>
-        <span style={{ textAlign: 'right', fontWeight: 600, color: growth == null ? 'var(--tx2)' : growth > 10 ? 'var(--fail)' : growth < 0 ? 'var(--pass)' : 'var(--tx2)' }}>
+          <Text as="span" variant="body" tone="primary" weight={600} align="right" className={s.cpuValue}>
+            {cpu == null ? '–' : `${fmt(cpu, 1)}%`}
+          </Text>
+        </Row>
+        <span className={s.right}>{fmt(r.total_cpu_ms)} ms</span>
+        <span className={s.right}>{r.peak_rss_mb == null ? '–' : `${fmt(r.peak_rss_mb)} MB`}</span>
+        <Text as="span" variant="body" weight={600} align="right" tone={growth == null ? 'secondary' : growth > 10 ? 'fail' : growth < 0 ? 'pass' : 'secondary'}>
           {growth == null ? '–' : `${growth > 10 ? '▲ ' : growth < 0 ? '▼ ' : ''}${fmt(growth, 1)} MB`}
-        </span>
-        <span
-          style={{ textAlign: 'right', color: (r.jank?.app_jank_pct ?? 0) > 0.5 ? 'var(--fail)' : 'var(--tx2)' }}
+        </Text>
+        <Text
+          as="span"
+          variant="body"
+          align="right"
+          tone={(r.jank?.app_jank_pct ?? 0) > 0.5 ? 'fail' : 'secondary'}
           title={r.jank ? `${r.jank.late} of ${r.jank.frames} frames late: ${r.jank.app} app deadline missed, ${r.jank.dropped} dropped, ${r.jank.buffer_stuffing} buffer stuffing, ${r.jank.system} system` : 'No FrameTimeline data'}
         >
           {r.jank?.app_jank_pct == null ? '–' : `${fmt(r.jank.app_jank_pct, 2)}%`}
-        </span>
-        <span style={{ textAlign: 'right', color: 'var(--tx2)' }}>{fmt(r.total_ms / 1000, 1)} s</span>
+        </Text>
+        <Text as="span" variant="body" align="right">
+          {fmt(r.total_ms / 1000, 1)} s
+        </Text>
       </button>
       {open && (
-        <div className={s.detail}>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+        <Stack gap={14} className={s.detail}>
+          <Row gap={12} wrap>
             <Segmented label="Chart" value={metric} onChange={setMetric} options={METRIC_OPTS.map((o) => ({ value: o.value, label: o.label }))} />
-            <span style={{ fontSize: 12, color: 'var(--tx3)' }}>
+            <Text variant="meta">
               {r.visits} visit{r.visits === 1 ? '' : 's'} · red = more than two standard deviations from the mean
-            </span>
-          </div>
+            </Text>
+          </Row>
           <BarSeries
             label={`${opt.label} for each visit to ${r.route}`}
             unit={opt.unit}
@@ -262,7 +304,7 @@ function ScreenRow({ r, maxCpu, open, onToggle, metric, setMetric }: { r: Screen
               }
             })}
           />
-        </div>
+        </Stack>
       )}
     </div>
   )
@@ -283,10 +325,16 @@ function LaunchView({ run }: { run: Run }) {
       </Grid>
       <Card title="Startup steps" hint={`Each stage of the launch run #${run.id} recorded, in order. Start is relative to the first step.`}>
         {run.steps.map((st) => (
-          <div key={st.step} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px', gap: 12, padding: '9px 0', borderTop: '1px solid var(--line)', fontSize: 13 }}>
-            <span style={{ fontWeight: 500 }}>{stepName(st.step)}</span>
-            <span style={{ textAlign: 'right', color: 'var(--tx2)' }}>+{fmt((st.start_ms ?? t0) - t0, 1)} ms</span>
-            <span style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(st.dur_ms, 1)} ms</span>
+          <div key={st.step} className={s.step}>
+            <Text variant="body" tone="primary" weight={500}>
+              {stepName(st.step)}
+            </Text>
+            <Text variant="body" align="right">
+              +{fmt((st.start_ms ?? t0) - t0, 1)} ms
+            </Text>
+            <Text variant="body" tone="primary" weight={600} align="right">
+              {fmt(st.dur_ms, 1)} ms
+            </Text>
           </div>
         ))}
       </Card>

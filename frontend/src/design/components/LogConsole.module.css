@@ -1,0 +1,56 @@
+/* Always dark: the console colours are the same in both themes. */
+.console {
+  min-height: 280px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px 0;
+  background: var(--con-bg);
+  color: var(--con-tx);
+  font: 12px/1.7 var(--font-mono);
+}
+.line {
+  display: flex;
+  gap: 12px;
+  padding: 0 14px;
+}
+.warn {
+  background: rgba(245, 184, 61, 0.08);
+  color: var(--con-warn);
+}
+.error {
+  background: rgba(255, 87, 115, 0.1);
+  color: var(--con-err);
+}
+.time {
+  flex: none;
+  color: var(--con-dim);
+}
+.level {
+  flex: none;
+  width: 40px;
+  font-weight: 700;
+}
+.text {
+  overflow-wrap: anywhere;
+}
+.pad {
+  padding: 0 14px;
+}
+.empty {
+  padding: 0 14px;
+  color: var(--con-dim);
+}
+/* The keyframes are global (foundations/global.css), hence global(). */
+.cursor {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  vertical-align: middle;
+  background: var(--con-tx);
+  animation: global(sp-pulse) 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
+}

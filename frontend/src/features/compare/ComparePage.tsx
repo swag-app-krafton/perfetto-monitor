@@ -2,10 +2,11 @@ import { Fragment, useMemo } from 'react'
 import { useSearchParams } from 'react-router'
 import { useCompare } from '@/api/hooks'
 import type { DiffVerdict, Run } from '@/api/types'
-import { Banner, Card, DiffTag, EmptyState, Grid, Label, Segmented, SelectField, Spinner, TableCard, numCell } from '@/design/components'
+import { Badge, Banner, Card, DiffTag, EmptyState, Grid, Label, Row, Segmented, SelectField, Spinner, Stack, TableCard, Text, numCell } from '@/design'
 import { fmt, pathLabel, shortDate, signed, stepName } from '@/domain/format'
 import { METRICS } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
+import s from './Compare.module.css'
 
 const toDiff = (v: DiffVerdict | null) => (v === 'worse' ? 'worse' : v === 'better' ? 'better' : 'same')
 
@@ -40,7 +41,7 @@ export function ComparePage() {
   const label = (m: string) => METRICS.find((x) => x.key === m || (m === 'ttff_ms' && x.key === 'ttff_ms'))?.label ?? m
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <Stack as="section" gap={20}>
       <div>
         <Segmented
           label="Compare against"
@@ -54,25 +55,29 @@ export function ComparePage() {
       </div>
       <Grid min={320}>
         <Card>
-          <Label style={{ color: 'var(--c1)' }}>RUN A</Label>
-          <div style={{ marginTop: 10 }}>
-            <SelectField label="Run" value={String(a)} options={opts} onChange={(v) => set('a', v)} />
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 10 }}>{sub(runA)}</div>
+          <Stack gap={10}>
+            <Label style={{ color: 'var(--c1)' }}>RUN A</Label>
+            <div>
+              <SelectField label="Run" value={String(a)} options={opts} onChange={(v) => set('a', v)} />
+            </div>
+            <Text variant="meta">{sub(runA)}</Text>
+          </Stack>
         </Card>
         <Card>
-          <Label style={{ color: 'var(--c4)' }}>RUN B</Label>
-          <div style={{ marginTop: 10 }}>
+          <Stack gap={10}>
+            <Label style={{ color: 'var(--c4)' }}>RUN B</Label>
             {mode === 'bench' && bench ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, height: 36 }}>
-                <span style={{ font: '800 18px var(--font-display)' }}>#{bench.id}</span>
-                <span style={{ padding: '2px 8px', borderRadius: 999, background: 'var(--s2)', color: 'var(--c4)', font: '700 11px var(--font-ui)', letterSpacing: '.08em' }}>PINNED</span>
-              </div>
+              <Row gap={10} className={s.pinnedRun}>
+                <Text variant="heading-lg">#{bench.id}</Text>
+                <Badge tone="c4">PINNED</Badge>
+              </Row>
             ) : (
-              <SelectField label="Run" value={String(b)} options={opts} onChange={(v) => set('b', v)} />
+              <div>
+                <SelectField label="Run" value={String(b)} options={opts} onChange={(v) => set('b', v)} />
+              </div>
             )}
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--tx3)', marginTop: 10 }}>{sub(runB)}</div>
+            <Text variant="meta">{sub(runB)}</Text>
+          </Stack>
         </Card>
       </Grid>
 
@@ -103,9 +108,9 @@ export function ComparePage() {
             title="Top-line metrics"
             minWidth={720}
             aside={
-              <span style={{ fontSize: 12, color: 'var(--tx3)' }}>
+              <Text variant="meta">
                 {d.summary.worse} worse · {d.summary.better} better · {d.summary.same} same
-              </span>
+              </Text>
             }
           >
             <thead>
@@ -124,10 +129,14 @@ export function ComparePage() {
                 const dp = def?.dp ?? 1
                 return (
                   <tr key={m.metric}>
-                    <td style={{ fontWeight: 500 }}>{label(m.metric)}</td>
+                    <td>
+                      <Text variant="body" tone="primary" weight={500}>
+                        {label(m.metric)}
+                      </Text>
+                    </td>
                     <td className={numCell}>{m.value == null ? '–' : `${fmt(m.value, dp)} ${def?.unit ?? ''}`}</td>
-                    <td className={numCell} style={{ color: 'var(--tx2)' }}>
-                      {m.base_value == null ? '–' : `${fmt(m.base_value, dp)} ${def?.unit ?? ''}`}
+                    <td className={numCell}>
+                      <Text variant="body">{m.base_value == null ? '–' : `${fmt(m.base_value, dp)} ${def?.unit ?? ''}`}</Text>
                     </td>
                     <td className={numCell}>{m.delta == null ? '–' : signed(m.delta, dp, def?.deltaUnit ?? '')}</td>
                     <td className={numCell}>{m.delta_pct == null ? '–' : signed(m.delta_pct, 1, '%')}</td>
@@ -152,10 +161,14 @@ export function ComparePage() {
               {d.steps.map((st) => (
                 <Fragment key={st.step}>
                   <tr>
-                    <td style={{ fontWeight: 700 }}>{stepName(st.step)}</td>
+                    <td>
+                      <Text variant="body" tone="primary" weight={700}>
+                        {stepName(st.step)}
+                      </Text>
+                    </td>
                     <td className={numCell}>{st.dur_ms == null ? '–' : `${fmt(st.dur_ms, 1)} ms`}</td>
-                    <td className={numCell} style={{ color: 'var(--tx2)' }}>
-                      {st.base_dur_ms == null ? '–' : `${fmt(st.base_dur_ms, 1)} ms`}
+                    <td className={numCell}>
+                      <Text variant="body">{st.base_dur_ms == null ? '–' : `${fmt(st.base_dur_ms, 1)} ms`}</Text>
                     </td>
                     <td className={numCell}>{st.delta_ms == null ? '–' : signed(st.delta_ms, 1)}</td>
                     <td className={numCell}>{st.delta_pct == null ? '–' : signed(st.delta_pct, 1, '%')}</td>
@@ -164,20 +177,12 @@ export function ComparePage() {
                     </td>
                   </tr>
                   {st.children.map((c) => (
-                    <tr key={c.name}>
-                      <td style={{ paddingLeft: 46, color: 'var(--tx2)' }}>{c.name}</td>
-                      <td className={numCell} style={{ color: 'var(--tx2)' }}>
-                        {c.dur_ms == null ? '–' : `${fmt(c.dur_ms, 1)} ms`}
-                      </td>
-                      <td className={numCell} style={{ color: 'var(--tx2)' }}>
-                        {c.base_dur_ms == null ? '–' : `${fmt(c.base_dur_ms, 1)} ms`}
-                      </td>
-                      <td className={numCell} style={{ color: 'var(--tx2)' }}>
-                        {c.delta_ms == null ? '–' : signed(c.delta_ms, 1)}
-                      </td>
-                      <td className={numCell} style={{ color: 'var(--tx2)' }}>
-                        {c.delta_pct == null ? '–' : signed(c.delta_pct, 1, '%')}
-                      </td>
+                    <tr key={c.name} className={s.childRow}>
+                      <td>{c.name}</td>
+                      <td className={numCell}>{c.dur_ms == null ? '–' : `${fmt(c.dur_ms, 1)} ms`}</td>
+                      <td className={numCell}>{c.base_dur_ms == null ? '–' : `${fmt(c.base_dur_ms, 1)} ms`}</td>
+                      <td className={numCell}>{c.delta_ms == null ? '–' : signed(c.delta_ms, 1)}</td>
+                      <td className={numCell}>{c.delta_pct == null ? '–' : signed(c.delta_pct, 1, '%')}</td>
                       <td />
                     </tr>
                   ))}
@@ -187,6 +192,6 @@ export function ComparePage() {
           </TableCard>
         </>
       )}
-    </section>
+    </Stack>
   )
 }

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { HelpTip } from './HelpTip'
-import { Sparkline } from './Sparkline'
+import { Sparkline } from '../charts/Sparkline'
 import s from './KpiTile.module.css'
 
 export interface Delta {
@@ -49,14 +49,14 @@ export function KpiTile({
       <div className={s.delta}>
         {delta && (
           <>
-            <span className={s.deltaVal} style={{ color: same ? 'var(--tx2)' : worse ? 'var(--fail)' : 'var(--pass)' }}>
+            <span className={`${s.deltaVal} ${same ? s.same : worse ? s.worse : s.better}`}>
               {same ? '= ' : worse ? '▲ ' : '▼ '}
               {delta.text}
             </span>{' '}
-            {delta.against && <span style={{ color: 'var(--tx3)' }}>{delta.against}</span>}
+            {delta.against && <span className={s.aside}>{delta.against}</span>}
           </>
         )}
-        {!delta && note && <span style={{ color: 'var(--tx3)' }}>{note}</span>}
+        {!delta && note && <span className={s.aside}>{note}</span>}
       </div>
       {trend && <Sparkline values={trend} label={`${label}, last ${trend.length} runs`} />}
     </div>

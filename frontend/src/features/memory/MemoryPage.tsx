@@ -1,9 +1,10 @@
 import { Link } from 'react-router'
 import type { Run } from '@/api/types'
-import { Card, EmptyState, Eyebrow, Grid, LineChart } from '@/design/components'
+import { Card, EmptyState, Eyebrow, Grid, LineChart, Row, Stack, Stat, StatGrid, Swatch, Text } from '@/design'
 import { fmt, signed } from '@/domain/format'
 import { metricByKey, valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
+import s from './Memory.module.css'
 
 /** What the trace can say about where the memory is. Real device traces carry
  *  the app's total resident memory; a per-runtime split exists only where the
@@ -18,16 +19,24 @@ function breakdown(r: Run | null) {
 
 function Bar({ label, b, max, dim }: { label: string; b: NonNullable<ReturnType<typeof breakdown>>; max: number; dim?: boolean }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px', gap: 12, alignItems: 'center', opacity: dim ? 0.6 : 1 }}>
-      <span style={{ fontSize: 13, fontWeight: 600 }}>{label}</span>
-      <div style={{ display: 'flex', height: 28, background: 'var(--s2)' }}>
+    <div className={dim ? `${s.bar} ${s.dim}` : s.bar}>
+      <Text variant="body" tone="primary" weight={600}>
+        {label}
+      </Text>
+      <div className={s.track}>
         {b.parts.map((p) => (
-          <div key={p.name} title={`${p.name} · ${fmt(p.mb)} MB`} style={{ width: `${(p.mb / max) * 100}%`, background: p.color, borderRight: '1px solid var(--s1)', color: '#000', font: '600 11px var(--font-ui)', display: 'flex', alignItems: 'center', paddingLeft: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-            {p.mb / max > 0.08 ? fmt(p.mb) : ''}
+          <div key={p.name} title={`${p.name} · ${fmt(p.mb)} MB`} className={s.segment} style={{ width: `${(p.mb / max) * 100}%`, background: p.color }}>
+            {p.mb / max > 0.08 && (
+              <Text variant="caption" tone="inherit" weight={600}>
+                {fmt(p.mb)}
+              </Text>
+            )}
           </div>
         ))}
       </div>
-      <span style={{ textAlign: 'right', fontWeight: 700 }}>{fmt(b.total)} MB</span>
+      <Text variant="ui" weight={700} align="right">
+        {fmt(b.total)} MB
+      </Text>
     </div>
   )
 }
@@ -46,49 +55,62 @@ export function MemoryPage() {
   const perRuntime = !!cur && cur.parts.length > 1
 
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <Card data-hl="memHero" style={{ padding: 28 }}>
-        <Eyebrow>PEAK MEMORY BREAKDOWN</Eyebrow>
-        <h2 style={{ margin: '12px 0 20px', font: '800 26px/1.2 var(--font-display)' }}>Three runtimes, one process</h2>
-        {cur ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Bar label={`Run #${latest.id}`} b={cur} max={max} />
-            {prev && base && <Bar label={benchmarkRun ? `Benchmark #${base.id}` : `Previous #${base.id}`} b={prev} max={max} dim />}
-          </div>
-        ) : (
-          <EmptyState>No memory samples were recorded for run #{latest.id}.</EmptyState>
-        )}
-        {cur && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 1, background: 'var(--line)', border: '1px solid var(--line)', marginTop: 20 }}>
-            {cur.parts.map((p) => {
-              const was = prev?.parts.find((q) => q.name === p.name)?.mb
-              const d = was != null ? p.mb - was : null
-              return (
-                <div key={p.name} style={{ background: 'var(--s1)', padding: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--tx2)' }}>
-                    <span style={{ width: 10, height: 10, background: p.color }} />
-                    {p.name}
-                  </div>
-                  <div style={{ font: '700 22px var(--font-display)', marginTop: 8 }}>
-                    {fmt(p.mb)} <span style={{ fontSize: 12, color: 'var(--tx3)' }}>MB</span>
-                  </div>
-                  {d != null && (
-                    <div style={{ fontSize: 12, marginTop: 4, fontWeight: 600, color: Math.abs(d) < 2 ? 'var(--tx2)' : d > 0 ? 'var(--fail)' : 'var(--pass)' }}>
-                      {Math.abs(d) < 2 ? '= ' : d > 0 ? '▲ ' : '▼ '}
-                      {signed(d, 0, ' MB')}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-        {!perRuntime && (
-          <p style={{ margin: '16px 0 0', fontSize: 13, lineHeight: 1.6, color: 'var(--tx3)', maxWidth: 760 }}>
-            This trace records the app's total resident memory only, so it cannot be split by runtime. A per-runtime breakdown needs the app to
-            report each runtime's own heap as a trace counter, as the Hermes heap counter does.
-          </p>
-        )}
+    <Stack as="section" gap={20}>
+      <Card data-hl="memHero" className={s.hero}>
+        <Stack gap={16}>
+          <Stack gap={20}>
+            <Stack gap={12}>
+              <Eyebrow>PEAK MEMORY BREAKDOWN</Eyebrow>
+              <Text as="h2" variant="display-lg">
+                Three runtimes, one process
+              </Text>
+            </Stack>
+            {cur ? (
+              <Stack gap={12}>
+                <Bar label={`Run #${latest.id}`} b={cur} max={max} />
+                {prev && base && <Bar label={benchmarkRun ? `Benchmark #${base.id}` : `Previous #${base.id}`} b={prev} max={max} dim />}
+              </Stack>
+            ) : (
+              <EmptyState>No memory samples were recorded for run #{latest.id}.</EmptyState>
+            )}
+            {cur && (
+              <StatGrid variant="hairline" min={160}>
+                {cur.parts.map((p) => {
+                  const was = prev?.parts.find((q) => q.name === p.name)?.mb
+                  const d = was != null ? p.mb - was : null
+                  return (
+                    <Stat
+                      key={p.name}
+                      size="lg"
+                      label={
+                        <Row as="span" gap={8}>
+                          <Swatch color={p.color} />
+                          {p.name}
+                        </Row>
+                      }
+                      value={fmt(p.mb)}
+                      unit="MB"
+                      note={
+                        d != null && (
+                          <Text variant="meta" weight={600} tone={Math.abs(d) < 2 ? 'secondary' : d > 0 ? 'fail' : 'pass'}>
+                            {Math.abs(d) < 2 ? '= ' : d > 0 ? '▲ ' : '▼ '}
+                            {signed(d, 0, ' MB')}
+                          </Text>
+                        )
+                      }
+                    />
+                  )
+                })}
+              </StatGrid>
+            )}
+          </Stack>
+          {!perRuntime && (
+            <Text as="p" variant="body" tone="muted" className={s.note}>
+              This trace records the app's total resident memory only, so it cannot be split by runtime. A per-runtime breakdown needs the app to
+              report each runtime's own heap as a trace counter, as the Hermes heap counter does.
+            </Text>
+          )}
+        </Stack>
       </Card>
       <Grid min={440}>
         <Card data-hl="peakChart" title="Peak RAM" hint="Highest resident memory of the app's own process, per run.">
@@ -118,6 +140,6 @@ export function MemoryPage() {
       <Card title="Where the growth happens" hint="Growth within a session is attributed to screens on the Screens tab: RAM over time with each screen visit behind it, and the navigation stack held open beneath each screen.">
         <Link to="/screens">Open the session timeline →</Link>
       </Card>
-    </section>
+    </Stack>
   )
 }

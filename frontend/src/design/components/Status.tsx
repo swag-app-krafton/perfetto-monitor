@@ -1,10 +1,7 @@
 import type { ReactNode } from 'react'
 import s from './Status.module.css'
+import { GLYPH, type Tone } from './tone'
 
-export type Tone = 'pass' | 'warn' | 'fail' | 'neutral'
-
-/** Status is never colour alone: every tone has a glyph. */
-export const GLYPH: Record<Tone, string> = { pass: '✓', warn: '!', fail: '✕', neutral: '–' }
 
 export function StatusPill({ tone, children }: { tone: Tone; children?: ReactNode }) {
   return (
@@ -48,4 +45,3 @@ export function SeverityPill({ level }: { level: SeverityLevel }) {
   )
 }
 
-export const toneColor = (t: Tone) => (t === 'neutral' ? 'var(--tx3)' : `var(--${t})`)

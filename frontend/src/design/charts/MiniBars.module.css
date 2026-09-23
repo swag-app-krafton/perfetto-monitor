@@ -1,0 +1,59 @@
+.box {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  min-width: 0;
+}
+.title {
+  font-size: 11.5px;
+  color: var(--tx3);
+  margin-bottom: 10px;
+}
+.plot {
+  position: relative;
+  height: 72px;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  border-bottom: 1px solid var(--line2);
+}
+.bar {
+  flex: 1;
+  min-height: 2px;
+  background: var(--c1);
+  border-radius: 2px 2px 0 0;
+}
+.over {
+  background: var(--fail);
+}
+.budget {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--accent);
+  pointer-events: none;
+}
+.budgetLabel {
+  position: absolute;
+  right: 0;
+  top: -16px;
+  font-size: 10px;
+  color: var(--accent-tx);
+  background: var(--bg);
+  padding-left: 4px;
+}
+.labels {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.label {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 9px;
+  color: var(--tx3);
+  overflow: hidden;
+  white-space: nowrap;
+}

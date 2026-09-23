@@ -1,0 +1,15 @@
+.accent {
+  color: var(--accent);
+}
+.muted {
+  color: var(--tx3);
+}
+.pass {
+  color: var(--pass);
+}
+.warn {
+  color: var(--warn);
+}
+.fail {
+  color: var(--fail);
+}

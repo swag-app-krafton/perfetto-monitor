@@ -1,4 +1,4 @@
-import { stageStates } from './CapturePage'
+import { stageStates } from './stages'
 
 const log = (...texts: string[]) => texts.map((text, t) => ({ t, text }))
 

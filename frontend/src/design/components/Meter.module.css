@@ -1,0 +1,41 @@
+.meter {
+  display: block;
+  position: relative;
+  width: 100%;
+  background: var(--s3);
+  border-radius: 1px;
+}
+.fill {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  max-width: 100%;
+  background: var(--c1);
+  border-radius: 1px;
+}
+.marker {
+  display: block;
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--tx);
+}
+.accent {
+  background: var(--accent);
+}
+.pass {
+  background: var(--pass);
+}
+.warn {
+  background: var(--warn);
+}
+.fail {
+  background: var(--fail);
+}
+.neutral {
+  background: var(--tx3);
+}

@@ -1,0 +1,28 @@
+.kbd {
+  height: 22px;
+  padding: 0 7px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.16);
+  font: 600 11px var(--font-ui);
+}
+.swatch {
+  display: inline-block;
+  flex: none;
+}
+.circle {
+  border-radius: 50%;
+}
+.square {
+  border-radius: var(--radius-sm);
+}
+.pulse {
+  /* global(): the keyframes live in global.css; a module would rename them. */
+  animation: global(sp-pulse) 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}

@@ -34,7 +34,8 @@ export function HelpTip({ text, label, large }: { text: string; label: string; l
         onBlur={hide}
         onClick={(e) => {
           e.stopPropagation()
-          pos ? hide() : show()
+          if (pos) hide()
+          else show()
         }}
       >
         ?

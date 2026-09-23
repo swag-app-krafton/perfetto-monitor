@@ -1,0 +1,62 @@
+.grid {
+  display: grid;
+}
+/* Hairline: cells share 1px rules, like a table without its lines. */
+.hairline {
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.hairline > .stat {
+  background: var(--s1);
+}
+/* Boxes: separate bordered tiles. */
+.boxes {
+  gap: 8px;
+}
+.boxes > .stat {
+  border: 1px solid var(--line);
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--tx);
+}
+.sm {
+  font-size: 14px;
+}
+.md {
+  font-size: 17px;
+}
+.lg {
+  font-size: 22px;
+}
+.value > span:first-child {
+  min-width: 0;
+  /* Long unbroken values (a version string with a build hash) wrap. */
+  overflow-wrap: anywhere;
+}
+.unit {
+  font: 400 12px var(--font-ui);
+  color: var(--tx3);
+}
+.pass {
+  color: var(--pass);
+}
+.warn {
+  color: var(--warn);
+}
+.fail {
+  color: var(--fail);
+}
