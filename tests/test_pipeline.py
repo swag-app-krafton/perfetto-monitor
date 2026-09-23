@@ -1135,6 +1135,34 @@ class TestStressInterrupted(unittest.TestCase):
         self.assertEqual(store.stress_get(done, db=db)["state"], "done")
 
 
+class TestStaticRouting(unittest.TestCase):
+    """The built React app owns every client route; the old dashboard is gone."""
+
+    def _path(self, url):
+        from swagperf import server
+        h = server.H.__new__(server.H)  # translate_path needs no socket
+        h.directory = os.path.abspath(server.WEB)
+        return os.path.relpath(h.translate_path(url), os.path.abspath(server.WEB))
+
+    def test_client_routes_get_the_app(self):
+        for url in ("/", "/overview", "/steps?focus=step:bind_application", "/design-system", "/legacy/"):
+            self.assertEqual(self._path(url), os.path.join("dist", "index.html"), url)
+
+    def test_assets_are_files_and_missing_assets_404(self):
+        self.assertEqual(self._path("/index.html"), os.path.join("dist", "index.html"))
+        self.assertEqual(self._path("/assets/nope-123.js"), os.path.join("dist", "assets", "nope-123.js"))
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(__file__), "..", "web", "dist", "assets", "nope-123.js")))
+
+    def test_token_page_and_no_escape_from_dist(self):
+        """A raw `..` path (curl --path-as-is) served repo files, and any file
+        the user could read, before the build root was enforced."""
+        self.assertEqual(self._path("/tokens.html"), "tokens.html")
+        for url in ("/../../swagperf/store.py", "/../../swagperf", "/assets/../../../../etc/passwd", "/../dist-evil/x.js"):
+            got = self._path(url)
+            self.assertTrue(got.startswith("dist" + os.sep), f"{url} -> {got}")
+            self.assertFalse(os.path.isfile(os.path.join(os.path.dirname(__file__), "..", "web", got)) and "store.py" in got)
+
+
 class TestCopilotEngine(unittest.TestCase):
     """The deterministic Copilot: routing, honesty about data it lacks, and
     the event stream the panel consumes."""

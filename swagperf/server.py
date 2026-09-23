@@ -6,6 +6,7 @@ from . import store
 from .budgets import STEP_BUDGETS_MS, GLOBAL_BUDGETS, RISK_MAP
 
 WEB = os.path.join(os.path.dirname(__file__), "..", "web")
+DIST = os.path.join(WEB, "dist")  # the built dashboard; see frontend/README.md
 
 
 def _device_payload():
@@ -187,27 +188,27 @@ class H(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, must-revalidate")
 
     def translate_path(self, path):
-        """Map a URL to a file: the built app, the legacy dashboard, or the
-        token-usage page.
+        """Map a URL to a file: the built app, or the token-usage page.
 
         The React app (web/dist, built from frontend/) owns every client route,
         so any path that is not a real file falls back to its index.html --
         /overview, /steps/... are routes, not files. A missing *asset* (a name
-        with an extension) still 404s rather than silently getting HTML. With no
-        build present, the legacy dashboard is served instead.
+        with an extension) still 404s rather than silently getting HTML.
         """
         p = urlparse(path).path
-        if p == "/legacy" or p.startswith("/legacy/") or p == "/tokens.html":
+        if p == "/tokens.html":
             return super().translate_path(path)
-        dist = os.path.abspath(os.path.join(WEB, "dist"))
-        if os.path.isfile(os.path.join(dist, "index.html")):
-            cand = os.path.normpath(os.path.join(dist, p.lstrip("/")))
-            if cand.startswith(dist) and os.path.isfile(cand):
-                return cand
-            if "." not in os.path.basename(p):
-                return os.path.join(dist, "index.html")
+        dist = os.path.abspath(DIST)
+        cand = os.path.normpath(os.path.join(dist, p.lstrip("/")))
+        # `..` in a raw request path must never reach a file outside the build
+        # (a browser normalises it away; curl --path-as-is does not).
+        if cand != dist and not cand.startswith(dist + os.sep):
+            return os.path.join(dist, ".not-found")
+        if os.path.isfile(cand):
             return cand
-        return super().translate_path("/legacy" + (p if p != "/" else "/"))
+        if "." not in os.path.basename(p):
+            return os.path.join(dist, "index.html")
+        return cand
 
     def send_head(self):
         # Static files only reach here, so this is where the conditional-GET
@@ -217,6 +218,14 @@ class H(SimpleHTTPRequestHandler):
             if h in self.headers:
                 del self.headers[h]
         return super().send_head()
+
+    def _text(self, text, code=200):
+        body = text.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _json(self, obj, code=200):
         body = json.dumps(obj).encode()
@@ -317,6 +326,8 @@ class H(SimpleHTTPRequestHandler):
                 job = jobs.get(jid)
                 return self._json(job) if job else self._json({"error": "unknown job"}, 404)
             return self._json({"jobs": jobs.recent()})
+        if not os.path.isfile(os.path.join(DIST, "index.html")):
+            return self._text("The dashboard is not built. Run `npm install && npm run build` in frontend/.", 503)
         return super().do_GET()
 
     def do_POST(self):

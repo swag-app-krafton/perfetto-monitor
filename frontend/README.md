@@ -62,5 +62,3 @@ the run history by rule. A model-backed engine can replace `answer()` there
 without the panel changing. Threads, feedback and answers pinned as findings
 are stored in `history.db` (`copilot_threads`, `copilot_messages`,
 `copilot_pins`).
-
-The old dashboard stays at `/legacy/` until every screen is rebuilt here.
