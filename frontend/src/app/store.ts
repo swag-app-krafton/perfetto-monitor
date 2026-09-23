@@ -15,6 +15,8 @@ interface UiState {
   /** A path_kind from the data ('cold', 'warm', 'returning_user', ...). */
   path: string
   range: RangeKey
+  /** An app build (see domain/versions); '' is every version. */
+  version: string
   /** The run in view on every screen; null follows the newest run in scope. */
   runId: number | null
   copilot: { open: boolean; maximised: boolean; width: number }
@@ -26,7 +28,7 @@ interface UiState {
   toggleTheme: () => void
   toggleRail: () => void
   setDrawer: (open: boolean) => void
-  setFilters: (f: Partial<Pick<UiState, 'app' | 'path' | 'range'>>) => void
+  setFilters: (f: Partial<Pick<UiState, 'app' | 'path' | 'range' | 'version'>>) => void
   setRunId: (id: number | null) => void
   setCopilot: (c: Partial<UiState['copilot']>) => void
   showToast: (text: string) => void
@@ -45,6 +47,7 @@ export const useUi = create<UiState>()(
       app: '',
       path: '',
       range: '30',
+      version: '',
       runId: null,
       copilot: { open: false, maximised: false, width: 400 },
       toast: null,
@@ -54,9 +57,14 @@ export const useUi = create<UiState>()(
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
       toggleRail: () => set((s) => ({ railPinned: !s.railPinned })),
       setDrawer: (drawerOpen) => set({ drawerOpen }),
-      // A different app or path has different runs: go back to its newest.
+      // A different app, path or version has different runs: go back to its
+      // newest. A different app has different versions too.
       setFilters: (f) =>
-        set((s) => ({ ...f, runId: (f.app !== undefined && f.app !== s.app) || (f.path !== undefined && f.path !== s.path) ? null : s.runId })),
+        set((s) => {
+          const appChanged = f.app !== undefined && f.app !== s.app
+          const changed = appChanged || (f.path !== undefined && f.path !== s.path) || (f.version !== undefined && f.version !== s.version)
+          return { ...f, version: appChanged ? (f.version ?? '') : (f.version ?? s.version), runId: changed ? null : s.runId }
+        }),
       setRunId: (runId) => set({ runId }),
       setCopilot: (c) =>
         set((s) => {

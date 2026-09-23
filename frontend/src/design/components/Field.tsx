@@ -63,3 +63,16 @@ export function TextAreaField({
     </div>
   )
 }
+
+/** A button dressed as a field (label, value, chevron) that opens a panel of
+ *  its own, for choices a native select cannot show: a sortable table. Place
+ *  the panel in the same position: relative container. */
+export function FieldButton({ label, value, open, onClick, title }: { label: string; value: ReactNode; open: boolean; onClick: () => void; title?: string }) {
+  return (
+    <button type="button" className={`${s.field} ${s.fieldButton}`} aria-haspopup="dialog" aria-expanded={open} onClick={onClick} title={title}>
+      <span className={s.label}>{label}</span>
+      <span className={s.buttonValue}>{value}</span>
+      <Icon name="chevronDown" size={12} />
+    </button>
+  )
+}

@@ -185,6 +185,10 @@ def main(argv=None):
     sc.add_argument("trace")
     sc.add_argument("--json", action="store_true")
 
+    rs = sub.add_parser("reset", help="delete every recorded run and its traces; start again from run #1")
+    rs.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    rs.add_argument("--keep-traces", action="store_true", help="keep the trace files in traces/")
+
     stp = sub.add_parser("stress", help="repeat cold starts and report the spread")
     stx = stp.add_subparsers(dest="scmd", required=True)
     sr = stx.add_parser("run", help="capture N sessions of one app")
@@ -541,6 +545,28 @@ def main(argv=None):
             print(json.dumps(d, indent=2))
             return 0
         _print_compare(d)
+        return 0
+
+    if n.cmd == "reset":
+        from . import reset
+        p = reset.plan()
+        if not any(p["rows"].values()) and not p["trace_files"]:
+            print("  nothing to delete: the history is already empty")
+            return 0
+        print("  This deletes, and cannot be undone:")
+        print(reset.describe(p) if not n.keep_traces else reset.describe({**p, "trace_files": 0}))
+        print("  The app catalogue (apps.json, apps.local.json) is kept.")
+        if not n.yes:
+            if not sys.stdin.isatty():
+                print("  refusing without --yes: not an interactive terminal")
+                return 2
+            if input("  Type 'delete' to confirm: ").strip() != "delete":
+                print("  cancelled; nothing was deleted")
+                return 1
+        done = reset.reset(keep_traces=n.keep_traces)
+        print(f"  deleted {done['rows']['runs']} run(s)"
+              + (f" and {done['trace_files']} trace file(s)" if done["trace_files"] else "")
+              + "; the next run is #1")
         return 0
 
     if n.cmd == "reextract":

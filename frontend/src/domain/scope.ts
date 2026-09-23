@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo } from 'react'
 import { useHistory } from '@/api/hooks'
 import type { Benchmark, HistoryPayload, Run, Verdict } from '@/api/types'
 import { useUi, type RangeKey } from '@/app/store'
+import { versionKey, versionsIn, type AppVersion } from './versions'
 
 export interface AppOption {
   pkg: string
@@ -48,8 +49,12 @@ export interface Scope {
   history: HistoryPayload
   apps: AppOption[]
   paths: string[]
-  /** Runs for the selected app and path, oldest first, within the range. */
+  /** Runs for the selected app, path and version, oldest first, within the range. */
   runs: Run[]
+  /** Every run of the app and path in the selected version (the Run list). */
+  versionRuns: Run[]
+  /** The builds among the app and path's runs, newest first. */
+  versions: AppVersion[]
   /** Every run for the app and path, ignoring range (baselines, benchmark lookups). */
   allRuns: Run[]
   /** The newest run in range. */
@@ -69,7 +74,7 @@ export interface Scope {
  *  the user chooses. */
 export function useScope(): { scope: Scope | null; isLoading: boolean; error: Error | null } {
   const q = useHistory()
-  const { app, path, range, runId, setFilters } = useUi()
+  const { app, path, range, version, runId, setFilters } = useUi()
 
   // Default the filters from the newest run, and repair them if the stored
   // choice no longer exists in the data (a pruned app, a renamed path).
@@ -91,9 +96,13 @@ export function useScope(): { scope: Scope | null; isLoading: boolean; error: Er
     if (!h) return null
     const appRuns = h.runs.filter((r) => (r.app_pkg ?? 'unknown') === app)
     const allRuns = appRuns.filter((r) => r.path_kind === path)
-    const runs = inRange(allRuns, range)
+    const versions = versionsIn(allRuns)
+    // A version that is not among these runs (another app's) means every version.
+    const v = versions.some((x) => x.key === version) ? version : ''
+    const versionRuns = v ? allRuns.filter((r) => versionKey(r) === v) : allRuns
+    const runs = inRange(versionRuns, range)
     const latest = runs[runs.length - 1] ?? null
-    const run = (runId != null ? allRuns.find((r) => r.id === runId) : null) ?? latest
+    const run = (runId != null ? versionRuns.find((r) => r.id === runId) : null) ?? latest
     const benchmark = benchmarkFor(run, h)
     const index = new Map(h.runs.map((r) => [r.id, r]))
     return {
@@ -101,6 +110,8 @@ export function useScope(): { scope: Scope | null; isLoading: boolean; error: Er
       apps: appsIn(h),
       paths: pathsIn(appRuns),
       runs,
+      versionRuns,
+      versions,
       allRuns,
       latest,
       run,
@@ -109,7 +120,7 @@ export function useScope(): { scope: Scope | null; isLoading: boolean; error: Er
       benchmarkRun: benchmark ? (index.get(benchmark.run_id) ?? null) : null,
       byId: (id) => index.get(id),
     }
-  }, [q.data, app, path, range, runId])
+  }, [q.data, app, path, range, version, runId])
 
   return { scope, isLoading: q.isLoading, error: q.error }
 }
@@ -122,7 +133,10 @@ export function useSelectRun() {
   return useCallback(
     (id: number | null) => {
       const run = id == null ? null : q.data?.runs.find((r) => r.id === id)
-      if (run) setFilters({ app: run.app_pkg ?? 'unknown', path: run.path_kind })
+      if (run) {
+        const { version } = useUi.getState()
+        setFilters({ app: run.app_pkg ?? 'unknown', path: run.path_kind, ...(version && version !== versionKey(run) ? { version: '' } : {}) })
+      }
       setRunId(run ? run.id : null)
     },
     [q.data, setFilters, setRunId],

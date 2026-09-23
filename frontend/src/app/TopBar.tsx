@@ -1,8 +1,9 @@
 import { Link } from 'react-router'
-import { GLYPH, Icon, Segmented, SelectField, type Tone } from '@/design'
-import type { Run } from '@/api/types'
-import { pathLabel, shortDate } from '@/domain/format'
-import { useSelectRun, verdictOf, type Scope } from '@/domain/scope'
+import { Icon, Segmented, SelectField } from '@/design'
+import { pathLabel } from '@/domain/format'
+import type { Scope } from '@/domain/scope'
+import { NO_VERSION, versionLabel } from '@/domain/versions'
+import { RunPicker } from './RunPicker'
 import { useUi, type RangeKey } from './store'
 import s from './Shell.module.css'
 
@@ -12,17 +13,8 @@ const RANGES: { value: RangeKey; label: string }[] = [
   { value: '7d', label: 'Last 7 days' },
 ]
 
-/** "#81 · Sep 23, 12:54 · ✕ FAIL" for the run picker. */
-function runOption(r: Run) {
-  const v = verdictOf(r)
-  const tone: Tone = v === 'pass' || v === 'warn' || v === 'fail' ? v : 'neutral'
-  return `#${r.id} · ${shortDate(r.ts, true)}${v ? ` · ${GLYPH[tone]} ${v.toUpperCase()}` : ''}`
-}
-
 export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean }) {
-  const { app, path, range, runId, theme, setFilters, toggleTheme, setDrawer } = useUi()
-  const selectRun = useSelectRun()
-  const runs = scope ? [...scope.allRuns].reverse() : []
+  const { app, path, range, version, runId, theme, setFilters, toggleTheme, setDrawer } = useUi()
   return (
     <header className={s.top}>
       {narrow && (
@@ -51,18 +43,19 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
             onChange={(v) => setFilters({ path: v })}
           />
         )}
-        {runs.length > 0 && (
-          // The one place a run is chosen: every screen shows the run picked here.
+        {scope && scope.versions.some((v) => v.key !== NO_VERSION) && (
           <SelectField
-            label="Run"
-            value={runId != null && scope?.run?.id === runId ? String(runId) : 'latest'}
+            label="Version"
+            value={scope.versions.some((v) => v.key === version) ? version : ''}
             options={[
-              { value: 'latest', label: `Latest · #${runs[0]!.id}` },
-              ...runs.map((r) => ({ value: String(r.id), label: runOption(r) })),
+              { value: '', label: `All versions · ${scope.allRuns.length}` },
+              ...scope.versions.map((v) => ({ value: v.key, label: `${versionLabel(v)} · ${v.runs} run${v.runs === 1 ? '' : 's'}` })),
             ]}
-            onChange={(v) => selectRun(v === 'latest' ? null : Number(v))}
+            onChange={(v) => setFilters({ version: v })}
           />
         )}
+        {/* The one place a run is chosen: every screen shows the run picked here. */}
+        {scope && scope.allRuns.length > 0 && <RunPicker scope={scope} runId={runId} />}
         <SelectField label="Range" value={range} options={RANGES} onChange={(v) => setFilters({ range: v })} />
         <Link className={s.tokensLink} to="/design-system">
           Tokens

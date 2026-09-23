@@ -2,10 +2,12 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import type { Space } from '../primitives/space'
 import s from './Popover.module.css'
 
-/** A surface floating above or below its (position: relative) container,
- *  as wide as the container less `inset` on each side. Closes on a
- *  pointer-down outside that container, or on Escape. */
-export function Popover({ open, onClose, placement = 'below', inset = 0, children }: { open: boolean; onClose: () => void; placement?: 'below' | 'above'; inset?: Space; children: ReactNode }) {
+/** A surface floating above or below its (position: relative) container.
+ *  By default it is as wide as the container less `inset` on each side; with
+ *  `width` it is that wide (never wider than the screen) and aligned to the
+ *  container's `align` edge. Closes on a pointer-down outside the container,
+ *  or on Escape. */
+export function Popover({ open, onClose, placement = 'below', inset = 0, width, align = 'start', maxHeight, children }: { open: boolean; onClose: () => void; placement?: 'below' | 'above'; inset?: Space; width?: number; align?: 'start' | 'end'; maxHeight?: number; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!open) return
@@ -28,7 +30,14 @@ export function Popover({ open, onClose, placement = 'below', inset = 0, childre
   }, [open, onClose])
   if (!open) return null
   return (
-    <div ref={ref} className={`${s.popover} ${s[placement]}`} style={inset ? { left: inset, right: inset } : undefined}>
+    <div
+      ref={ref}
+      className={`${s.popover} ${s[placement]}`}
+      style={{
+        ...(width ? { width: `min(${width}px, calc(100vw - 32px))`, [align === 'start' ? 'right' : 'left']: 'auto' } : inset ? { left: inset, right: inset } : {}),
+        ...(maxHeight ? { maxHeight } : {}),
+      }}
+    >
       {children}
     </div>
   )
