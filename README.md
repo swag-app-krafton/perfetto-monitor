@@ -104,11 +104,19 @@ budget (16.67 ms, 60 fps) applies to every app.
 - **Top bar:** everything is filtered by **App** (package), **Path** (cold, warm,
   returning user, first run — whichever exist for that app) and **Range** (last 30
   runs, last 10 runs, last 7 days). The app, path and range are remembered.
-- **Run** (top bar) is the one place a run is chosen. *Latest* follows the newest
-  run as new ones land. Pick any other run and every screen shows that run. Links
-  that name a run (History's **Open**, a Copilot source, **View results** after a
-  capture) set it here too. Changing the app or path goes back to that scope's
-  latest run.
+- **Version** (top bar) narrows everything to one build of the app: its version
+  name and build number (the Android `versionCode`), with how many runs each has.
+  The Run list, the charts and the verdict strip then cover that build only;
+  baselines still use every run, so a build is still compared with earlier ones.
+  It appears once runs have recorded a version.
+- **Run** (top bar) is the one place a run is chosen. It opens a table of the runs
+  in scope (the selected version's, if one is picked): run, version, verdict,
+  TTID, slow and janky frames, peak RAM and RAM growth, **sortable by any
+  column**, so the slowest or heaviest run of a build is one click away. Pick a row
+  and every screen shows that run; **Follow the latest run** goes back to
+  following new runs as they land. Links that name a run (History's **Open**, a
+  Copilot source, **View results** after a capture) set it here too. Changing the
+  app, path or version goes back to that scope's latest run.
 - **Run box** (top right of every screen): the run in view. It shows the run ID and
   verdict, whether it is the latest (**Older run · go to latest** when it is not),
   the device and Android version, and the app and its version and build number. It
@@ -356,7 +364,9 @@ them moved.
    applied to it.
 
 **Look back at an older run**
-1. Pick it in **Run** (top bar), or **Open** it from **History**.
+1. Pick it in **Run** (top bar), or **Open** it from **History**. To find the worst
+   run of a build, pick the build in **Version**, open **Run** and sort by TTID
+   or Peak RAM.
 2. Every screen now shows it. The run box says it is an older run, and
    **Run details** shows the device and app build it was measured on.
 
@@ -471,6 +481,13 @@ After pulling changes to the Python side (`swagperf/`), restart the dashboard
 ./.venv/bin/python -m swagperf.cli stress run --pkg com.swagpay -n 10
 ./.venv/bin/python -m swagperf.cli manual start --pkg com.swagpay --cold
 ./.venv/bin/python -m swagperf.cli screens traces/session.pftrace
+
+# delete every run, stress test, benchmark and Copilot conversation, and the
+# trace files in traces/; run ids start again at #1. Asks you to type "delete".
+# The app catalogue is kept, and so is any trace outside traces/.
+./.venv/bin/python -m swagperf.cli reset            # or: perfetto_init reset
+./.venv/bin/python -m swagperf.cli reset --keep-traces
+./.venv/bin/python -m swagperf.cli reset --yes      # no prompt, for scripts
 
 # recompute metrics for all runs whose traces still exist
 # (run this after changing extract.py, or historical rows mix two formats)
@@ -917,7 +934,7 @@ swagperf/
 frontend/         the dashboard's source (React + TypeScript)
 web/dist/         the built dashboard, served by server.py
 web/tokens.html   the token-consumption page
-tests/            114 tests over the pipeline, the store, the server and the Copilot
+tests/            117 tests over the pipeline, the store, the server and the Copilot
 docs/             backlog, decisions and plans
 ```
 

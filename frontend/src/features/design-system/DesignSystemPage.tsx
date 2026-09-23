@@ -20,6 +20,7 @@ import {
   Disclosure,
   DockPanel,
   EmptyState,
+  FieldButton,
   FlushCard,
   Eyebrow,
   Grid,
@@ -293,6 +294,9 @@ export function DesignSystemPage() {
                 <SelectField label="Range" value={sel} onChange={setSel} options={[{ value: '30', label: 'Last 30 runs' }, { value: '10', label: 'Last 10 runs' }]} />
               </Row>
               <SearchInput label="Search runs" placeholder="Search run, build or device" value={q} onChange={setQ} />
+              <Row>
+                <FieldButton label="Run" value="#81 · Latest" open={false} onClick={() => undefined} title="Opens a panel of its own (the top bar's Run picker)" />
+              </Row>
               <Row gap={12} wrap>
                 <Switch checked={deep} onChange={setDeep} label="Deep analysis" />
                 <HelpTip label="What is TTID?" text="Time to initial display: from process start to the first frame the app draws." />

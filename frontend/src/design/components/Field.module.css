@@ -86,3 +86,19 @@
 .textarea:focus-visible {
   outline: none;
 }
+.fieldButton {
+  color: var(--tx);
+  cursor: pointer;
+  font: 500 13px var(--font-ui);
+  max-width: 100%;
+}
+.fieldButton:hover,
+.fieldButton[aria-expanded='true'] {
+  border-color: var(--line2);
+}
+.buttonValue {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}

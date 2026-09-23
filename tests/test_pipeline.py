@@ -1227,6 +1227,65 @@ class TestRunMetadata(unittest.TestCase):
             self.assertNotIn("package_name_filter", cfg)
 
 
+class TestReset(unittest.TestCase):
+    """`swagperf reset` deletes every run and the traces the tool wrote, and
+    nothing else."""
+
+    def test_reset_empties_history_and_restarts_ids(self):
+        from swagperf import reset
+        db = os.path.join(tempfile.mkdtemp(), "h.db")
+        traces = tempfile.mkdtemp()
+        keep = os.path.join(traces, "notes.txt")
+        for name in ("a.pftrace", "b.pftrace"):
+            with open(os.path.join(traces, name), "wb") as f:
+                f.write(b"x" * 10)
+        with open(keep, "w") as f:
+            f.write("not a trace")
+        os.makedirs(os.path.join(traces, ".screens-cache"))
+        path = os.path.join(traces, "a.pftrace")
+        data, _ = gen_trace(seed=4)
+        src = os.path.join(tempfile.mkdtemp(), "s.pftrace")
+        with open(src, "wb") as f:
+            f.write(data)
+        m = extract(src)
+        rid = store.record(m, device="V2514", trace_path=path, db=db)
+        tid = store.copilot_thread_new("q", db=db)
+        store.copilot_message_add(tid, "user", {"text": "q"}, db=db)
+
+        p = reset.plan(db, traces)
+        self.assertEqual((p["rows"]["runs"], p["trace_files"], p["cache"]), (1, 2, True))
+        done = reset.reset(db, traces)
+        self.assertEqual(done["rows"]["runs"], 1)
+        self.assertEqual(reset.plan(db, traces)["rows"], {t: 0 for t in reset.TABLES})
+        self.assertEqual(sorted(os.listdir(traces)), ["notes.txt"], "only the tool's traces and cache go")
+        self.assertTrue(os.path.exists(src), "a trace outside traces/ is never touched")
+        self.assertEqual(store.record(m, device="V2514", db=db), 1, "ids start again at 1")
+        self.assertGreaterEqual(rid, 1)
+
+    def test_keep_traces(self):
+        from swagperf import reset
+        db = os.path.join(tempfile.mkdtemp(), "h.db")
+        traces = tempfile.mkdtemp()
+        open(os.path.join(traces, "a.pftrace"), "wb").close()
+        reset.reset(db, traces, keep_traces=True)
+        self.assertEqual(os.listdir(traces), ["a.pftrace"])
+
+    def test_cli_refuses_without_confirmation_when_not_interactive(self):
+        import subprocess
+        env = {**os.environ, "SWAGPERF_DB": os.path.join(tempfile.mkdtemp(), "h.db")}
+        data, _ = gen_trace(seed=5)
+        src = os.path.join(tempfile.mkdtemp(), "s.pftrace")
+        with open(src, "wb") as f:
+            f.write(data)
+        store.record(extract(src), device="V2514", db=env["SWAGPERF_DB"])
+        out = subprocess.run([sys.executable, "-m", "swagperf.cli", "reset", "--keep-traces"], env=env,
+                             stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                             cwd=os.path.join(os.path.dirname(__file__), ".."))
+        self.assertEqual(out.returncode, 2, out.stdout + out.stderr)
+        self.assertIn("refusing without --yes", out.stdout)
+        self.assertEqual(len(store.history(db=env["SWAGPERF_DB"])), 1, "nothing deleted")
+
+
 class TestStaticRouting(unittest.TestCase):
     """The built React app owns every client route; the old dashboard is gone."""
 
