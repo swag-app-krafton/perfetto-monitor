@@ -171,7 +171,7 @@ def screen_visits(tp):
             from slice s
             join thread_track tt on s.track_id = tt.id
             join thread th on tt.utid = th.utid
-            where s.name = 'Choreographer#doFrame'
+            where s.name like 'Choreographer#doFrame%'
               and s.ts >= {start} and s.ts <= {end}
               {f"and th.upid = {upid}" if upid is not None else ""}
         """)
@@ -323,6 +323,9 @@ def _visit_stats(visits):
     return out
 
 
+INSTANT_NS = 100_000  # 0.1ms
+
+
 def actions(tp):
     """User actions, aggregated by name.
 
@@ -330,10 +333,14 @@ def actions(tp):
     additionally carry timing. Both shapes are reported through one table so a
     caller does not need to know which the app emitted.
     """
+    # On Android an instant is emitted as an async begin/end pair a few
+    # microseconds apart, so it arrives with a tiny non-zero duration. Anything
+    # under INSTANT_NS is treated as an instant: reporting it as "0.01 ms mean"
+    # presented a marker's bookkeeping as the action's cost.
     rows = _rows(tp, f"""
         select name as nm, count(*) as n,
-               sum(case when dur > 0 then dur else 0 end) as total_dur,
-               max(dur) as max_dur
+               sum(case when dur > {INSTANT_NS} then dur else 0 end) as total_dur,
+               max(case when dur > {INSTANT_NS} then dur else 0 end) as max_dur
         from slice where name like '{ACTION_PREFIX}%'
         group by name order by n desc
     """)
@@ -477,32 +484,236 @@ def stack_summary(visits):
     return sorted(out, key=lambda d: d["depth"])
 
 
-def navigations(tp):
-    """Screen-to-screen transitions and what each one cost."""
-    rows = _rows(tp, f"""
-        select name as nm, count(*) as n,
-               sum(case when dur > 0 then dur else 0 end) as total_dur,
-               max(dur) as max_dur
-        from slice where name like '{NAV_PREFIX}%'
-        group by name order by n desc
+def navigations(tp, upids=None):
+    """Screen-to-screen transitions, each costed as the user experiences it.
+
+    Three marker shapes share the `nav:` prefix, and reading them all as
+    transitions listed every navigation two or three times: `nav:open-Send`
+    and friends are *stack operations* (consumed by `screen_stack`), while
+    `nav:Home->Send` and its kind-tagged twin `nav:Home#native_view->Send#compose`
+    are the same transition emitted twice at the same instant. Only `From->To`
+    markers are read here, kind tags are stripped, and twins are collapsed.
+
+    The marker's own duration is not the cost. It closes in the same call that
+    opened it -- before the destination has drawn anything -- so every
+    transition read 0.0-0.2ms. What a user waits for is the gap from the
+    navigation to the end of the first frame the app renders after it, and the
+    trace has both, so that is what is reported.
+    """
+    import bisect
+    events = _rows(tp, f"""
+        select name as nm, ts from slice
+        where name like '{NAV_PREFIX}%->%' order by ts
     """)
-    out = []
-    for r in rows:
-        label = r["nm"][len(NAV_PREFIX):]
+    scope = ""
+    if upids:
+        ids = ",".join(str(int(u)) for u in upids)
+        scope = f""" and s.track_id in (select tt.id from thread_track tt
+                     join thread th using(utid) where th.upid in ({ids}))"""
+    frames = _rows(tp, f"""
+        select s.ts as ts, s.ts + s.dur as e from slice s
+        where s.name like 'Choreographer#doFrame%' and s.dur > 0{scope}
+        order by s.ts
+    """)
+    starts = [f["ts"] for f in frames]
+
+    seen, by = {}, {}
+    for ev in events:
+        label = ev["nm"][len(NAV_PREFIX):]
         frm, _, to = label.partition("->")
-        total = (r["total_dur"] or 0) / 1e6
+        frm = frm.split(KIND_SEPARATOR)[0] or None
+        to = to.split(KIND_SEPARATOR)[0] or None
+        # Twins land within microseconds of each other; 50ms buckets them.
+        key = (frm, to, ev["ts"] // 50_000_000)
+        if key in seen:
+            continue
+        seen[key] = True
+        cost = None
+        i = bisect.bisect_left(starts, ev["ts"])
+        if i < len(frames):
+            cost = (frames[i]["e"] - ev["ts"]) / 1e6
+        d = by.setdefault((frm, to), {"costs": [], "n": 0})
+        d["n"] += 1
+        if cost is not None:
+            d["costs"].append(cost)
+
+    out = []
+    for (frm, to), d in by.items():
+        cs = sorted(d["costs"])
         out.append({
-            "transition": label,
-            "from": frm or None, "to": to or None,
-            "count": r["n"],
-            "total_ms": round(total, 2) if total else None,
-            "max_ms": round((r["max_dur"] or 0) / 1e6, 2) if (r["max_dur"] or 0) > 0 else None,
+            "transition": f"{frm}->{to}",
+            "from": frm, "to": to,
+            "count": d["n"],
+            # Median and worst, not mean: one cold first visit would drag a mean.
+            "median_ms": round(cs[len(cs) // 2], 1) if cs else None,
+            "max_ms": round(cs[-1], 1) if cs else None,
+            "total_ms": round(sum(cs), 1) if cs else None,
         })
+    return sorted(out, key=lambda r: -(r["max_ms"] or 0))
+
+
+# Bump whenever the shape or maths of extract_screens changes, so a cached
+# result computed by older code is never served as if it were current.
+SCREENS_CACHE_VERSION = 4
+
+
+def _cache_path(trace_path):
+    """Where a trace's extracted screen data is cached, or None if uncachable.
+
+    Keyed on the trace's absolute path, size and mtime: a trace file is written
+    once and never edited, so those three identify its content without hashing
+    hundreds of megabytes on every request.
+    """
+    import hashlib, os
+    try:
+        st = os.stat(trace_path)
+    except OSError:
+        return None
+    key = f"{os.path.abspath(trace_path)}|{st.st_size}|{st.st_mtime_ns}|{SCREENS_CACHE_VERSION}"
+    d = os.path.join(os.path.dirname(os.path.abspath(trace_path)), ".screens-cache")
+    return os.path.join(d, hashlib.sha1(key.encode()).hexdigest() + ".json")
+
+
+def extract_screens(trace_path, use_cache=True):
+    """Screen, action and navigation metrics for one trace.
+
+    Cached per trace file. Extraction re-parses the whole trace and runs a CPU,
+    RAM and frame query per visit, which took 2.5-3.7s on a real 165-280MB
+    manual session -- paid again every time the Screens tab opened or the run
+    picker changed, for a result that cannot change because the trace cannot.
+    """
+    import json, os
+    cp = _cache_path(trace_path) if use_cache else None
+    if cp and os.path.exists(cp):
+        try:
+            with open(cp) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            pass  # a torn or stale cache file is just a miss
+    out = _extract_screens(trace_path)
+    if cp:
+        try:
+            os.makedirs(os.path.dirname(cp), exist_ok=True)
+            tmp = cp + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(out, f)
+            os.replace(tmp, cp)  # atomic, so a concurrent reader never sees half a file
+        except OSError:
+            pass  # caching is an optimisation; failing to write it is not an error
     return out
 
 
-def extract_screens(trace_path):
-    """Screen, action and navigation metrics for one trace."""
+def _screen_upids(tp):
+    """The process(es) that emitted screen markers -- the app, by definition."""
+    return [r["upid"] for r in _rows(tp, f"""
+        select distinct coalesce(pt.upid, th.upid) as upid
+        from slice s
+        left join process_track pt on s.track_id = pt.id
+        left join thread_track tt on s.track_id = tt.id
+        left join thread th on tt.utid = th.utid
+        where s.name like '{SCREEN_PREFIX}%'
+    """) if r.get("upid") is not None]
+
+
+TIMELINE_BUCKET_MS = 500
+
+
+def session_timeline(tp, upids):
+    """The app's RAM and CPU across the whole session, on the visits' clock.
+
+    Per-visit numbers say how much a screen cost; they cannot say *when* memory
+    arrived. On a real session the app grew 256MB, and the only way to see which
+    screen it arrived on is to draw RAM over time with each visit behind it.
+    Timestamps are milliseconds on the same absolute clock as `start_ms` in
+    each visit, so the dashboard can overlay the two without re-basing.
+    """
+    if not upids:
+        return {"rss": [], "cpu": [], "bucket_ms": TIMELINE_BUCKET_MS}
+    ids = ",".join(str(int(u)) for u in upids)
+    mb = 1024 * 1024
+    rss = [[round(r["ts"] / 1e6, 1), round(r["v"] / mb, 1)] for r in _rows(tp, f"""
+        select c.ts as ts, c.value as v
+        from counter c join process_counter_track t on c.track_id = t.id
+        where t.name = 'mem.rss' and t.upid in ({ids})
+        order by c.ts
+    """)]
+    bucket_ns = TIMELINE_BUCKET_MS * 1_000_000
+    # A slice is credited to the bucket it starts in. Scheduler slices are
+    # micro- to milliseconds long against a 500ms bucket, so the error from not
+    # splitting the rare one that straddles a boundary is well under a percent.
+    cpu = [[round(r["b"] * TIMELINE_BUCKET_MS, 1), round(r["ns"] / bucket_ns * 100, 1)]
+           for r in _rows(tp, f"""
+        select ss.ts / {bucket_ns} as b, sum(ss.dur) as ns
+        from sched_slice ss
+        where ss.utid in (select utid from thread where upid in ({ids}))
+        group by b order by b
+    """)]
+    return {"rss": rss, "cpu": cpu, "bucket_ms": TIMELINE_BUCKET_MS}
+
+
+# Android's own FrameTimeline verdict on each late frame. "App Deadline
+# Missed" is the app's fault; the SurfaceFlinger / Display HAL / prediction
+# types are the system's; "Buffer Stuffing" means frames queued faster than
+# they could be shown (app-side, usually not a visible hitch on its own).
+JANK_GROUPS = (
+    ("app", ("App Deadline Missed",)),
+    ("system", ("SurfaceFlinger", "Display HAL", "Prediction Error")),
+    ("dropped", ("Dropped Frame",)),
+    ("buffer_stuffing", ("Buffer Stuffing",)),
+)
+
+
+def _jank_group(jank_type):
+    for group, needles in JANK_GROUPS:
+        if any(n in jank_type for n in needles):
+            return group
+    return "other"
+
+
+def jank_by_screen(tp, upids, visits):
+    """Late frames per screen, split by whose fault Android says they were.
+
+    Slow-frame percentages say a screen stuttered, not why. FrameTimeline
+    classifies each late frame at the source, which separates "our code missed
+    the deadline" from "the compositor or display did" -- two problems with
+    nothing in common in how they are fixed.
+    """
+    if not upids or not visits:
+        return {}
+    ids = ",".join(str(int(u)) for u in upids)
+    try:
+        frames = _rows(tp, f"""
+            select ts, jank_type as jt from actual_frame_timeline_slice
+            where upid in ({ids}) order by ts""")
+    except Exception:
+        return {}  # older traces have no FrameTimeline table
+    if not frames:
+        return {}
+    spans = sorted(((v["start_ms"] * 1e6, (v["start_ms"] + v["duration_ms"]) * 1e6, v["route"])
+                    for v in visits))
+    out, i = {}, 0
+    for f in frames:
+        while i < len(spans) and spans[i][1] < f["ts"]:
+            i += 1
+        if i >= len(spans):
+            break
+        start, end, route = spans[i]
+        if f["ts"] < start:
+            continue  # between visits: not attributable to a screen
+        d = out.setdefault(route, {"frames": 0, "late": 0, "app": 0, "system": 0,
+                                   "dropped": 0, "buffer_stuffing": 0, "other": 0})
+        d["frames"] += 1
+        jt = f.get("jt") or "None"
+        if jt not in ("None", ""):
+            d["late"] += 1
+            d[_jank_group(jt)] += 1
+    for d in out.values():
+        d["app_jank_pct"] = round(d["app"] / d["frames"] * 100, 2) if d["frames"] else None
+        d["late_pct"] = round(d["late"] / d["frames"] * 100, 2) if d["frames"] else None
+    return out
+
+
+def _extract_screens(trace_path):
     from perfetto.trace_processor import TraceProcessor
     tp = TraceProcessor(trace=trace_path)
     try:
@@ -517,13 +728,19 @@ def extract_screens(trace_path):
         # Stacks are attached before summarising so each visit carries the depth
         # it ran at, and the summary can group by it.
         visits = attach_stacks(visits, screen_stack(tp))
+        upids = _screen_upids(tp)
+        summary = screen_summary(visits)
+        jank = jank_by_screen(tp, upids, visits)
+        for row in summary:
+            row["jank"] = jank.get(row["route"])
         return {"instrumented": True,
                 "screens": visits,
-                "screen_summary": screen_summary(visits),
+                "screen_summary": summary,
+                "timeline": session_timeline(tp, upids),
                 "stack_summary": stack_summary(visits),
                 "max_depth": max((v.get("depth", 1) for v in visits), default=0),
                 "actions": actions(tp),
-                "navigations": navigations(tp)}
+                "navigations": navigations(tp, upids)}
     finally:
         tp.close()
 

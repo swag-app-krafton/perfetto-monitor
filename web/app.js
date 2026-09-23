@@ -26,6 +26,12 @@ const PATH_LABEL = { returning_user: 'Returning user', first_run: 'First run',
 const pathLabel = k => PATH_LABEL[k] || (k ? k[0].toUpperCase() + k.slice(1) : k);
 
 let DATA = null, RANGE = 30, PATH = 'returning_user', APP = 'all';
+// Until the person picks a path themselves, follow the most recent run. A fixed
+// default of 'returning_user' opened the dashboard on the synthetic seed runs
+// and hid every real device capture, which are recorded as 'cold' or 'warm' --
+// so "latest run" on the Overview was a day-old fixture from a phone nobody
+// owns. Any explicit choice (the picker, or a job that just finished) wins.
+let PATH_PICKED = false;
 let SORT = { history: { k: 'id', dir: -1 }, steps: { k: 'start_ms', dir: 1 } };
 let FILTER = { verdict: 'all', device: 'all', runtime: 'all', q: '' };
 let OPEN_STEP = null;   // step drilled into, null = none
@@ -43,7 +49,9 @@ const MAN_LIST_LIMIT = 60;
 // Each live poll costs an adb pull plus a trace parse, so keep it well clear
 // of the server's own 4s cache rather than hammering it.
 const LIVE_POLL_MS = 5000;
-let MAN = { status: null, pkg: 'com.swag.pay', cold: false, job: null,
+// Cold by default: a warm session records no launch, so it has no startup
+// metrics at all -- which is what a first manual run looked like from outside.
+let MAN = { status: null, pkg: 'com.swag.pay', cold: true, job: null,
             polling: false, since: null, q: '',
             // Live marker feed while recording. `kinds` is the filter: an empty
             // set would mean "show nothing", so it starts with everything on.
@@ -936,6 +944,105 @@ function visitBars(row, metric) {
   return svg;
 }
 
+/* The app's RAM and CPU over the whole session, with each screen visit behind.
+
+   Per-visit numbers say how much a screen cost; they cannot say *when* memory
+   arrived. On a real session the app grew 256MB, and this is how to see which
+   screen it arrived on. RAM and CPU are different units, so they are two panels
+   on one shared time axis with a single crosshair -- never one chart with two
+   y-scales. Visits are neutral alternating bands, labelled directly where they
+   are wide enough; the tooltip always names the screen. */
+function timelineChart(d) {
+  const tl = d.timeline || {};
+  const rss = tl.rss || [], cpu = tl.cpu || [];
+  const visits = d.screens || [];
+  if (!rss.length && !cpu.length) return null;
+  const W = 1180, L = 58, R = 16, top = 22, panelH = 150, gap = 34, B = 34;
+  const H = top + panelH * 2 + gap + B;
+  const iw = W - L - R;
+  const allT = rss.map(p => p[0]).concat(cpu.map(p => p[0]))
+    .concat(visits.map(v => v.start_ms), visits.map(v => v.start_ms + v.duration_ms));
+  const t0 = Math.min(...allT), t1 = Math.max(...allT);
+  const x = t => L + ((t - t0) / Math.max(t1 - t0, 1)) * iw;
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img',
+    'aria-label': 'App RAM and CPU over the session, with screen visits' });
+  const g = el('g'); svg.appendChild(g);
+
+  const panels = [
+    { key: 'rss', data: rss, y0: top, unit: ' MB', label: 'RAM (MB)', color: 'var(--s1)', dp: 0 },
+    { key: 'cpu', data: cpu, y0: top + panelH + gap, unit: '%', label: 'CPU busy (%)', color: 'var(--s2)', dp: 0 },
+  ];
+
+  // Visit bands first, so every mark sits on top of them.
+  visits.forEach((v, i) => {
+    const xa = x(v.start_ms), xb = x(v.start_ms + v.duration_ms);
+    panels.forEach(pn => g.appendChild(el('rect', {
+      x: xa, y: pn.y0, width: Math.max(xb - xa, 0.5), height: panelH,
+      fill: i % 2 ? 'var(--surface-2)' : 'var(--surface-1)' })));
+    if (xb - xa > 46) {
+      g.appendChild(el('text', { x: xa + 4, y: top - 7, class: 'ax', fill: 'var(--text-secondary)' },
+        [document.createTextNode(v.route.length > Math.floor((xb - xa) / 7)
+          ? v.route.slice(0, Math.max(Math.floor((xb - xa) / 7) - 1, 3)) + '\u2026' : v.route)]));
+    }
+  });
+
+  panels.forEach(pn => {
+    const vals = pn.data.map(p => p[1]);
+    const max = Math.max(...vals, 1) * 1.08;
+    pn.y = v => pn.y0 + panelH - (v / max) * panelH;
+    for (let k = 0; k <= 3; k++) {
+      const gv = (max / 3) * k;
+      g.appendChild(el('line', { x1: L, x2: W - R, y1: pn.y(gv), y2: pn.y(gv),
+        stroke: 'var(--grid)', 'stroke-width': 1 }));
+      g.appendChild(el('text', { x: L - 8, y: pn.y(gv) + 4, class: 'ax', 'text-anchor': 'end' },
+        [document.createTextNode(fmt(gv, 0))]));
+    }
+    g.appendChild(el('text', { x: L, y: pn.y0 + panelH + 14, class: 'ax', fill: 'var(--text-secondary)' },
+      [document.createTextNode(pn.label)]));
+    if (pn.data.length > 1) {
+      const path = pn.data.map((p, j) => `${j ? 'L' : 'M'}${x(p[0]).toFixed(1)},${pn.y(p[1]).toFixed(1)}`).join('');
+      g.appendChild(el('path', { d: path, fill: 'none', stroke: pn.color, 'stroke-width': 2,
+        'stroke-linejoin': 'round' }));
+    }
+  });
+
+  // One x-axis for both panels, in seconds into the session.
+  const span = (t1 - t0) / 1000;
+  const step = span > 240 ? 60 : span > 90 ? 20 : span > 30 ? 10 : 5;
+  for (let s = 0; s <= span; s += step) {
+    g.appendChild(el('text', { x: x(t0 + s * 1000), y: H - 12, class: 'ax', 'text-anchor': 'middle' },
+      [document.createTextNode(`${s}s`)]));
+  }
+
+  const cross = el('line', { y1: top, y2: top + panelH * 2 + gap, stroke: 'var(--text-secondary)',
+    'stroke-width': 1, 'stroke-dasharray': '3 3', visibility: 'hidden' });
+  g.appendChild(cross);
+  const near = (arr, t) => {
+    let best = null, bd = Infinity;
+    for (const p of arr) { const dd = Math.abs(p[0] - t); if (dd < bd) { bd = dd; best = p; } }
+    return best;
+  };
+  const hit = el('rect', { x: L, y: top, width: iw, height: panelH * 2 + gap, class: 'hit' });
+  hit.addEventListener('mousemove', e => {
+    const box = svg.getBoundingClientRect();
+    const px = (e.clientX - box.left) * (W / box.width);
+    const t = t0 + ((px - L) / iw) * (t1 - t0);
+    cross.setAttribute('x1', px); cross.setAttribute('x2', px); cross.setAttribute('visibility', 'visible');
+    const v = visits.find(q => t >= q.start_ms && t <= q.start_ms + q.duration_ms);
+    const r = near(rss, t), c = near(cpu, t);
+    showTip(
+      `<b>${v ? esc(v.route) : 'between screens'}</b>` +
+      `<div class="r"><span>time</span><b>${fmt((t - t0) / 1000, 1)} s</b></div>` +
+      `<div class="r"><span>RAM</span><b>${r ? fmt(r[1], 0) + ' MB' : '\u2013'}</b></div>` +
+      `<div class="r"><span>CPU busy</span><b>${c ? fmt(c[1], 0) + '%' : '\u2013'}</b></div>` +
+      (v && v.stack && v.stack.length > 1
+        ? `<div class="r"><span>stack</span><b>${esc(v.stack.join(' \u203a '))}</b></div>` : ''), e);
+  });
+  hit.addEventListener('mouseleave', () => { cross.setAttribute('visibility', 'hidden'); hideTip(); });
+  g.appendChild(hit);
+  return svg;
+}
+
 /* Cost grouped by how deep the screen sat in the navigation stack.
 
    A per-screen number says what the screen on top cost. It cannot say what was
@@ -1070,6 +1177,14 @@ function tileHTML(k, v, unit, budget, prevV, d) {
       <div class="v" style="font-size:19px;color:var(--text-muted)">not measured</div>
       <div class="m">no startup marker in this trace</div></div>`;
   }
+  // Any metric can be unmeasured (no frames counted, too short a window for
+  // drift). Showing 0 would read as a perfect score; say what happened.
+  if (v == null) {
+    return `<div class="tile">
+      <div class="k">${esc(k)}</div>
+      <div class="v" style="font-size:19px;color:var(--text-muted)">not measured</div>
+      <div class="m">not enough data in this trace</div></div>`;
+  }
   const bad = budget != null && v > budget;
   const warnb = budget != null && v > budget * 0.9 && !bad;
   const dl = (a, b) => {
@@ -1104,7 +1219,8 @@ function findingsHTML(an, opts = {}) {
   }
   if (!fs.length) return `<p class="empty">${esc(opts.emptyMsg || 'No findings in this area for the latest run.')}</p>`;
   return fs.map(f => `<div class="find ${esc(f.severity || 'low')}">
-    <div class="t">${esc(f.title)}<span class="tag">${esc(RLABEL[f.runtime] || f.runtime || 'unknown')}</span><span class="tag">${esc(f.kind || '')}</span></div>
+    <div class="t">${esc(f.title)}${f.runtime && f.runtime !== 'unknown'
+      ? `<span class="tag">${esc(RLABEL[f.runtime] || f.runtime)}</span>` : ''}<span class="tag">${esc((f.kind || '').replace(/_/g, ' '))}</span></div>
     <div class="e">${esc(f.evidence)}</div>
     ${f.recommendation ? `<div class="r">&rarr; ${esc(f.recommendation)}</div>` : ''}
     ${f.architectural_risk ? `<div class="rk">risk: ${esc(f.architectural_risk)}</div>` : ''}
@@ -1233,12 +1349,15 @@ function render() {
       <div class="card"><h2>Reading these two together</h2>
         <p class="hint">Progressive drift across a session means thermal throttling. Scattered spikes with flat drift point at the CMP &times; RN interop seam. They need different fixes, so the dashboard keeps them apart.</p>
         <div class="readout">
-          <div class="ro"><span class="rok">Drift</span><b>${fmt(cur.thermal_drift_pct, 2)}%</b>
-            <em>${cur.thermal_drift_pct > gb.thermal_drift_pct ? 'progressive — thermal likely' : 'flat — not thermal'}</em></div>
-          <div class="ro"><span class="rok">Slow frames</span><b>${fmt(cur.slow_pct, 2)}%</b>
-            <em>${cur.slow_pct > gb.slow_frame_pct ? 'over budget' : 'within budget'}</em></div>
+          <div class="ro"><span class="rok">Drift</span><b>${cur.thermal_drift_pct == null ? 'not measured' : fmt(cur.thermal_drift_pct, 2) + '%'}</b>
+            <em>${cur.thermal_drift_pct == null ? 'too few sustained frames to judge'
+              : cur.thermal_drift_pct > gb.thermal_drift_pct ? 'progressive — thermal likely' : 'flat — not thermal'}</em></div>
+          <div class="ro"><span class="rok">Slow frames</span><b>${cur.slow_pct == null ? 'not measured' : fmt(cur.slow_pct, 2) + '%'}</b>
+            <em>${cur.slow_pct == null ? 'no frames counted in this trace'
+              : cur.slow_pct > gb.slow_frame_pct ? 'over budget' : 'within budget'}</em></div>
           <div class="ro"><span class="rok">Indication</span><b>${
-            cur.thermal_drift_pct > gb.thermal_drift_pct && cur.slow_pct > gb.slow_frame_pct ? 'Thermal'
+            cur.slow_pct == null ? 'Unknown'
+            : cur.thermal_drift_pct != null && cur.thermal_drift_pct > gb.thermal_drift_pct && cur.slow_pct > gb.slow_frame_pct ? 'Thermal'
             : cur.slow_pct > gb.slow_frame_pct ? 'Seam or workload' : 'Healthy'}</b>
             <em>needs per-surface tags to confirm the seam</em></div>
         </div>
@@ -1815,6 +1934,11 @@ function render() {
             -- competitors -- where it is the only half available. */''
         }${d && !d.error && SCR.view === 'launch' ? launchViewHTML(scrRun) : ''}
       ${d && d.instrumented && SCR.view === 'usage' ? `
+        ${(d.timeline && (d.timeline.rss || []).length) ? `<div class="card"><h2>Session timeline</h2>
+          <p class="hint">The app's own RAM and CPU across the whole session, with each screen
+            visit as a band behind. A step up in RAM that never comes back down, landing on
+            the same screen each time, is where to look first.</p>
+          <div id="scrtl"></div></div>` : ''}
         ${stackViewHTML(d)}
         <div class="card"><h2>Screens</h2>
           <p class="hint">Select a row to chart every visit to that screen separately.
@@ -1831,6 +1955,7 @@ function render() {
               <th class="num">CPU time${qh('Total time a CPU core was actually scheduled doing work for this screen, summed across every visit. Not the same as time on screen -- a screen can be open a long time while mostly idle.')}</th>
               <th class="num">CPU busy %${qh('CPU time as a share of time on screen. Answers "was it actually working, or just open?" Over 100% means work spread across more than one CPU core at once.')}</th>
               <th class="num">Slow frames${qh('Share of frames on this screen that took longer than 16.6ms to render (missed 60fps).')}</th>
+              <th class="num">App jank${qh("Frames Android's own FrameTimeline marked as the app missing its deadline -- your code's fault, as opposed to the compositor or display. Hover a value for the full split.")}</th>
               <th class="num">Worst RAM growth${qh('The largest increase in resident memory seen during any single visit to this screen, from when it opened to its peak.')}</th>
             </tr></thead>
             <tbody>${d.screen_summary.map(r => {
@@ -1846,8 +1971,14 @@ function render() {
                 <td class="num">${fmt(r.total_cpu_ms, 1)}</td>
                 <td class="num" style="color:var(--text-secondary)">${cpuPct == null ? '–' : fmt(cpuPct, 1) + '%'}</td>
                 <td class="num ${(r.slow_frame_pct || 0) > 5 ? 'up' : ''}">${r.slow_frame_pct == null ? '–' : fmt(r.slow_frame_pct, 2) + '%'}</td>
+                <td class="num ${((r.jank || {}).app_jank_pct || 0) > 0.5 ? 'up' : ''}" title="${r.jank
+                  ? esc(`${r.jank.late} of ${r.jank.frames} frames late: ${r.jank.app} app deadline missed, `
+                      + `${r.jank.dropped} dropped, ${r.jank.buffer_stuffing} buffer stuffing, `
+                      + `${r.jank.system} system (compositor/display)`)
+                  : 'No FrameTimeline data for this screen'}">${r.jank && r.jank.app_jank_pct != null
+                  ? fmt(r.jank.app_jank_pct, 2) + '%' : '\u2013'}</td>
                 <td class="num ${(r.max_rss_delta_mb || 0) > 10 ? 'up' : ''}">${r.max_rss_delta_mb == null ? '–' : fmt(r.max_rss_delta_mb, 1) + ' MB'}</td>
-              </tr>${isOpen ? `<tr><td colspan="9" style="background:var(--surface-1)">
+              </tr>${isOpen ? `<tr><td colspan="10" style="background:var(--surface-1)">
                 <div class="ctl" style="margin:4px 0 10px">
                   <span class="flabel">Chart</span><div id="scrmetric"></div>
                   <span class="count">${r.visits} visit${r.visits === 1 ? '' : 's'}</span>
@@ -1870,24 +2001,31 @@ function render() {
             hybrid app is React Native against Compose.</p>
         </div>
         ${d.navigations.length ? `<div class="card"><h2>Transitions</h2>
-          <p class="hint">Cost of the navigation itself, separate from the screens either side.</p>
+          <p class="hint">How long each navigation takes to reach the screen: from the moment
+            the app navigates to the end of the first frame it draws afterwards. Over one frame
+            budget (16.7ms) is a visible pause; over 100ms reads as lag.</p>
           <div class="scroll"><table>
-            <thead><tr><th>From</th><th>To</th><th class="num">Count</th><th class="num">Worst ms</th></tr></thead>
+            <thead><tr><th>From</th><th>To</th><th class="num">Count</th>
+              <th class="num">Median${qh('Typical time from navigating to the first frame drawn afterwards, across every time this transition happened.')}</th>
+              <th class="num">Worst${qh('The slowest single occurrence. A worst far above the median usually means a first, cold visit.')}</th></tr></thead>
             <tbody>${d.navigations.map(n2 => `<tr>
               <td>${esc(n2.from || '')}</td><td>${esc(n2.to || '')}</td>
               <td class="num">${n2.count}</td>
-              <td class="num ${(n2.max_ms || 0) > 32 ? 'up' : ''}">${n2.max_ms == null ? '–' : fmt(n2.max_ms, 1)}</td>
+              <td class="num">${n2.median_ms == null ? '\u2013' : fmt(n2.median_ms, 1) + ' ms'}</td>
+              <td class="num ${(n2.max_ms || 0) > 100 ? 'up' : ''}">${n2.max_ms == null ? '\u2013' : fmt(n2.max_ms, 1) + ' ms'}</td>
             </tr>`).join('')}</tbody>
           </table></div></div>` : ''}
         ${d.actions.length ? `<div class="card"><h2>Actions</h2>
           <p class="hint">Discrete user actions the app marked. Counts alone are meaningful
             for instant markers; spans also carry timing.</p>
           <div class="scroll"><table>
-            <thead><tr><th>Action</th><th class="num">Count</th><th class="num">Mean ms</th><th class="num">Worst ms</th></tr></thead>
+            <thead><tr><th>Action</th><th class="num">Count</th>${d.actions.some(a => a.max_ms != null)
+              ? '<th class="num">Mean ms</th><th class="num">Worst ms</th>' : ''}</tr></thead>
             <tbody>${d.actions.map(a => `<tr>
               <td>${esc(a.action)}</td><td class="num">${a.count}</td>
+              ${d.actions.some(x => x.max_ms != null) ? `
               <td class="num">${a.mean_ms == null ? '–' : fmt(a.mean_ms, 2)}</td>
-              <td class="num">${a.max_ms == null ? '–' : fmt(a.max_ms, 2)}</td>
+              <td class="num">${a.max_ms == null ? '–' : fmt(a.max_ms, 2)}</td>` : ''}
             </tr>`).join('')}</tbody>
           </table></div></div>` : ''}` : ''}`;
 
@@ -1905,6 +2043,8 @@ function render() {
         });
       }
       if (d && d.instrumented && SCR.view === 'usage') {
+        const tlh = $('#scrtl');
+        if (tlh) { const c = timelineChart(d); if (c) tlh.appendChild(c); }
         document.querySelectorAll('[data-scrrow]').forEach(tr => tr.onclick = () => {
           const route = tr.dataset.scrrow;
           SCR.open = SCR.open === route ? null : route;
@@ -2219,10 +2359,14 @@ async function load() {
 
   const scoped = DATA.runs.filter(r => APP === 'all' || (r.app_pkg || '') === APP);
   const kinds = [...new Set(scoped.map(r => r.path_kind))];
+  if (!PATH_PICKED && scoped.length) {
+    const newest = scoped.reduce((a, b) => (b.id > a.id ? b : a));
+    if (newest.path_kind) PATH = newest.path_kind;
+  }
   if (!kinds.includes(PATH) && kinds.length) PATH = kinds[0];
   const sel = $('#pathsel');
   sel.innerHTML = kinds.map(k => `<option value="${esc(k)}"${k === PATH ? ' selected' : ''}>${esc(pathLabel(k))}</option>`).join('');
-  sel.onchange = () => { PATH = sel.value; render(); };
+  sel.onchange = () => { PATH = sel.value; PATH_PICKED = true; render(); };
   render();
 }
 $('#rangebtn').onclick = e => {
