@@ -291,8 +291,13 @@ def main(argv=None):
             print(f"  note: {n.pkg} is not in the catalogue; add it with "
                   f"`swagperf apps add {n.pkg}` to label it in reports.")
         rc = 0
+        from .capture import run_metadata
         for i in range(max(n.repeat, 1)):
             out = n.out or f"traces/{n.pkg}_{'cold' if n.cold else 'warm'}_{i:02d}.pftrace"
+            try:
+                meta = run_metadata(n.pkg)
+            except Exception:
+                meta = None
             p = capture(out, pkg=n.pkg, duration_ms=n.duration_ms, cold=n.cold)
             print(f"  captured -> {p}")
             if n.analyse:
@@ -302,6 +307,9 @@ def main(argv=None):
                 lbl = n.label or f"{'cold' if n.cold else 'warm'}-{i:02d}"
                 args += ["--label", lbl]
                 rc = main(args) or rc
+                rid = store.run_id_for_trace(p)
+                if meta and rid:
+                    store.set_run_meta(rid, "capture", {**meta, "moment": "before capture"})
         return rc
 
     if n.cmd == "seed":

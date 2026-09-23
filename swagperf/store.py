@@ -120,6 +120,9 @@ def _scope(path_kind, device, app_pkg=None):
 MIGRATIONS = [
     ("runs", "app_pkg", "text"),
     ("runs", "derived", "int default 0"),
+    # Where a run was measured: {"capture": device/app/state read over adb at
+    # capture time, "from_trace": what the trace itself records}.
+    ("runs", "meta_json", "text"),
 ]
 
 
@@ -136,7 +139,7 @@ def connect(db=None):
 
 
 def record(metrics, *, label=None, git_sha=None, app_version=None,
-           device=None, trace_path=None, app_pkg=None, db=None):
+           device=None, trace_path=None, app_pkg=None, meta=None, db=None):
     c = connect(db)
     f, mem = metrics["frames"], metrics.get("memory", {})
     app_pkg = app_pkg or metrics.get("app_pkg")
@@ -154,6 +157,8 @@ def record(metrics, *, label=None, git_sha=None, app_version=None,
         json.dumps(metrics["breaches"]), json.dumps(metrics["ordering_violations"]),
         json.dumps(f), json.dumps(mem)))
     rid = cur.lastrowid
+    if meta:
+        c.execute("update runs set meta_json=? where id=?", (json.dumps({"capture": meta}), rid))
     for s in metrics["steps"]:
         c.execute("""insert into step_metrics
             (run_id,step,dur_ms,start_ms,budget_ms,over_budget,children_json)
@@ -620,6 +625,37 @@ def history(limit=100, db=None):
     for r in runs:
         r["steps"] = sorted(per.get(r["id"], []), key=lambda x: x["start_ms"] or 0)
     return list(reversed(runs))
+
+
+# ---------------------------------------------------------------- run metadata
+
+def run_row(run_id, db=None):
+    c = connect(db)
+    r = c.execute("select * from runs where id=?", (run_id,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+
+def run_id_for_trace(trace_path, db=None):
+    """The newest run recorded from a trace file."""
+    c = connect(db)
+    r = c.execute("select max(id) as id from runs where trace_path=?", (trace_path,)).fetchone()
+    c.close()
+    return r["id"] if r else None
+
+
+def set_run_meta(run_id, key, value, db=None):
+    """Set one section ("capture" or "from_trace") of a run's metadata."""
+    c = connect(db)
+    row = c.execute("select meta_json from runs where id=?", (run_id,)).fetchone()
+    if row is None:
+        c.close()
+        raise ValueError(f"no run {run_id}")
+    meta = json.loads(row["meta_json"] or "{}")
+    meta[key] = value
+    c.execute("update runs set meta_json=? where id=?", (json.dumps(meta), run_id))
+    c.commit(); c.close()
+    return meta
 
 
 # ---------------------------------------------------------------- copilot

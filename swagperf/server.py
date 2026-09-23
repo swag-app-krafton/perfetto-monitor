@@ -2,7 +2,7 @@
 import json, os, tempfile, threading, time
 from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from . import store
+from . import runmeta, store
 from .budgets import STEP_BUDGETS_MS, GLOBAL_BUDGETS, RISK_MAP
 
 WEB = os.path.join(os.path.dirname(__file__), "..", "web")
@@ -68,6 +68,7 @@ def _payload(limit=100):
         app = catalogue.get(d.get("app_pkg")) if d.get("app_pkg") else None
         d["app_name"] = (app or {}).get("name") or d.get("app_pkg")
         d["app_role"] = (app or {}).get("role")
+        d["meta"] = runmeta.merge(d, json.loads(d.pop("meta_json", None) or "{}"), (app or {}).get("name"))
         d["ttid_budget_ms"] = (
             GLOBAL_BUDGETS["time_to_first_camera_frame_ms"] if not d.get("derived")
             else (app or {}).get("budgets", {}).get("ttid_ms"))
@@ -304,6 +305,12 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(extract_screens(row["trace_path"]))
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
+        if u.path == "/api/run/meta":
+            try:
+                rid = int(q.get("id", [""])[0])
+            except ValueError:
+                return self._json({"error": "id is required"}, 400)
+            return self._run_meta(rid)
         if u.path == "/api/copilot/threads":
             tid = q.get("id", [None])[0]
             if tid:
@@ -417,6 +424,26 @@ class H(SimpleHTTPRequestHandler):
                 return self._json({"error": str(e)}, 400)
             return self._json({"ok": True, "job_id": jid})
         return self._json({"error": "unknown endpoint"}, 404)
+
+    def _run_meta(self, rid):
+        """A run's merged metadata. The first time a run is looked at, what its
+        trace records (device build, SoC, kernel, Perfetto, the app's version
+        code) is read once and kept, so runs captured before capture-time
+        metadata existed still show their device."""
+        run = store.run_row(rid)
+        if not run:
+            return self._json({"error": f"no run {rid}"}, 404)
+        raw = json.loads(run.get("meta_json") or "{}")
+        path = run.get("trace_path")
+        if "from_trace" not in raw and path and os.path.exists(path):
+            from .extract import trace_metadata
+            try:
+                raw = store.set_run_meta(rid, "from_trace", trace_metadata(path, run.get("app_pkg")))
+            except Exception as e:  # a trace the processor cannot open: say so, once
+                raw = store.set_run_meta(rid, "from_trace", {"error": str(e)[:300]})
+        from . import catalogue
+        app = catalogue.get(run.get("app_pkg")) if run.get("app_pkg") else None
+        return self._json({"run_id": rid, "meta": runmeta.merge(run, raw, (app or {}).get("name"))})
 
     def _copilot_ask(self, payload):
         """Stream a Copilot answer as server-sent events.
