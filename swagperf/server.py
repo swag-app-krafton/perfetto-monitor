@@ -176,6 +176,29 @@ class H(SimpleHTTPRequestHandler):
         super().send_response(code, *a)
         self.send_header("Cache-Control", "no-store, must-revalidate")
 
+    def translate_path(self, path):
+        """Map a URL to a file: the built app, the legacy dashboard, or the
+        token-usage page.
+
+        The React app (web/dist, built from frontend/) owns every client route,
+        so any path that is not a real file falls back to its index.html --
+        /overview, /steps/... are routes, not files. A missing *asset* (a name
+        with an extension) still 404s rather than silently getting HTML. With no
+        build present, the legacy dashboard is served instead.
+        """
+        p = urlparse(path).path
+        if p == "/legacy" or p.startswith("/legacy/") or p == "/tokens.html":
+            return super().translate_path(path)
+        dist = os.path.abspath(os.path.join(WEB, "dist"))
+        if os.path.isfile(os.path.join(dist, "index.html")):
+            cand = os.path.normpath(os.path.join(dist, p.lstrip("/")))
+            if cand.startswith(dist) and os.path.isfile(cand):
+                return cand
+            if "." not in os.path.basename(p):
+                return os.path.join(dist, "index.html")
+            return cand
+        return super().translate_path("/legacy" + (p if p != "/" else "/"))
+
     def send_head(self):
         # Static files only reach here, so this is where the conditional-GET
         # negotiation happens: drop the browser's validators so the base class
