@@ -1,7 +1,8 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { Outlet, useLocation } from 'react-router'
 import { Toast } from '@/design/components'
 import { useScope } from '@/domain/scope'
+import { useHighlightTarget } from '@/lib/highlight'
 import { useIsNarrow, useIsWide } from '@/lib/useMediaQuery'
 import { PageHeader } from './PageHeader'
 import { screenByPath } from './routes'
@@ -21,6 +22,7 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
   const loc = useLocation()
   const screen = screenByPath(loc.pathname)
   const mainRef = useRef<HTMLElement>(null)
+  useHighlightTarget(useCallback(() => mainRef.current, []))
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme

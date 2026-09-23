@@ -35,7 +35,7 @@ export function KpiTile({
   return (
     <div className={s.tile}>
       <span className={s.label}>
-        {label}
+        <span>{label}</span>
         {help && <HelpTip text={help} label={label} large />}
       </span>
       {value == null ? (

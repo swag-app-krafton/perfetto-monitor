@@ -2,7 +2,7 @@
   background: var(--s1);
   border: 1px solid var(--line);
   border-radius: 4px;
-  padding: 18px;
+  padding: 18px 18px 14px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -11,6 +11,8 @@
 .label {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   font: 600 11px var(--font-ui);
   letter-spacing: 0.12em;
   color: var(--tx2);
@@ -30,7 +32,8 @@
   color: var(--tx3);
 }
 .muted {
-  font: 600 19px/34px var(--font-display);
+  font: 600 16px/34px var(--font-display);
+  white-space: nowrap;
   color: var(--tx3);
 }
 .delta {
