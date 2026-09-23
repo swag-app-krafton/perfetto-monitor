@@ -9,6 +9,39 @@ attribute any regression to a runtime and to a named architectural risk.
 
 It is not a general trace viewer. Use the Perfetto UI for that.
 
+- [Quick start](#quick-start)
+- [The dashboard: what to monitor on each screen](#the-dashboard-what-to-monitor-on-each-screen)
+- [Common workflows](#common-workflows)
+- [Copilot](#copilot)
+- [Command line](#command-line)
+- [Frontend development](#frontend-development)
+
+## Quick start
+
+```bash
+# 1. install (once)
+cd ~/Documents/perfetto-monitor
+python3 -m venv .venv && ./.venv/bin/pip install perfetto anthropic
+ln -sf "$PWD/perfetto_init" ~/.local/bin/perfetto_init   # optional: puts the launcher on PATH
+
+# 2. start the dashboard
+perfetto_init                  # opens http://127.0.0.1:8787 (or: ./.venv/bin/python -m swagperf.cli dashboard)
+
+# 3. connect an Android device with USB debugging on, then check it is seen
+perfetto_init doctor
+```
+
+Then, in the dashboard:
+
+1. **Capture** → pick the app → **Cold** → **Profile**. The run is traced, analysed
+   and saved; **View results** opens it.
+2. **Overview** shows its verdict against the budgets and the previous run.
+3. When you have a run you trust, **History** → **Pin as benchmark**. Every later run
+   of that app, path and device is judged against it.
+
+No device? `./.venv/bin/python -m swagperf.cli seed -n 16 --regress-last` fills the
+history with synthetic runs so every screen has something to show.
+
 ## Design
 
 Measurement is deterministic; judgement is not. The split is deliberate:
@@ -29,13 +62,19 @@ baselines and the budget table. Measuring is SQL's job; the model's job is decid
 which runtime owns a regression and whether it deserves a human. A test asserts this
 boundary holds.
 
+## NLP automation architecture
+
+- [Shareable architecture plan](docs/nlp-mobile-automation-ci-plan.html)
+- [ADR 0001: NLP mobile automation in CI](docs/decisions/0001-nlp-mobile-automation-ci.md)
+- [Reusable architecture skill](.cursor/skills/nlp-mobile-ci-architect/SKILL.md)
+
 ## What it measures
 
 Each metric maps to a constraint or risk named in the shell architecture.
 
 | Metric | Budget | Architectural basis |
 |---|---|---|
-| Time to first usable camera frame | 420 ms | *"Nothing before the first camera frame"* — the strongest decision on the board |
+| Time to initial display (TTID) — for Swag Pay, the first usable camera frame | 420 ms | *"Nothing before the first camera frame"* — the strongest decision on the board |
 | Deferred-work ordering | hard fail | RN / Cronet / analytics / remote config must not run before the camera is usable |
 | Slow / janky frames | 5% / 0.5% | Frame pacing at the CMP × RN interop seam |
 | Thermal drift | 15% | Sustained-scan throttling on mid-range devices |
@@ -48,6 +87,285 @@ path and defers Hermes. First-run inverts it — onboarding *is* an RN surface. 
 one by the other's budget produces nonsense, so `--path-kind` is explicit and the
 critical path differs per kind.
 
+The startup, memory and thermal budgets are Swag Pay's own targets, so they apply
+only to Swag Pay. Another app's run shows its numbers with no budget line (see
+[Analysing any app](#analysing-any-app-and-the-competitor-catalogue)). The frame
+budget (16.67 ms, 60 fps) applies to every app.
+
+## The dashboard: what to monitor on each screen
+
+### Finding your way around
+
+- **Sidebar:** eleven screens in three groups. **Analyse** is for reading runs,
+  **Run** is for making them, **Data** is for comparing and managing them. The
+  `«` button collapses it to a rail of two-letter codes. It collapses by itself
+  while the Copilot is open on a screen under 1400 px wide.
+- **Top bar:** everything is filtered by **App** (package), **Path** (cold, warm,
+  returning user, first run — whichever exist for that app) and **Range** (last 30
+  runs, last 10 runs, last 7 days). The choice is remembered.
+- **Page header:** names the run you are looking at: run number, device, path,
+  label and time.
+- **Status is never colour alone.** ✓ pass, ! warn, ✕ fail. A metric warns within
+  10% of its budget and fails over it. ▲ is worse, ▼ is better, = is unchanged.
+  Moves under 5 ms on a step are treated as noise and are not coloured.
+- **Links land on the thing they name.** A citation, "Inspect step" or a History
+  row opens the screen, scrolls to the chart, row or finding, and rings it
+  briefly.
+- **Theme:** dark (the default) or light, from the top bar.
+
+### At a glance
+
+| Screen | Look here when… | The signal that matters |
+|---|---|---|
+| **Overview** | a new run lands | the verdict, any ✕ release gate, the worst regression |
+| **Startup** | TTID moved, or deferred work is suspected | TTID trend against 420 ms; a step's share growing; ordering violations |
+| **Frame pacing** | the app feels janky or hot | janky frames above 0.5%; thermal drift rising run over run |
+| **Memory** | RAM is near 320 MB or growing | peak against budget; growth per run; Hermes heap |
+| **Steps** | you need to know *which* step moved | Δ ms against the baseline; the child slice that moved inside it |
+| **Screens** | the cost belongs to a screen or flow | RAM that steps up on the same screen and stays up; app jank per screen; slow transitions; deep stacks |
+| **Capture** | you need a run | device health before profiling; the job log if it fails |
+| **Stress** | one run is not proof | the spread of TTID; whether a shift is real or noise |
+| **Manual** | the flow cannot be scripted | live markers arriving; the screen currently open |
+| **Compare** | you need what changed between two builds | metrics and steps that got worse, and the child slices under them |
+| **History** | managing runs and benchmarks | TTID over budget across runs; which benchmark is active |
+
+### Overview
+
+The latest run in scope, judged.
+
+- **Verdict hero:** PASS, WARN or FAIL, the analyst's headline, and what the run
+  was compared against: the pinned benchmark, or the previous run when none is
+  pinned.
+- **Worst regression:** the step that grew most (5 ms or more), its share of the
+  TTID change, and three ways in: **Inspect step** (Steps, drill-down open),
+  **Open in Compare**, **Ask Copilot why**.
+- **Release gates:** every budgeted metric against its budget, as a bar.
+- **KPI tiles:** TTID, slow frames, janky frames, peak RAM, RAM growth and
+  thermal drift. Each shows its change against the baseline and a 12-run trend.
+- **Verdict by run:** one cell per run in range, oldest to newest. Select one to
+  see its numbers. A "B" marks the benchmark.
+- **Findings:** the analyst's findings, by severity, each with its evidence,
+  recommendation and architectural risk. **Ask Copilot** explains one. Answers you
+  pin from the Copilot appear here too, marked *Pinned from Copilot*.
+
+**Watch for:** any ✕ gate, a high-severity finding, a worst regression that
+accounts for most of the TTID change.
+
+### Startup
+
+How long launch took, and what it was spent on.
+
+- **TTID over runs:** each run against the 420 ms budget, with this run's figure
+  and its change.
+- **Critical-path composition:** the last runs, each split into its startup steps.
+  Time no step accounts for is left as a visible gap. It is not spread over the
+  steps.
+- **Ordering constraint:** deferred work (Hermes, Cronet, remote config…) against
+  the first frame. Anything that starts before it is a violation. A derived run has
+  no stated constraint and says so.
+- **Startup findings:** the findings that concern launch.
+
+**Watch for:** TTID creeping towards the budget over several runs, one step's
+segment widening, any ordering violation.
+
+### Frame pacing
+
+- **Slow frames:** the share of frames over 16.67 ms, per run.
+- **Janky frames:** the share over three frame budgets, the stutter a user sees.
+- **Thermal drift:** mean frame time late in a run against early in it. It rises
+  when the device throttles. A run that moved between screens shows a gap, because
+  a change of screen, not heat, would move the number.
+
+**Watch for:** janky frames above 0.5% (slow frames alone are often harmless),
+thermal drift rising run after run on the same flow. To find *which* screen
+stutters, go to **Screens**. Its per-screen *app jank* separates frames the app
+was late with from compositor and display misses.
+
+### Memory
+
+- **Peak memory breakdown:** this run against the previous one, split by runtime
+  when the trace records each runtime's own heap. When it does not, the screen shows
+  the app total and says which counter is missing.
+- **Peak RAM, RAM growth, Hermes heap:** one chart each, per run, with the 320 MB
+  and 60 MB budgets for Swag Pay.
+- **Where the growth happens:** links to Screens, which attributes growth to
+  screens and to what was held open beneath them.
+
+**Watch for:** peak over budget, RAM growth trending up, Hermes heap rising. Growth is
+the orphaned-surface signature. Compare like with like: a long manual session peaks
+higher than a 10 s capture simply because it runs longer.
+
+### Steps
+
+Every startup step of the latest run against its baseline: the pinned benchmark, or
+the median of the previous 10 runs.
+
+- **Table:** runtime, this run, baseline, Δ ms, Δ % and a 12-run trend. Sort by any
+  column.
+- **Drill-down** (select a row): P50 and P90 over recent runs, this run and the
+  runtime, then every child slice as a bar for this run with a tick for its baseline.
+  **Ask Copilot** from here names the step.
+
+**Watch for:** a step with Δ ≥ 5 ms in the warn or fail colour, then the child
+slice whose bar ends past its tick. That is the part of the step that moved.
+
+### Screens
+
+Per-screen cost, read from the app's own `SwagTrace` markers (see
+[Per-screen CPU and RAM](#per-screen-cpu-and-ram)). Pick any traced run. Manual
+sessions are the richest.
+
+**Screen usage** view:
+
+- **Per-screen cost:** each screen's runtime (Compose, React Native, native view),
+  stack depth, visits, CPU busy share, CPU time, peak RAM, RAM growth, app jank and
+  time on screen. Select a screen to chart each visit separately.
+- **Session timeline:** the app's RAM and CPU over the whole session, with each
+  screen visit as a band behind it.
+- **Navigation stack:** screens in visit order with how long each transition took
+  to draw.
+- **User actions:** every action the app marked, in order, with its screen.
+- **Cost by stack depth:** peak RAM grouped by how many screens were open beneath.
+
+**Launch metrics** view: TTID and the startup steps from the same trace, so a manual
+session's launch is readable without switching the run on Startup.
+
+**Watch for:** RAM that steps up on the same screen each visit and never comes back
+down (look at the timeline first). Also a visit drawn in red, more than two standard
+deviations from that screen's mean; high app jank on one screen; a slow transition;
+a cheap screen with high RAM at depth 2+ (the memory belongs to the screens beneath).
+
+### Capture
+
+Profile an app on the connected device.
+
+- **Device:** model, Android version, serial, battery, battery temperature and the
+  on-device Perfetto version. A hot or low device skews results, so check this
+  first.
+- **Installed packages:** the device's apps, catalogue apps first, searchable.
+- **Start** (cold force-stops the app first, warm does not) and **Duration**
+  (5, 10 or 20 s), then **Profile**.
+- **Job:** stages (Connect device → Launch → Record → Pull trace → Analyse), a
+  progress bar and the live log. The result shows the new run's verdict and
+  **View results**.
+
+A capture that contains nothing from the target app fails loudly instead of saving a
+flawless-looking empty run.
+
+### Stress
+
+One cold start is a noisy measurement. A stress test captures N cold starts back to
+back.
+
+- **Run:** pick the app and the number of cold starts (more is steadier: 10 or more
+  for a decision).
+- **Stress-test history:** every test with its sessions, median and spread. Select
+  one to plot it.
+- **TTID distribution:** the selected test against the previous completed test of
+  the same app: each session as a dot, the box as the middle half, the median line
+  and the budget. The shift between them is called **real** only when it is
+  statistically significant (Mann–Whitney, p < 0.05) *and* larger than the earlier
+  test's own spread; otherwise it is noise.
+
+**Watch for:** a wide spread (a single capture of that app is not reproducible, so
+compare medians), and whether a suspected regression survives as *real*.
+
+### Manual
+
+Drive the app by hand while it is traced: payments, biometrics, OTP onboarding.
+
+- **Start** (cold or warm) → use the app → **Stop & analyse**, or **Abort** to
+  discard. The clock shows elapsed time. Recording survives a page reload.
+- **Live markers:** screens, actions, navigations and steps as the app emits them,
+  newest first, filterable by kind. The screen on display now is marked open.
+- The result links to the run. Its screens are on **Screens**, its launch on
+  **Screens → Launch metrics**.
+
+**Watch for:** markers arriving as you move through the app. If none arrive, the
+build is not emitting them. Check it is the instrumented build, and remember that
+a flow that never reached a screen emits nothing for it.
+
+### Compare
+
+- **Against the benchmark** (default) or **between two runs** (pick Run A and Run B;
+  any run of the app, across paths).
+- **Banners:** *Same run*, *Different devices* (compare with care), *Not comparable*
+  (different app or path: different critical paths and budgets).
+- **Top-line metrics:** each metric in both runs with Δ, Δ % and ▲ worse / ▼ better.
+- **Steps diff:** every step with its child slices indented under it, including steps
+  only one run has.
+
+**Watch for:** the metrics and steps marked ▲ worse, and which child slices under
+them moved.
+
+### History
+
+- **Runs:** every run of the app, searchable (run, label, device, build), filterable
+  by verdict, sortable on any column. TTID over budget is shown in the fail colour.
+- **Per row:** **Open** (Overview for that run), **Compare** (against the latest run),
+  **Pin as benchmark**.
+- **Pinned benchmarks:** one per app, path and device. Regressions are measured
+  against the active one. Unpin or compare from here.
+
+## Common workflows
+
+**Is this PR a regression?**
+1. Install the PR build. **Capture** → cold → Profile.
+2. **Overview:** read the verdict and the worst regression.
+3. **Steps:** find the step and the child slice that moved.
+4. **Stress:** run 10 cold starts on the benchmark build, then 10 on the PR build.
+   The second test is plotted against the first. Treat it as a regression only if
+   the shift is *real*.
+5. **Copilot:** "Summarise this run for a PR comment" gives a paste-ready summary.
+
+**RAM is high or growing**
+1. **Memory:** is it the peak or the growth, and is Hermes heap part of it?
+2. **Manual:** record the flow that grows. **Screens:** read the session timeline for
+   a step up that never comes down, then the navigation stack for what was held open
+   beneath it.
+
+**The app stutters**
+1. **Frame pacing:** janky frames, and whether thermal drift rises.
+2. **Screens:** app jank per screen, and the transitions that were slow to draw.
+
+**Benchmark a competitor**
+1. **Capture** the competitor's package (cold, several runs or a **Stress** test).
+2. Switch **App** in the top bar. Every screen scopes to it. No Swag Pay budget is
+   applied to it.
+
+**Establish a baseline for a device**
+1. Capture several cold starts of a known-good build on that device.
+2. **History** → **Pin as benchmark** on a representative run. Later runs on that
+   device and path are judged against it.
+
+## Copilot
+
+Press **⌘K** (Ctrl+K), or the **Ask** button, on any screen.
+
+- **Ask** in plain words: why a run failed, which step grew, whether a regression is
+  real (it reads the stress tests), how peak RAM moved across builds, when TTID first
+  went over budget, which screen uses the most CPU or grows RAM, what changed
+  between two runs, or a finding explained. **Suggested for {screen}** offers
+  questions that fit the screen you are on.
+- **Context** chips show what the question is about: the current screen, the run in
+  view, its benchmark. Add runs, steps or findings with **+ Add**, or type **@** to
+  reference one.
+- **Answers** show the steps taken, a verdict, tables and charts, and **Sources**.
+  Clicking a source opens that screen and rings the item.
+- **Under each answer:** Copy (Markdown), Open in Compare, **Pin as finding** (it
+  appears on Overview for that run), Export .md, and 👍 / 👎.
+- **Deep analysis** also cross-checks the answer against the stress tests.
+- **History** (clock icon) reopens past conversations. **New chat** starts over.
+  **Stop** cancels an answer, and nothing half-finished is saved.
+- Drag the panel's left edge to resize it, or maximise it. On a phone it takes the
+  whole screen. Esc closes it.
+
+**How it answers:** today the answers are computed by rules over the run history
+(`swagperf/copilot.py`), not by a language model. Every number comes from the data,
+and a run that is not in the history gets "no data", never a guess. A model-backed
+engine can replace `answer()` there without the panel changing. Conversations,
+feedback and pinned answers are stored in `history.db`.
+
 ## Install
 
 ```bash
@@ -57,7 +375,9 @@ ln -sf "$PWD/perfetto_init" ~/.local/bin/perfetto_init   # optional, puts it on 
 ln -sf "$PWD/perfetto" ~/.local/bin/perfetto             # optional, shorter alias
 ```
 
-`trace_processor_shell` downloads automatically on first run.
+`trace_processor_shell` downloads automatically on first run. The dashboard is
+prebuilt in `web/dist`, so running it needs no Node. Node is only needed to change
+the frontend (see [Frontend development](#frontend-development)).
 
 ### perfetto_init
 
@@ -90,7 +410,10 @@ cannot find `web/` or `history.db` and every relative trace path breaks. Known
 subcommands are detected by asking the CLI's own parser rather than from a
 hardcoded list, so a new swagperf subcommand works without editing the script.
 
-## Use
+After pulling changes to the Python side (`swagperf/`), restart the dashboard
+(`perfetto_init stop && perfetto_init`): the server does not reload itself.
+
+## Command line
 
 ```bash
 # analyse a trace and record it
@@ -106,6 +429,7 @@ hardcoded list, so a new swagperf subcommand works without editing the script.
 
 # dashboard
 ./.venv/bin/python -m swagperf.cli dashboard      # http://127.0.0.1:8787
+./.venv/bin/python -m swagperf.cli dashboard -p 9000 --no-open
 
 # compare two runs (base defaults to the pinned benchmark)
 ./.venv/bin/python -m swagperf.cli compare 19 11
@@ -116,16 +440,27 @@ hardcoded list, so a new swagperf subcommand works without editing the script.
 ./.venv/bin/python -m swagperf.cli benchmark list
 ./.venv/bin/python -m swagperf.cli benchmark clear --run 11
 
+# stress test, manual session, per-screen report (see their sections below)
+./.venv/bin/python -m swagperf.cli stress run --pkg com.swagpay -n 10
+./.venv/bin/python -m swagperf.cli manual start --pkg com.swagpay --cold
+./.venv/bin/python -m swagperf.cli screens traces/session.pftrace
+
 # recompute metrics for all runs whose traces still exist
 # (run this after changing extract.py, or historical rows mix two formats)
 ./.venv/bin/python -m swagperf.cli reextract
 
 # synthetic history, for development without a device
 ./.venv/bin/python -m swagperf.cli seed -n 16 --regress-last
+
+# tests
+./.venv/bin/python -m unittest discover -s tests
 ```
 
 `analyse` exits non-zero on a `fail` verdict, so it drops into CI directly.
 Use `--fail-on warn` to gate harder, `--fail-on never` to report only.
+
+`SWAGPERF_DB=/path/to/other.db` points any command, including the dashboard, at a
+different history, which is useful for experiments that should not touch the real one.
 
 ## Model backends
 
@@ -151,7 +486,7 @@ reason about.
 **Benchmark** is a pinned reference that changes what "regressed" means. Pin a
 known-good run and every regression check for its scope compares against that run
 instead of the trailing baseline, including the CLI exit code. One benchmark per
-`(path_kind, device)` scope, so a returning-user benchmark is never applied to a
+`(app, path_kind, device)` scope, so a returning-user benchmark is never applied to a
 first-run trace and device classes stay apart.
 
 Two consequences worth knowing:
@@ -183,183 +518,16 @@ baseline (median of the last 20 runs):
 
 Both are required because a step with very tight historical variance will produce a
 large z-score from sub-millisecond noise. A baseline of fewer than 5 runs is not
-trusted at all and nothing fires.
+trusted at all and nothing fires. A move under 5 ms never counts, whatever its
+percentage.
 
 A deferred step starting within 1 ms of the first-frame boundary is not an ordering
 violation — it is a step legitimately starting *at* the boundary, and float rounding
 can place it a hair early.
 
-## Dashboard
-
-Six tabs, one per concern the architecture names:
-
-| Tab | Answers |
-|---|---|
-| **Overview** | Verdict, all six budgets, every finding, verdict-per-run strip |
-| **Startup** | Time to first camera frame, ordering violations, critical-path composition |
-| **Frame pacing** | Slow/janky frames and thermal drift — kept apart because progressive drift means throttling while scattered spikes mean the interop seam |
-| **Memory** | Peak RAM usage and Hermes heap on one axis, session growth, JS share of growth |
-| **Steps** | Per-step table with trailing-baseline deltas; click a step for its history and child breakdown |
-| **Compare** | Diff any two runs, defaulting to the pinned benchmark; child slices expand under any step that got worse |
-| **History** | Every run, sortable on any column, filterable by verdict/device/text; pin a benchmark or jump to a comparison per row |
-
-The step chart has three views. **Critical path** is the default and sums only the
-steps a user waits through on the selected path — the bar height is a number they
-experience. **All steps** adds deferred work, hatched at 45° so "off the critical
-path" is not carried by position alone. **Per step** is small multiples, each step on
-its own scale, so a 40ms step's movement is as readable as a 200ms step's.
-
-The legend doubles as a show/hide control. In critical-path mode a runtime with no
-steps in view (Hermes, for a returning user) is marked *not in view* rather than
-appearing broken when toggling it changes nothing, and the last visible runtime is
-disabled so the chart can never be emptied.
-
-Clicking a step row opens a breakdown below the table: this run versus its trailing
-median, z-score, stdev, min/max, the step's own history against its budget, and every
-direct child slice with its own trend. Untraced self-time is shown explicitly, so the
-breakdown sums to the step duration — "24ms unaccounted for in compose_shell" is
-itself a finding rather than a rounding gap.
-
-## Token consumption monitor
-
-A second, unrelated dashboard at `/tokens.html` (linked from the main page),
-answering a different question: not how the *app* performs, but how much this
-Claude Code session has spent reading this repository.
-
-`tokens.py` reads the `usage` blocks Claude Code writes into its own session
-transcripts under `~/.claude/projects/<this-project>/*.jsonl` and buckets them
-by how the tokens got into context: `graphify` calls, `Read`/`NotebookRead`,
-`Grep`/`Glob`, and read-only `Bash` (matched shallowly on the command's first
-token -- `cat`, `head`, `sed`, `grep`, `find`, `ls`, `awk`, `less` -- because
-guessing deeper misattributes more often than it helps).
-
-Every figure is server-reported; nothing here is estimated. It deliberately
-does **not** report "tokens saved", since that would need the cost of the path
-not taken, which is a counterfactual and cannot be measured, only modelled --
-that is what `graphify benchmark`'s words/chars ratio does instead, and the two
-should not be confused for the same kind of number. Attribution is sound in
-aggregate and fuzzy for any single call, since a tool result's cost lands on
-the *next* API call rather than being labelled at the point it entered context.
-
-Served at `/api/tokens`, aggregating the most recent sessions for the project
-`server.py` is running in.
-
-## Layout
-
-```
-swagperf/
-  budgets.py    architecture-derived budgets and risk map — start here
-  extract.py    TraceProcessor SQL → metrics (no LLM)
-  store.py      SQLite history, trailing baselines, regression detection
-  analyst.py    model backends + deterministic fallback
-  capture.py    optional adb capture
-  server.py     dashboard server + /api/history, /api/compare, /api/benchmark/*
-  synth.py      synthetic trace generator for development
-web/            dashboard (no build step, no dependencies)
-tests/          24 tests over the deterministic pipeline
-```
-
-## Adapting it
-
-Editing `budgets.py` is the main thing you will do — the step names, budgets and
-`RISK_MAP` are what make the output specific to Swag Pay rather than generic.
-
-Step names are matched by the `step:` prefix. Emit them from the app with
-`Trace.beginSection("step:camera_open")` or from the automation harness; child slices
-inside a step are attributed automatically and give the model what it needs to say
-*which part* of a step moved.
-
-## Known gaps
-
-- **iOS is not wired up.** The extractor is schema-driven and should mostly work on an
-  iOS trace, but `capture.py` is adb-only and nothing has been tested against a real
-  iOS trace. The CMP × RN seam — the highest risk in the architecture — lives on iOS.
-- **Frame attribution is process-wide.** Slow frames are not yet attributed to a
-  specific surface, so the tool cannot currently prove the interop seam is the cause.
-  The model correctly declines to claim it. Emitting surface-boundary markers would
-  close this.
-- **No device-model baselines.** `device` is recorded and baselines can filter on it,
-  but the CLI does not yet segment automatically. Mixing device classes in one history
-  will inflate variance and hide real regressions.
-- **Dashboard verified with Playwright, not Chrome DevTools MCP.** That MCP server is
-  not installed in this environment. Playwright drives real Chromium over CDP, so
-  click/sort/filter/keyboard behaviour and console errors were checked against a live
-  page, but if you have the DevTools MCP configured it is worth a second pass for
-  performance-panel and network profiling that Playwright assertions do not cover.
-- **The dashboard server has no auth and mutates local history** (pinning a benchmark
-  is a POST). It binds to loopback only, which is fine for a dev/CI tool — but do not
-  expose it on a routable interface.
-- All development used synthetic traces. The SQL is written against the real
-  TraceProcessor schema, but validate step extraction against one real capture before
-  trusting it in CI.
-
-## Analysing any app, and the competitor catalogue
-
-Not every app can be instrumented. A competitor's binary cannot emit `step:`
-markers, so this tool reads a second way: **derivation** from the slice names
-every Android app produces regardless of instrumentation (`bindApplication`,
-`activityStart`, `inflate`, `Choreographer#doFrame`, ...). Perfetto's own
-`android.startup.startups` stdlib module identifies the package and cold/warm
-classification; explicit phase matching over slice names produces attributable
-step durations, because a derived number that cannot be traced back to the
-slices that produced it is not trustworthy.
-
-```bash
-# analyse any app -- instrumented or not, auto-detected from the catalogue
-./.venv/bin/python -m swagperf.cli analyse trace.pftrace --app com.phonepe.app --device pixel7
-
-# force derivation even for an app the catalogue marks instrumented
-./.venv/bin/python -m swagperf.cli analyse trace.pftrace --app com.swagpay --derive
-
-# capture a real cold start (force-stops the app, launches it just after
-# tracing begins so the launch itself falls inside the trace window)
-./.venv/bin/python -m swagperf.cli capture --pkg com.phonepe.app --cold --repeat 5 --analyse
-
-# the app catalogue
-./.venv/bin/python -m swagperf.cli apps list
-./.venv/bin/python -m swagperf.cli apps add com.rival.app --name "Rival" --role competitor
-./.venv/bin/python -m swagperf.cli apps discover     # verify package names against a connected device
-```
-
-**A derived run never gets an invented budget.** `budgets.py`'s numbers are Swag
-Pay's own stated targets; asserting them against a competitor's app would be
-making up a number for a product whose architecture is undocumented here. A
-derived run's `budget_ms` is `None` unless the catalogue's `apps.json` (or a
-local `apps.local.json` override) explicitly states one for that package, and
-the dashboard does not draw a budget line or colour a breach when none exists.
-This was a real bug during development, twice over: the dashboard first drew
-Swag Pay's 420ms line against a competitor's trace, and separately the CLI's
-`--path-kind` flag defaulted to `"returning_user"` and was silently applied to
-a derived run regardless of app, mixing a competitor's trace into Swag Pay's
-own bucket. Both are covered by regression tests now
-(`TestGenericAppDerivation`, `TestCLIPathKindDefaulting`).
-
-Regression detection, baselines and benchmarks are all scoped by
-`(app_pkg, path_kind, device)`, so a PhonePe cold-start trend is compared
-against its own history, never against Swag Pay's.
-
-Steps derived this way carry no runtime attribution beyond "native" (the
-`RUNTIME` map in the dashboard only knows Swag Pay's own step names), so the
-step chart's colour-by-runtime legend is uninformative for a derived run --
-the duration and child-slice numbers are still fully attributable, only the
-colour coding is not meaningful.
-
-## Theme
-
-Typography follows [krafton.com](https://www.krafton.com/en/)'s own stack --
-Zalando Sans Expanded for display numbers and headings, Poppins for UI text,
-Noto Sans KR as the CJK fallback their stylesheet declares -- loaded from
-Google Fonts. Their proprietary "KRAFTON" display face is not licensable here;
-Zalando Sans Expanded stands in for it on hero numbers, matching its bold,
-geometric, wide-set shape. Surfaces follow their stark black/white/grey
-editorial treatment in both themes. The categorical and status colors
-(`--s1`..`--s4`, `--good`/`--warn`/`--crit`) are untouched -- they are
-validated against the dataviz skill's CVD-safety and contrast gates, and
-swapping them for brand colors would need re-validation against those gates.
-
 ## Profiling from the dashboard
 
-The **Capture** tab lists the apps installed on the connected device, merged with
+The **Capture** screen lists the apps installed on the connected device, merged with
 the catalogue (known apps first). Pick one, choose cold or warm and a duration,
 and press Profile. The capture runs server-side on a background thread; the page
 polls and streams the log, then records the run and offers a link to it.
@@ -377,7 +545,7 @@ Two things this does not do, deliberately:
   if not, the job fails loudly instead of recording a flawless-looking run of
   zero findings.
 
-Runs are scoped by app throughout: the header's app selector filters every tab,
+Runs are scoped by app throughout: the top bar's app selector filters every screen,
 because plotting several different applications as one trend line is meaningless.
 
 ### Known limits, found against a real device
@@ -416,14 +584,13 @@ the **spread**, not an average:
 ./.venv/bin/python -m swagperf.cli stress show 3
 ```
 
-Or from the dashboard's **Stress** tab: pick an app, choose a session count, run.
+Or from the dashboard's **Stress** screen: pick an app, choose a session count, run.
 
 Three deliberate choices:
 
 - **Each session is also an ordinary run.** Sessions are recorded in `runs` like
-  any other capture, so the Steps, Memory and Compare tabs work on them
-  unchanged; `stress_tests` only groups them. The per-session table links
-  straight through to each run.
+  any other capture, so the Steps, Memory and Compare screens work on them
+  unchanged; `stress_tests` only groups them.
 - **A failed session does not end the test.** Stopping would discard the
   sessions already captured, and a test with two failures out of ten is still
   informative. Failures are counted and shown; only an all-failed test errors.
@@ -432,7 +599,8 @@ Three deliberate choices:
   and medians should be compared instead — the CLI says so explicitly above 25%.
 
 Stress history is kept separate from run history, since a row there is a whole
-test rather than one capture.
+test rather than one capture. A test left running when the server stopped is
+marked interrupted at the next start rather than showing as running forever.
 
 ## Manual mode
 
@@ -448,7 +616,7 @@ tracing yourself.
 ./.venv/bin/python -m swagperf.cli manual abort    # discard without analysing
 ```
 
-Or the dashboard's **Manual** tab: Start tracing → use the app → Stop and analyse.
+Or the dashboard's **Manual** screen: Start → use the app → Stop & analyse.
 
 Tracing runs as a **detached** perfetto session (`--detach=KEY`, stopped with
 `--attach=KEY --stop`), so it survives between HTTP requests and carries no
@@ -469,15 +637,14 @@ attributes cost to named screens and actions:
 ./.venv/bin/python -m swagperf.cli screens traces/session.pftrace
 ```
 
-Or the dashboard's **Screens** tab, which reads any recorded run's trace. That
-tab has two views over the same run:
+Or the dashboard's **Screens** screen, which reads any recorded run's trace. It
+has two views over the same run:
 
 - **Screen usage** — per-screen attribution plus the navigation stack.
   Selecting a row charts every visit to that screen separately.
 - **Launch metrics** — the startup steps from the same trace. A manual session
-  records both halves at once, and this view exists because the **Startup** tab
-  reads the *globally* selected run: after a manual capture the launch numbers
-  were a tab switch and a re-pick away, which read as them not being recorded.
+  records both halves at once, so its launch is readable here without re-picking
+  the run on the Startup screen.
 
 ### Navigation stack
 
@@ -494,7 +661,7 @@ operations — `nav:open-` pushes, `nav:back-` pops, `nav:tab-` resets — so th
 result is the same back stack the app held rather than an inference.
 
 Each visit carries its `depth`, `stack` and what was `beneath` it, and the
-Screens tab groups cost by depth. On a real session this surfaced a screen at
+Screens screen groups cost by depth. On a real session this surfaced a screen at
 depth 3 running at 11% CPU while 485MB was resident: the screen itself was
 nearly idle, and the memory belonged to the two screens held open below it.
 
@@ -561,34 +728,193 @@ Perfetto records it as an unfinished slice (`dur = -1`). Those are reported as
 visits, clamped to the end of the trace and flagged `open_ended`, because that
 screen is usually the one the session was about — dropping it reported "0
 visits" for a session that plainly had one. CPU, RAM and frames are all scoped
-to the process that owns the slice; matching RSS counters across every process
+to the process that owns the slice; matching RAM counters across every process
 once summed the whole device into a single screen's "peak".
+
+Two things worth knowing about the numbers:
+
+- **CPU is scheduled CPU time, not elapsed time.** It comes from `sched_slice`
+  clipped to the visit window. A screen that is merely *open* while the device
+  idles has not cost anything, and elapsed time cannot tell that apart from real
+  work. The two are shown side by side so the difference is visible. This needs
+  the `sched/sched_switch` ftrace event; a synthetic trace has none, and the
+  screen says so rather than drawing zero bars.
+- **RAM growth is min-to-peak within a single visit.** A screen that repeatedly
+  leaves RAM higher than it found it is the orphaned-surface signature the shell
+  architecture names.
 
 ### Live markers while recording
 
-The Manual tab shows markers as they land, filterable by kind
+The Manual screen shows markers as they land, filterable by kind
 (screens / actions / navigations / steps), with the currently-open screen
-marked. It reads the partial trace the manual config is already draining to
-the device, so nothing about the recording session is disturbed:
+marked. It reads only the part of the trace written since the last read, so a
+long session stays cheap to follow, and nothing about the recording is
+disturbed:
 
 ```
 GET /api/manual/live
 ```
 
-The response is cached briefly server-side, since each refresh costs an adb
-pull and a parse. If this stays empty while the app is being used, the build
-being traced is not emitting markers — check the package is the instrumented
-one, and note that a marker missing because the flow never reached that screen
-is not the same as a marker that was never instrumented.
+If this stays empty while the app is being used, the build being traced is not
+emitting markers — check the package is the instrumented one, and note that a
+marker missing because the flow never reached that screen is not the same as a
+marker that was never instrumented.
 
-Two things worth knowing about the numbers:
+## Analysing any app, and the competitor catalogue
 
-- **CPU is scheduled CPU time, not wall time.** It comes from `sched_slice`
-  clipped to the visit window. A screen that is merely *open* while the device
-  idles has not cost anything, and wall time cannot tell that apart from real
-  work. The two are shown side by side so the difference is visible. This needs
-  the `sched/sched_switch` ftrace event; a synthetic trace has none, and the tab
-  says so rather than drawing zero bars.
-- **RAM growth is min-to-peak within a single visit.** A screen that repeatedly
-  leaves RAM higher than it found it is the orphaned-surface signature the shell
-  architecture names.
+Not every app can be instrumented. A competitor's binary cannot emit `step:`
+markers, so this tool reads a second way: **derivation** from the slice names
+every Android app produces regardless of instrumentation (`bindApplication`,
+`activityStart`, `inflate`, `Choreographer#doFrame`, ...). Perfetto's own
+`android.startup.startups` stdlib module identifies the package and cold/warm
+classification; explicit phase matching over slice names produces attributable
+step durations, because a derived number that cannot be traced back to the
+slices that produced it is not trustworthy.
+
+```bash
+# analyse any app -- instrumented or not, auto-detected from the catalogue
+./.venv/bin/python -m swagperf.cli analyse trace.pftrace --app com.phonepe.app --device pixel7
+
+# force derivation even for an app the catalogue marks instrumented
+./.venv/bin/python -m swagperf.cli analyse trace.pftrace --app com.swagpay --derive
+
+# capture a real cold start (force-stops the app, launches it just after
+# tracing begins so the launch itself falls inside the trace window)
+./.venv/bin/python -m swagperf.cli capture --pkg com.phonepe.app --cold --repeat 5 --analyse
+
+# the app catalogue
+./.venv/bin/python -m swagperf.cli apps list
+./.venv/bin/python -m swagperf.cli apps add com.rival.app --name "Rival" --role competitor
+./.venv/bin/python -m swagperf.cli apps discover     # verify package names against a connected device
+```
+
+**A derived run never gets an invented budget.** `budgets.py`'s numbers are Swag
+Pay's own stated targets; asserting them against a competitor's app would be
+making up a number for a product whose architecture is undocumented here. A
+derived run's `budget_ms` is `None` unless the catalogue's `apps.json` (or a
+local `apps.local.json` override) explicitly states one for that package, and
+the dashboard does not draw a budget line or colour a breach when none exists.
+This was a real bug during development, twice over: the dashboard first drew
+Swag Pay's 420ms line against a competitor's trace, and separately the CLI's
+`--path-kind` flag defaulted to `"returning_user"` and was silently applied to
+a derived run regardless of app, mixing a competitor's trace into Swag Pay's
+own bucket. Both are covered by regression tests now
+(`TestGenericAppDerivation`, `TestCLIPathKindDefaulting`).
+
+Regression detection, baselines and benchmarks are all scoped by
+`(app_pkg, path_kind, device)`, so a PhonePe cold-start trend is compared
+against its own history, never against Swag Pay's.
+
+Steps derived this way carry no runtime attribution beyond "Android framework",
+since only Swag Pay's own step names map to a runtime. The durations and
+child-slice numbers are still fully attributable.
+
+## Token consumption monitor
+
+A second, unrelated page at `/tokens.html` (the *LLM token usage* link at the
+bottom of the sidebar), answering a different question: not how the *app*
+performs, but how much this Claude Code session has spent reading this
+repository.
+
+`tokens.py` reads the `usage` blocks Claude Code writes into its own session
+transcripts under `~/.claude/projects/<this-project>/*.jsonl` and buckets them
+by how the tokens got into context: `graphify` calls, `Read`/`NotebookRead`,
+`Grep`/`Glob`, and read-only `Bash` (matched shallowly on the command's first
+token -- `cat`, `head`, `sed`, `grep`, `find`, `ls`, `awk`, `less` -- because
+guessing deeper misattributes more often than it helps).
+
+Every figure is server-reported; nothing here is estimated. It deliberately
+does **not** report "tokens saved", since that would need the cost of the path
+not taken, which is a counterfactual and cannot be measured, only modelled --
+that is what `graphify benchmark`'s words/chars ratio does instead, and the two
+should not be confused for the same kind of number. Attribution is sound in
+aggregate and fuzzy for any single call, since a tool result's cost lands on
+the *next* API call rather than being labelled at the point it entered context.
+
+Served at `/api/tokens`, aggregating the most recent sessions for the project
+`server.py` is running in.
+
+## Frontend development
+
+The dashboard is a React 19 + TypeScript app in `frontend/`, built with Vite into
+`web/dist`, which is committed so the tool runs without Node.
+
+```bash
+cd frontend
+npm install
+npm run dev        # Vite on :5173, proxying /api to the dashboard on :8787
+npm run build      # typecheck + build into ../web/dist (commit the result)
+npm test           # vitest
+npm run lint       # oxlint
+```
+
+Every screen is built from the design system in `frontend/src/design/`: colour
+tokens for both themes, a type and spacing scale, layout and text primitives, and
+the shared components and charts. **`/design-system`** (the *Tokens* link in the top
+bar) is its living reference. Typography follows [krafton.com](https://www.krafton.com/en/):
+Zalando Sans Expanded for display, Poppins for UI text, Noto Sans KR as the Korean
+fallback. The status colours are separate from the brand red. Fail is its own
+crimson and always carries ✕, so brand and status never read as the same thing.
+[`frontend/README.md`](frontend/README.md) has the layout and conventions.
+
+## Layout
+
+```
+swagperf/
+  budgets.py      architecture-derived budgets and risk map — start here
+  extract.py      TraceProcessor SQL → metrics (no LLM)
+  derive.py       steps from an uninstrumented app's own slices
+  screens.py      per-screen and per-action cost from SwagTrace markers
+  store.py        SQLite history, trailing baselines, regression detection,
+                  benchmarks, stress tests, Copilot threads and pins
+  analyst.py      model backends + deterministic fallback
+  copilot.py      the Copilot's answers, computed from the run history
+  capture.py      on-device capture via adb (one-shot, cold/warm, manual)
+  live.py         incremental reads of a trace still being recorded
+  jobs.py         background jobs for dashboard-started captures and stress tests
+  catalogue.py    apps under test (apps.json, apps.local.json)
+  server.py       dashboard server and JSON API
+  tokens.py       token-consumption monitor
+  synth*.py       synthetic trace generators for development
+  cli.py          the swagperf command
+frontend/         the dashboard's source (React + TypeScript)
+web/dist/         the built dashboard, served by server.py
+web/tokens.html   the token-consumption page
+tests/            108 tests over the pipeline, the store, the server and the Copilot
+docs/             backlog, decisions and plans
+```
+
+## Adapting it
+
+Editing `budgets.py` is the main thing you will do — the step names, budgets and
+`RISK_MAP` are what make the output specific to Swag Pay rather than generic.
+
+Step names are matched by the `step:` prefix. Emit them from the app with
+`Trace.beginSection("step:camera_open")` or from the automation harness; child slices
+inside a step are attributed automatically and give the model what it needs to say
+*which part* of a step moved.
+
+## Known gaps
+
+- **iOS is not wired up.** The extractor is schema-driven and should mostly work on an
+  iOS trace, but `capture.py` is adb-only and nothing has been tested against a real
+  iOS trace. The CMP × RN seam — the highest risk in the architecture — lives on iOS.
+- **Frame attribution is per screen, not per surface.** Janky frames are attributed
+  to the screen on display, but not yet to the CMP or RN surface within it, so the
+  tool cannot currently prove the interop seam is the cause. The model correctly
+  declines to claim it.
+- **No device-model baselines.** `device` is recorded and benchmarks are per device,
+  but the trailing baseline does not yet segment by device automatically. Mixing
+  device classes in one history inflates variance and hides real regressions.
+- **The Copilot is rule-based.** It answers the questions listed under
+  [Copilot](#copilot) from the data and says so for anything else. A language model
+  is not wired in yet.
+- **The dashboard server has no auth and mutates local history** (pinning a
+  benchmark, the Copilot's threads). It binds to loopback only, which is fine for a
+  dev/CI tool — but do not expose it on a routable interface.
+- **Dashboard verified with Playwright, not Chrome DevTools MCP.** Playwright drives
+  real Chromium, so clicks, keyboard use, layout at phone width and console errors
+  were checked against a live page. A DevTools pass would add performance-panel and
+  network profiling.
+
+Deferred work is tracked in [docs/BACKLOG.md](docs/BACKLOG.md).
