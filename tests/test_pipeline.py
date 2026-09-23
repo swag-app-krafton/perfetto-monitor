@@ -1121,3 +1121,15 @@ class TestLiveServerFallback(unittest.TestCase):
             (cap.manual_status, cap.manual_remote_size, cap.manual_read_from,
              cap.manual_snapshot, srv._live, srv._LIVE_TTL_S) = saved
             srv._live_reset()
+
+
+class TestStressInterrupted(unittest.TestCase):
+    def test_running_tests_are_closed_at_startup(self):
+        """A server restart kills its job threads; their tests must not read RUNNING forever."""
+        db = os.path.join(tempfile.mkdtemp(), "h.db")
+        sid = store.stress_create(app_pkg="com.swag.pay", sessions=5, db=db)
+        done = store.stress_create(app_pkg="com.swag.pay", sessions=5, db=db)
+        store.stress_finish(done, state="done", db=db)
+        self.assertEqual(store.stress_mark_interrupted(db=db), 1)
+        self.assertEqual(store.stress_get(sid, db=db)["state"], "interrupted")
+        self.assertEqual(store.stress_get(done, db=db)["state"], "done")

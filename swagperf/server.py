@@ -30,7 +30,9 @@ def _device_payload():
     rows.sort(key=lambda a: (not a["installed"], a["role"] != "own",
                              not a.get("in_catalogue", True),
                              a["role"] != "competitor", a["name"].lower()))
-    return {"connected": True, **info, "packages": rows}
+    return {"connected": True, **info, "packages": rows,
+            "health": cap.device_health(info.get("serial")),
+            "devices": cap.devices()}
 
 
 def _payload(limit=100):
@@ -367,6 +369,10 @@ class H(SimpleHTTPRequestHandler):
 
 def serve(port=8787):
     print(f"  swagperf dashboard -> http://127.0.0.1:{port}   (ctrl-c to stop)")
+    # Jobs live in this process, so nothing can still be running at startup.
+    stale = store.stress_mark_interrupted()
+    if stale:
+        print(f"  marked {stale} stress test(s) left running by a previous server as interrupted")
     # Threading server: a capture job can run for tens of seconds, and the
     # dashboard must keep polling /api/jobs and serving the page while it does.
     ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()

@@ -8,6 +8,11 @@ import { FramesPage } from '@/features/frames/FramesPage'
 import { MemoryPage } from '@/features/memory/MemoryPage'
 import { StepsPage } from '@/features/steps/StepsPage'
 import { ScreensPage } from '@/features/screens/ScreensPage'
+import { ComparePage } from '@/features/compare/ComparePage'
+import { HistoryPage } from '@/features/history/HistoryPage'
+import { CapturePage } from '@/features/capture/CapturePage'
+import { StressPage } from '@/features/stress/StressPage'
+import { ManualPage } from '@/features/manual/ManualPage'
 
 const PAGES: Record<string, React.ReactNode> = {
   overview: <OverviewPage />,
@@ -16,6 +21,11 @@ const PAGES: Record<string, React.ReactNode> = {
   memory: <MemoryPage />,
   steps: <StepsPage />,
   screens: <ScreensPage />,
+  compare: <ComparePage />,
+  history: <HistoryPage />,
+  capture: <CapturePage />,
+  stress: <StressPage />,
+  manual: <ManualPage />,
 }
 
 export const router = createBrowserRouter([

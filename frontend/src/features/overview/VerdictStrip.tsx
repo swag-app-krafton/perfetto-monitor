@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import type { Run } from '@/api/types'
 import { Button, Card, GLYPH, StatusPill, toneColor } from '@/design/components'
 import { fmt, shortDate } from '@/domain/format'
@@ -8,7 +8,9 @@ import s from './Overview.module.css'
 
 export function VerdictStrip({ runs, latest, benchmarkId }: { runs: Run[]; latest: Run; benchmarkId: number | null }) {
   const navigate = useNavigate()
-  const [selId, setSelId] = useState(latest.id)
+  const [params] = useSearchParams()
+  // History's "Open" lands here with ?run=<id> selected in the strip.
+  const [selId, setSelId] = useState(() => Number(params.get('run')) || latest.id)
   const sel = runs.find((r) => r.id === selId) ?? latest
   const counts = { pass: 0, warn: 0, fail: 0 }
   for (const r of runs) {

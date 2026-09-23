@@ -503,6 +503,25 @@ def stress_finish(stress_id, *, state="done", error=None, db=None):
     c.commit(); c.close()
 
 
+def stress_mark_interrupted(db=None):
+    """Close out stress tests left 'running' by a server that stopped.
+
+    Jobs run on threads inside the dashboard process, so a restart kills them
+    mid-test. Without this, such a test reads RUNNING forever (one sat at 0/5
+    for a day), and the UI keeps treating it as live. Called once at startup,
+    when by definition nothing can still be running.
+    """
+    c = connect(db)
+    n = c.execute(
+        """update stress_tests set state='interrupted',
+               error=coalesce(error, 'the dashboard stopped while this test was running'),
+               finished=coalesce(finished, ?)
+           where state in ('running', 'queued')""",
+        (datetime.now(timezone.utc).isoformat(timespec="seconds"),)).rowcount
+    c.commit(); c.close()
+    return n
+
+
 def stress_stats(values):
     """Spread across sessions. A stress test exists to expose variance, so the
     summary leads with spread rather than a single average that hides it."""

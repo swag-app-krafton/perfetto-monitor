@@ -145,6 +145,8 @@ export type DevicePayload =
       release: string
       sdk?: string
       packages: DevicePackage[]
+      health?: { battery_pct: number | null; battery_temp_c: number | null; perfetto_version: string | null }
+      devices?: string[]
       [k: string]: unknown
     }
 
@@ -305,16 +307,20 @@ export interface StressSession {
   error: string | null
   ttid_ms: number | null
   slow_pct?: number | null
+  peak_rss_mb?: number | null
+  run_label?: string | null
+  run_ts?: string | null
 }
 
 export interface SpreadStats {
   n: number
-  median: number
-  p10?: number
-  p90?: number
   min: number
   max: number
-  [k: string]: number | undefined
+  mean: number
+  median: number
+  p90: number
+  stdev: number
+  spread_pct: number
 }
 
 export interface StressTest {
@@ -330,27 +336,54 @@ export interface StressTest {
   error: string | null
   finished: string | null
   completed?: number
+  failed?: number
   sessions?: StressSession[]
   stats?: Record<string, SpreadStats | null>
 }
 
+export type DiffVerdict = 'better' | 'worse' | 'same'
+
 export interface CompareMetric {
-  key: string
-  label?: string
-  a: number | null
-  b: number | null
+  metric: string
+  value: number | null
+  base_value: number | null
   delta: number | null
-  pct: number | null
-  worse: boolean
-  same: boolean
-  signed?: boolean
-  [k: string]: unknown
+  delta_pct: number | null
+  direction: 'lower' | 'higher'
+  signed: boolean
+  verdict: DiffVerdict | null
+}
+
+export interface CompareStep {
+  step: string
+  dur_ms: number | null
+  base_dur_ms: number | null
+  budget_ms: number | null
+  /** Set when the step exists in only one of the two runs. */
+  only_in: 'run' | 'base' | null
+  delta_ms: number | null
+  delta_pct: number | null
+  verdict: DiffVerdict | null
+  children: { name: string; dur_ms: number | null; base_dur_ms: number | null; delta_ms: number | null; delta_pct: number | null }[]
+}
+
+export interface RunMeta {
+  id: number
+  ts: string
+  label: string | null
+  git_sha: string | null
+  app_version: string | null
+  device: string | null
+  path_kind: string
 }
 
 export interface ComparePayload {
-  run: Run | Record<string, unknown>
-  base: Run | Record<string, unknown>
+  run: RunMeta
+  base: RunMeta
+  /** Same startup path: a cold start is not comparable with a warm one. */
+  comparable: boolean
+  same_device: boolean
   metrics: CompareMetric[]
-  steps: Record<string, unknown>[]
-  [k: string]: unknown
+  steps: CompareStep[]
+  summary: Record<DiffVerdict, number>
 }
