@@ -33,7 +33,8 @@ export function Copilot() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         toggle()
-      } else if (e.key === 'Escape' && useUi.getState().copilot.open && !e.defaultPrevented) {
+      } else if (e.key === 'Escape' && useUi.getState().copilot.open && !e.defaultPrevented && !document.querySelector('dialog[open]')) {
+        // A modal (Run details) takes Esc for itself.
         setCopilot({ open: false })
       }
     }
@@ -74,7 +75,7 @@ function Panel({ textareaRef, prompt, showToast }: { textareaRef: React.RefObjec
 
   const refs = useMemo(() => references(scope), [scope])
   const context = activeContext(defaultContext(scope, screen), chat.added, chat.removed)
-  const scopeReq = useMemo(() => ({ app: scope?.latest?.app_pkg ?? undefined, path: scope?.latest?.path_kind ?? undefined }), [scope])
+  const scopeReq = useMemo(() => ({ app: scope?.run?.app_pkg ?? undefined, path: scope?.run?.path_kind ?? undefined }), [scope])
 
   const send = (text: string) => void chat.send({ text, context, scope: scopeReq, deep: chat.deep })
 

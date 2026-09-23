@@ -44,12 +44,12 @@ function Bar({ label, b, max, dim }: { label: string; b: NonNullable<ReturnType<
 export function MemoryPage() {
   const { scope, isLoading } = useScope()
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
-  const { latest, runs, allRuns, benchmarkRun, history } = scope
-  if (!latest) return <EmptyState title="No runs yet">Capture a trace to see memory.</EmptyState>
-  const base = benchmarkRun ?? allRuns.filter((r) => r.id < latest.id).pop() ?? null
-  const cur = breakdown(latest)
+  const { run, runs, allRuns, benchmarkRun, history } = scope
+  if (!run) return <EmptyState title="No runs yet">Capture a trace to see memory.</EmptyState>
+  const base = benchmarkRun ?? allRuns.filter((r) => r.id < run.id).pop() ?? null
+  const cur = breakdown(run)
   const prev = breakdown(base)
-  const max = Math.max(cur?.total ?? 0, prev?.total ?? 0, metricByKey('peak_rss_mb').budget(latest, history.global_budgets) ?? 0) * 1.05 || 1
+  const max = Math.max(cur?.total ?? 0, prev?.total ?? 0, metricByKey('peak_rss_mb').budget(run, history.global_budgets) ?? 0) * 1.05 || 1
   const labels = runs.map((r) => `#${r.id}`)
   const hasHermes = runs.some((r) => r.memory?.hermes_heap)
   const perRuntime = !!cur && cur.parts.length > 1
@@ -67,11 +67,11 @@ export function MemoryPage() {
             </Stack>
             {cur ? (
               <Stack gap={12}>
-                <Bar label={`Run #${latest.id}`} b={cur} max={max} />
+                <Bar label={`Run #${run.id}`} b={cur} max={max} />
                 {prev && base && <Bar label={benchmarkRun ? `Benchmark #${base.id}` : `Previous #${base.id}`} b={prev} max={max} dim />}
               </Stack>
             ) : (
-              <EmptyState>No memory samples were recorded for run #{latest.id}.</EmptyState>
+              <EmptyState>No memory samples were recorded for run #{run.id}.</EmptyState>
             )}
             {cur && (
               <StatGrid variant="hairline" min={160}>
@@ -118,7 +118,7 @@ export function MemoryPage() {
             label="Peak RAM per run"
             labels={labels}
             series={[{ name: 'Peak RAM', color: 'var(--c1)', values: runs.map((r) => valueOf(r, 'peak_rss_mb')) }]}
-            budget={metricByKey('peak_rss_mb').budget(latest, history.global_budgets)}
+            budget={metricByKey('peak_rss_mb').budget(run, history.global_budgets)}
             unit="MB"
           />
         </Card>
@@ -127,7 +127,7 @@ export function MemoryPage() {
             label="RAM growth per run"
             labels={labels}
             series={[{ name: 'RAM growth', color: 'var(--c2)', values: runs.map((r) => valueOf(r, 'rss_growth_mb')) }]}
-            budget={metricByKey('rss_growth_mb').budget(latest, history.global_budgets)}
+            budget={metricByKey('rss_growth_mb').budget(run, history.global_budgets)}
             unit="MB"
           />
         </Card>

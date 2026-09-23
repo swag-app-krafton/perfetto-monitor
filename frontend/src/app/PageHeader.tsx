@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 import { Eyebrow, Row, Stack, Text } from '@/design'
 import type { Run } from '@/api/types'
-import { runMetaLines } from './runMeta'
+import { RunBox } from './RunBox'
 import s from './Shell.module.css'
 
-export function PageHeader({ group, title, hint, run, aside }: { group: string; title: string; hint: string; run: Run | null; aside?: ReactNode }) {
-  const meta = runMetaLines(run)
+/** Every screen's header: where you are, and the run in view. */
+export function PageHeader({ group, title, hint, run, isLatest, aside }: { group: string; title: string; hint: string; run: Run | null; isLatest: boolean; aside?: ReactNode }) {
   return (
     <Row align="end" justify="between" gap={16} wrap>
       <Stack>
@@ -17,14 +17,7 @@ export function PageHeader({ group, title, hint, run, aside }: { group: string; 
           {hint}
         </Text>
       </Stack>
-      {aside ??
-        (meta && (
-          <Text as="div" variant="meta">
-            {meta[0]}
-            <br />
-            {meta[1]}
-          </Text>
-        ))}
+      {aside ?? (run && <RunBox run={run} isLatest={isLatest} />)}
     </Row>
   )
 }

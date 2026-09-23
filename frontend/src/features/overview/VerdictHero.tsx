@@ -16,12 +16,14 @@ export function VerdictHero({
   baselineLabel,
   worst,
   budgets,
+  isLatest,
 }: {
   run: Run
   benchmark: Run | null
   baselineLabel: string
   worst: Worst
   budgets: GlobalBudgets
+  isLatest: boolean
 }) {
   const navigate = useNavigate()
   const askCopilot = useUi((st) => st.askCopilot)
@@ -35,7 +37,7 @@ export function VerdictHero({
     <Stack direction="row" wrap className={s.hero} style={{ borderTopColor: toneColor(tone) }} data-hl="verdict">
       <Stack gap={24} className={s.heroMain}>
         <Row gap={12} wrap>
-          <Eyebrow>LATEST RUN VERDICT</Eyebrow>
+          <Eyebrow>{isLatest ? 'Latest run verdict' : `Run #${run.id} verdict`}</Eyebrow>
           <Text variant="meta">
             Run #{run.id} vs {benchmark ? `Benchmark #${benchmark.id}` : baselineLabel}
           </Text>

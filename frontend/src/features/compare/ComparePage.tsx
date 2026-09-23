@@ -1,11 +1,11 @@
-import { Fragment, useMemo } from 'react'
+import { Fragment, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router'
 import { useCompare } from '@/api/hooks'
 import type { DiffVerdict, Run } from '@/api/types'
 import { Badge, Banner, Card, DiffTag, EmptyState, Grid, Label, Row, Segmented, SelectField, Spinner, Stack, TableCard, Text, numCell } from '@/design'
 import { fmt, pathLabel, shortDate, signed, stepName } from '@/domain/format'
 import { METRICS } from '@/domain/metrics'
-import { useScope } from '@/domain/scope'
+import { useScope, useSelectRun } from '@/domain/scope'
 import s from './Compare.module.css'
 
 const toDiff = (v: DiffVerdict | null) => (v === 'worse' ? 'worse' : v === 'better' ? 'better' : 'same')
@@ -16,7 +16,19 @@ export function ComparePage() {
   const runs = useMemo(() => scope?.allRuns ?? [], [scope])
   const bench = scope?.benchmarkRun ?? null
   const mode = params.get('mode') === 'run' || !bench ? 'run' : 'bench'
-  const a = Number(params.get('a')) || scope?.latest?.id || null
+  // Run A is the run in view, chosen in the top bar. A link's `a` (Copilot,
+  // History) selects that run there, then leaves the URL.
+  const selectRun = useSelectRun()
+  const aParam = Number(params.get('a')) || null
+  const ready = !!scope
+  useEffect(() => {
+    if (aParam == null || !ready) return
+    selectRun(aParam)
+    const next = new URLSearchParams(params)
+    next.delete('a')
+    setParams(next, { replace: true })
+  }, [aParam, ready, selectRun, params, setParams])
+  const a = aParam ?? scope?.run?.id ?? null
   const bParam = Number(params.get('b')) || null
   const b = mode === 'bench' ? (bench?.id ?? null) : (bParam ?? runs.filter((r) => r.id !== a).pop()?.id ?? null)
   const q = useCompare(a, b)
@@ -35,7 +47,7 @@ export function ComparePage() {
   const sub = (r?: Run) => (r ? `${shortDate(r.ts, true)} · ${r.device ?? 'unknown device'} · ${r.app_version ?? r.label ?? 'no build'}` : '')
   // Pickers list every run of this app, across paths: comparing a cold run with
   // a warm one is allowed -- the "Not comparable" banner says why it misleads.
-  const appRuns = scope.history.runs.filter((r) => r.app_pkg === scope.latest?.app_pkg)
+  const appRuns = scope.history.runs.filter((r) => r.app_pkg === scope.run?.app_pkg)
   const opts = [...appRuns].reverse().map((r) => ({ value: String(r.id), label: `#${r.id} · ${shortDate(r.ts)} · ${pathLabel(r.path_kind)} · ${r.label ?? ''}` }))
   const d = q.data
   const label = (m: string) => METRICS.find((x) => x.key === m || (m === 'ttff_ms' && x.key === 'ttff_ms'))?.label ?? m
@@ -57,10 +69,12 @@ export function ComparePage() {
         <Card>
           <Stack gap={10}>
             <Label style={{ color: 'var(--c1)' }}>RUN A</Label>
-            <div>
-              <SelectField label="Run" value={String(a)} options={opts} onChange={(v) => set('a', v)} />
-            </div>
+            <Row gap={10} className={s.pinnedRun}>
+              <Text variant="heading-lg">#{a}</Text>
+              <Badge tone="c1">In view</Badge>
+            </Row>
             <Text variant="meta">{sub(runA)}</Text>
+            <Text variant="caption">Change it with Run in the top bar.</Text>
           </Stack>
         </Card>
         <Card>

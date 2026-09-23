@@ -7,10 +7,11 @@ import { findingId } from '@/features/shared/findings'
 import { chipKey } from './chat'
 import type { ContextItem } from './types'
 
-/** What the panel is looking at: the tab, the run in view and its benchmark. */
+/** What the panel is looking at: the tab, the run in view (the top bar's
+ *  Run) and its benchmark. */
 export function defaultContext(scope: Scope | null, screen: ScreenDef): ContextItem[] {
   const out: ContextItem[] = [{ kind: 'tab', id: screen.id, label: `${screen.label} tab` }]
-  const run = scope?.latest
+  const run = scope?.run
   if (run) out.push({ kind: 'run', id: run.id, label: `Run #${run.id}` })
   const bench = scope?.benchmarkRun
   if (bench && bench.id !== run?.id) out.push({ kind: 'benchmark', id: bench.id, label: `vs Benchmark #${bench.id}` })
@@ -41,20 +42,20 @@ const runMeta = (r: Run) => ['Run', shortDate(r.ts), verdictOf(r)?.toUpperCase()
 
 /** Everything in scope that can be referenced, most relevant first. */
 export function references(scope: Scope | null): Reference[] {
-  if (!scope?.latest) return []
-  const { latest, allRuns, benchmarkRun } = scope
+  if (!scope?.run) return []
+  const { run, allRuns, benchmarkRun } = scope
   const out: Reference[] = []
   if (benchmarkRun) out.push({ handle: `#${benchmarkRun.id}`, kind: 'Benchmark', meta: 'Pinned benchmark', item: { kind: 'benchmark', id: benchmarkRun.id, label: `vs Benchmark #${benchmarkRun.id}` } })
   for (const r of [...allRuns].reverse().slice(0, 12)) {
     if (r.id === benchmarkRun?.id) continue
     out.push({ handle: `#${r.id}`, kind: 'Run', meta: runMeta(r), item: { kind: 'run', id: r.id, label: `Run #${r.id}` } })
   }
-  const deltas = stepDeltas(latest, allRuns, benchmarkRun).sort((a, b) => Math.abs(b.deltaMs ?? 0) - Math.abs(a.deltaMs ?? 0))
+  const deltas = stepDeltas(run, allRuns, benchmarkRun).sort((a, b) => Math.abs(b.deltaMs ?? 0) - Math.abs(a.deltaMs ?? 0))
   for (const d of deltas) {
     const name = stepName(d.step)
     out.push({ handle: name, kind: 'Step', meta: d.deltaMs == null ? 'Step · no baseline' : `Step · ${signed(d.deltaMs, 1, ' ms')}`, item: { kind: 'step', id: d.step, label: `Step: ${name}` } })
   }
-  ;(latest.analysis?.findings ?? []).forEach((f, i) => {
+  ;(run.analysis?.findings ?? []).forEach((f, i) => {
     const id = findingId(i)
     out.push({ handle: id, kind: 'Finding', meta: `Finding · ${f.severity}`, item: { kind: 'finding', id, label: `Finding ${id}` } })
   })

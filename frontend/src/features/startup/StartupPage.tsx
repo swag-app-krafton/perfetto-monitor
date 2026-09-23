@@ -15,24 +15,24 @@ export function StartupPage() {
   const { scope, isLoading } = useScope()
   const askCopilot = useUi((s) => s.askCopilot)
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
-  const { latest, runs, allRuns, benchmarkRun, history } = scope
-  if (!latest) return <EmptyState title="No runs yet">Capture a cold start to see its startup here.</EmptyState>
+  const { run, runs, allRuns, benchmarkRun, history } = scope
+  if (!run) return <EmptyState title="No runs yet">Capture a cold start to see its startup here.</EmptyState>
 
-  const prior = allRuns.filter((r) => r.id < latest.id)
+  const prior = allRuns.filter((r) => r.id < run.id)
   const base = benchmarkRun ?? prior[prior.length - 1] ?? null
-  const ttid = valueOf(latest, 'ttff_ms')
+  const ttid = valueOf(run, 'ttff_ms')
   const baseTtid = valueOf(base, 'ttff_ms')
-  const budget = latest.ttid_budget_ms
-  const findings = (latest.analysis?.findings ?? []).map((f, i) => ({ f, i })).filter(({ f }) => findingArea(f) === 'Startup')
+  const budget = run.ttid_budget_ms
+  const findings = (run.analysis?.findings ?? []).map((f, i) => ({ f, i })).filter(({ f }) => findingArea(f) === 'Startup')
   const model = history.startup_model
-  const critical = model.critical_path[latest.path_kind] ?? null
+  const critical = model.critical_path[run.path_kind] ?? null
 
   return (
     <Stack as="section" gap={20}>
       <Card
         data-hl="ttidChart"
         title="TTID over runs"
-        hint={`Time to initial display${latest.app_role === 'own' ? ' (the first usable camera frame)' : ''}.${budget ? ` Dashed line is the ${budget} ms budget.` : ' No budget is set for this app.'}`}
+        hint={`Time to initial display${run.app_role === 'own' ? ' (the first usable camera frame)' : ''}.${budget ? ` Dashed line is the ${budget} ms budget.` : ' No budget is set for this app.'}`}
         actions={
           ttid != null && (
             <Stack gap={4} align="end">
@@ -62,14 +62,14 @@ export function StartupPage() {
       </Card>
 
       <Grid min={440}>
-        <Composition runs={runs.slice(-12)} latestId={latest.id} budget={budget} critical={critical} />
-        <Ordering run={latest} benchmark={benchmarkRun} critical={critical} deferred={model.deferred_steps} />
+        <Composition runs={runs.slice(-12)} latestId={run.id} budget={budget} critical={critical} />
+        <Ordering run={run} benchmark={benchmarkRun} critical={critical} deferred={model.deferred_steps} />
       </Grid>
 
       <SectionTitle>Startup findings</SectionTitle>
-      {findings.length === 0 && <EmptyState>No startup findings for run #{latest.id}.</EmptyState>}
+      {findings.length === 0 && <EmptyState>No startup findings for run #{run.id}.</EmptyState>}
       {findings.map(({ f, i }) => (
-        <FindingCard key={i} compact finding={f} id={findingId(i)} area="Startup" onAsk={() => askCopilot(`Explain finding ${findingId(i)} on run #${latest.id}: ${f.title}`)} />
+        <FindingCard key={i} compact finding={f} id={findingId(i)} area="Startup" onAsk={() => askCopilot(`Explain finding ${findingId(i)} on run #${run.id}: ${f.title}`)} />
       ))}
     </Stack>
   )

@@ -2,10 +2,10 @@ import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useBenchmarkMutations } from '@/api/hooks'
 import type { Run } from '@/api/types'
-import { Badge, Button, Card, EmptyState, Grid, Row, SearchInput, Segmented, SectionTitle, SortHeader, Stack, StatusPill, TableCard, TableEmptyRow, Text, numCell, useSort } from '@/design'
+import { Badge, Button, Card, EmptyState, Grid, Row, SearchInput, Segmented, SectionTitle, SortHeader, Stack, StatusPill, TableCard, TableEmptyRow, Text, numCell, selectedRow, useSort } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
 import { valueOf, verdictTone } from '@/domain/metrics'
-import { useScope } from '@/domain/scope'
+import { useScope, useSelectRun } from '@/domain/scope'
 import { useUi } from '@/app/store'
 
 type Key = 'id' | 'ts' | 'build' | 'device' | 'verdict' | 'ttid' | 'slow' | 'janky' | 'peak'
@@ -26,6 +26,7 @@ const VERDICT_RANK = { fail: 3, warn: 2, pass: 1, neutral: 0 }
 export function HistoryPage() {
   const { scope, isLoading } = useScope()
   const navigate = useNavigate()
+  const selectRun = useSelectRun()
   const { pin, unpin } = useBenchmarkMutations()
   const showToast = useUi((s) => s.showToast)
   const [q, setQ] = useState('')
@@ -57,11 +58,16 @@ export function HistoryPage() {
 
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
   // Benchmarks never cross apps, so only this app's are listed.
-  const appPkg = scope.latest?.app_pkg ?? null
+  const appPkg = scope.run?.app_pkg ?? null
   const benchmarks = scope.history.benchmarks.filter((b) => b.app_pkg === appPkg)
   const pinnedIds = new Set(benchmarks.map((b) => b.run_id))
   const activeId = scope.benchmarkRun?.id ?? null
-  const latest = scope.latest
+  // Compare is always against the run in view (the top bar's Run).
+  const inView = scope.run
+  const open = (id: number) => {
+    selectRun(id)
+    navigate('/overview')
+  }
 
   const doPin = (r: Run) =>
     pin.mutate({ runId: r.id }, { onSuccess: () => showToast(`Pinned run #${r.id} as the benchmark`), onError: (e) => showToast(`Could not pin: ${e.message}`) })
@@ -104,7 +110,7 @@ export function HistoryPage() {
             const ttid = valueOf(r, 'ttff_ms')
             const over = ttid != null && r.ttid_budget_ms != null && ttid > r.ttid_budget_ms
             return (
-              <tr key={r.id} data-hl={`run:${r.id}`}>
+              <tr key={r.id} data-hl={`run:${r.id}`} className={r.id === inView?.id ? selectedRow : undefined} aria-current={r.id === inView?.id || undefined}>
                 <td>
                   <Row gap={8}>
                     <Text variant="body" tone="primary" weight={700} nowrap>
@@ -137,11 +143,11 @@ export function HistoryPage() {
                 <td className={numCell}>{valueOf(r, 'peak_rss_mb') == null ? '–' : `${fmt(valueOf(r, 'peak_rss_mb'))} MB`}</td>
                 <td>
                   <Row gap={6}>
-                    <Button variant="mini" onClick={() => navigate(`/overview?run=${r.id}`)}>
-                      Open
+                    <Button variant="mini" onClick={() => open(r.id)} disabled={inView?.id === r.id} title={inView?.id === r.id ? 'This run is in view' : `Put run #${r.id} in view on every screen`}>
+                      {inView?.id === r.id ? 'In view' : 'Open'}
                     </Button>
-                    {latest && latest.id !== r.id && (
-                      <Button variant="mini" onClick={() => navigate(`/compare?mode=run&a=${latest.id}&b=${r.id}`)}>
+                    {inView && inView.id !== r.id && (
+                      <Button variant="mini" onClick={() => navigate(`/compare?mode=run&b=${r.id}`)} title={`Compare run #${inView.id} with #${r.id}`}>
                         Compare
                       </Button>
                     )}
@@ -190,9 +196,9 @@ export function HistoryPage() {
                     )}
                   </Stack>
                   <Row gap={6}>
-                    {latest && latest.id !== b.run_id && (
-                      <Button variant="mini" onClick={() => navigate(`/compare?mode=run&a=${latest.id}&b=${b.run_id}`)}>
-                        Compare with #{latest.id}
+                    {inView && inView.id !== b.run_id && (
+                      <Button variant="mini" onClick={() => navigate(`/compare?mode=run&b=${b.run_id}`)}>
+                        Compare with #{inView.id}
                       </Button>
                     )}
                     <Button

@@ -1,0 +1,32 @@
+.list {
+  display: grid;
+  gap: 0 24px;
+  margin: 0;
+}
+.item {
+  display: grid;
+  grid-template-columns: minmax(110px, 40%) 1fr;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+.term {
+  font: 500 12px var(--font-ui);
+  color: var(--tx3);
+}
+.value {
+  margin: 0;
+  font: 400 13px/1.5 var(--font-ui);
+  color: var(--tx);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.mono {
+  font: 400 12px/1.5 var(--font-mono);
+}
+.missing {
+  color: var(--tx3);
+  font-style: italic;
+}

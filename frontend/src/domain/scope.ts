@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useHistory } from '@/api/hooks'
 import type { Benchmark, HistoryPayload, Run, Verdict } from '@/api/types'
 import { useUi, type RangeKey } from '@/app/store'
@@ -52,7 +52,13 @@ export interface Scope {
   runs: Run[]
   /** Every run for the app and path, ignoring range (baselines, benchmark lookups). */
   allRuns: Run[]
+  /** The newest run in range. */
   latest: Run | null
+  /** The run in view: the one picked in the top bar, else the newest. Every
+   *  per-run screen reads this, never `latest`. */
+  run: Run | null
+  /** Whether `run` is the newest run (the top bar is following it). */
+  isLatest: boolean
   benchmark: Benchmark | null
   benchmarkRun: Run | null
   byId: (id: number) => Run | undefined
@@ -63,7 +69,7 @@ export interface Scope {
  *  the user chooses. */
 export function useScope(): { scope: Scope | null; isLoading: boolean; error: Error | null } {
   const q = useHistory()
-  const { app, path, range, setFilters } = useUi()
+  const { app, path, range, runId, setFilters } = useUi()
 
   // Default the filters from the newest run, and repair them if the stored
   // choice no longer exists in the data (a pruned app, a renamed path).
@@ -87,7 +93,8 @@ export function useScope(): { scope: Scope | null; isLoading: boolean; error: Er
     const allRuns = appRuns.filter((r) => r.path_kind === path)
     const runs = inRange(allRuns, range)
     const latest = runs[runs.length - 1] ?? null
-    const benchmark = benchmarkFor(latest, h)
+    const run = (runId != null ? allRuns.find((r) => r.id === runId) : null) ?? latest
+    const benchmark = benchmarkFor(run, h)
     const index = new Map(h.runs.map((r) => [r.id, r]))
     return {
       history: h,
@@ -96,11 +103,28 @@ export function useScope(): { scope: Scope | null; isLoading: boolean; error: Er
       runs,
       allRuns,
       latest,
+      run,
+      isLatest: !!run && run.id === latest?.id,
       benchmark,
       benchmarkRun: benchmark ? (index.get(benchmark.run_id) ?? null) : null,
       byId: (id) => index.get(id),
     }
-  }, [q.data, app, path, range])
+  }, [q.data, app, path, range, runId])
 
   return { scope, isLoading: q.isLoading, error: q.error }
+}
+
+/** Put a run in view on every screen: switches the app and path to the run's
+ *  own when they differ, so a link to any run lands on it. */
+export function useSelectRun() {
+  const q = useHistory()
+  const { setFilters, setRunId } = useUi()
+  return useCallback(
+    (id: number | null) => {
+      const run = id == null ? null : q.data?.runs.find((r) => r.id === id)
+      if (run) setFilters({ app: run.app_pkg ?? 'unknown', path: run.path_kind })
+      setRunId(run ? run.id : null)
+    },
+    [q.data, setFilters, setRunId],
+  )
 }

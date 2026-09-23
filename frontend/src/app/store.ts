@@ -15,6 +15,8 @@ interface UiState {
   /** A path_kind from the data ('cold', 'warm', 'returning_user', ...). */
   path: string
   range: RangeKey
+  /** The run in view on every screen; null follows the newest run in scope. */
+  runId: number | null
   copilot: { open: boolean; maximised: boolean; width: number }
   /** A prompt a page asked the Copilot to send ("Ask Copilot why"). */
   copilotPrompt: { id: number; text: string } | null
@@ -25,6 +27,7 @@ interface UiState {
   toggleRail: () => void
   setDrawer: (open: boolean) => void
   setFilters: (f: Partial<Pick<UiState, 'app' | 'path' | 'range'>>) => void
+  setRunId: (id: number | null) => void
   setCopilot: (c: Partial<UiState['copilot']>) => void
   showToast: (text: string) => void
   askCopilot: (text: string) => void
@@ -42,6 +45,7 @@ export const useUi = create<UiState>()(
       app: '',
       path: '',
       range: '30',
+      runId: null,
       copilot: { open: false, maximised: false, width: 400 },
       toast: null,
       copilotPrompt: null,
@@ -50,7 +54,10 @@ export const useUi = create<UiState>()(
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
       toggleRail: () => set((s) => ({ railPinned: !s.railPinned })),
       setDrawer: (drawerOpen) => set({ drawerOpen }),
-      setFilters: (f) => set(f),
+      // A different app or path has different runs: go back to its newest.
+      setFilters: (f) =>
+        set((s) => ({ ...f, runId: (f.app !== undefined && f.app !== s.app) || (f.path !== undefined && f.path !== s.path) ? null : s.runId })),
+      setRunId: (runId) => set({ runId }),
       setCopilot: (c) =>
         set((s) => {
           const next = { ...s.copilot, ...c }

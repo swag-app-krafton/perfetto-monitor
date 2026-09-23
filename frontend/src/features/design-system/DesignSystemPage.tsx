@@ -14,6 +14,8 @@ import {
   ChipButton,
   CodeBlock,
   CompactTable,
+  DescriptionList,
+  Dialog,
   DiffTag,
   Disclosure,
   DockPanel,
@@ -173,6 +175,7 @@ export function DesignSystemPage() {
   const [chips, setChips] = useState(['Overview tab', 'Run #81', 'vs Benchmark #79'])
   const [active, setActive] = useState(0)
   const [kinds, setKinds] = useState({ screen: true, action: false })
+  const [dialog, setDialog] = useState(false)
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null)
 
   return (
@@ -475,6 +478,27 @@ export function DesignSystemPage() {
                 <TableEmptyRow colSpan={3}>No runs match the filter.</TableEmptyRow>
               </tbody>
             </TableCard>
+            <Card title="DescriptionList and Dialog" hint="Label/value pairs that say when a value was not recorded; a modal on the native <dialog>.">
+              <Stack gap={16}>
+                <DescriptionList
+                  min={200}
+                  items={[
+                    { term: 'Model', value: 'vivo V2514' },
+                    { term: 'Android', value: '16 (SDK 36)' },
+                    { term: 'Build number', value: null },
+                    { term: 'Build ID', value: 'BP2A.250605.031', mono: true },
+                  ]}
+                />
+                <Row>
+                  <Button variant="outline" onClick={() => setDialog(true)}>
+                    Open a dialog
+                  </Button>
+                </Row>
+                <Dialog open={dialog} onClose={() => setDialog(false)} title="Run #81" subtitle="Swag Pay · Cold start · Sep 23, 12:54" width={520}>
+                  <Text variant="body">Esc, the close button or a click on the backdrop closes it, and focus returns to the button that opened it.</Text>
+                </Dialog>
+              </Stack>
+            </Card>
             <FlushCard title="FlushCard" hint="The same title bar around any flush body.">
               <div className={s.flushBody}>
                 <Text variant="body">A div grid of expandable rows goes here, edge to edge.</Text>
