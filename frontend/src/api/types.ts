@@ -123,6 +123,7 @@ export interface HistoryPayload {
   benchmarks: Benchmark[]
   metric_direction: Record<string, 'lower' | 'higher'>
   signed_metrics: string[]
+  startup_model: { critical_path: Record<string, string[]>; deferred_steps: string[] }
 }
 
 export interface DevicePackage {
