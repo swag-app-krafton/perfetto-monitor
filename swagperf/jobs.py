@@ -128,6 +128,8 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
             _log(jid, "running analysis (rules)" + (" + model" if use_llm else "") + "…")
             res, regs = _analyse_run(rid, m, use_llm=use_llm)
             _log(jid, f"verdict: {res.get('verdict')} — {res.get('headline','')}")
+            from . import pm
+            _log(jid, pm.request_review())
 
             _set(jid, state="done",
                 result={"run_id": rid, "path_kind": m["path_kind"],
@@ -233,6 +235,9 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
             if s:
                 _log(jid, f"startup across {s['n']} session(s): median {s['median']}ms, "
                           f"min {s['min']}ms, max {s['max']}ms, spread {s.get('spread_pct')}%")
+            # One review for the whole test, not one per session.
+            from . import pm
+            _log(jid, pm.request_review())
             _set(jid, state="done",
                  result={"stress_id": stress_id, "app_pkg": pkg,
                          "completed": ok, "failed": sessions - ok,
@@ -241,6 +246,9 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
             _log(jid, f"ERROR: {e}")
             if stress_id:
                 store.stress_finish(stress_id, state="error", error=str(e))
+                # Sessions recorded before the failure are runs like any other.
+                from . import pm
+                _log(jid, pm.request_review())
             _set(jid, state="error", error=str(e))
         finally:
             _capture_lock.release()
@@ -308,6 +316,8 @@ def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
             from .cli import _analyse_run
             res, _ = _analyse_run(rid, m, use_llm=use_llm)
             _log(jid, f"verdict: {res.get('verdict')} — {res.get('headline','')}")
+            from . import pm
+            _log(jid, pm.request_review())
             _set(jid, state="done",
                  result={"run_id": rid, "app_pkg": pkg, "verdict": res.get("verdict"),
                          "headline": res.get("headline"),

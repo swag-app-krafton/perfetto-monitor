@@ -4,10 +4,14 @@ Deferred work on the swagperf tracing pipeline and the `swag-pay` instrumentatio
 it reads. Each entry records why the item matters, not just what it is, so it
 stays actionable once the conversation that produced it is gone.
 
+These are the long write-ups. The live list, with status and priority for
+every item, is [TRACKER.md](TRACKER.md); each entry here carries its tracker ID.
+
 ---
 
 ## Widget-level trace metrics (widget TTI)
 
+**Tracker:** F-003
 **Status:** not started
 **Raised:** 2026-09-22, while adding React Native screen and action tracing
 
@@ -66,6 +70,7 @@ Two concrete cases from this codebase motivate it:
 
 ## Stack depth is reconstructed, not recorded
 
+**Tracker:** T-002
 **Status:** working, with a known limit
 **Raised:** 2026-09-22, while adding the navigation stack view
 
@@ -91,6 +96,7 @@ worth doing if depth ever becomes something budgets are asserted against.
 
 ## Onboarding modelled as one native route
 
+**Tracker:** F-005
 **Status:** partially addressed
 **Raised:** 2026-09-22
 
@@ -107,6 +113,7 @@ which is why the tracing work did not do it.
 
 ## A/B measurement of graphify's token savings
 
+**Tracker:** F-004
 **Status:** not started
 **Raised:** 2026-09-22
 

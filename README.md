@@ -403,6 +403,53 @@ and a run that is not in the history gets "no data", never a guess. A model-back
 engine can replace `answer()` there without the panel changing. Conversations,
 feedback and pinned answers are stored in `history.db`.
 
+## Tracker and PM agent
+
+[`docs/TRACKER.md`](docs/TRACKER.md) is the live list of everything open. It has
+four kinds of item:
+- tool bugs (B-)
+- features (F-)
+- tech debt and security (T-)
+- **performance issues found in runs** (P-). Each has a file in `docs/issues/`
+  for a developer to review.
+
+A product-manager agent ([`.claude/agents/product-manager.md`](.claude/agents/product-manager.md))
+keeps the list current.
+
+**After every recorded run** (a capture, a manual session, the end of a stress
+test, or `analyse`), swagperf reviews what is new:
+- **The data half, with no model:** `swagperf triage` turns the new runs' budget
+  breaches, step regressions and ordering violations into signals. Each signal has a
+  stable key, so the same problem in ten runs is one issue, not ten.
+- **A clean run** just moves the tracker's "Runs reviewed through" line on. No model
+  starts.
+- **A run that raised something** starts the agent in the background, through your
+  own Claude Code session (no API key). It opens a `needs-review` issue with first
+  observations, or adds the run to the issue already open for that signal. It never
+  closes an issue and never commits. Its changes show up in `git status`, and the
+  capture log says what it's doing.
+- **To review an issue:** set its `Status:` line to `confirmed`, `dismissed` or
+  `expected` and add a Log line with the reason. You can also tell the agent.
+
+```bash
+perfetto_init triage              # what the runs since the last review raised
+perfetto_init triage --json       # the same, as the agent reads it
+perfetto_init pm status           # is a review running; where is its log
+perfetto_init pm review           # review now, in the background
+```
+
+To use the agent by hand, ask Claude Code to "use the product-manager agent to…",
+e.g. "log this bug", "review new runs", "what should we build next?". It also
+reads screenshots you drop into `.claude/issues/`.
+
+**Switches** (`.env`):
+- `SWAGPERF_PM_AUTOTRIAGE=0` turns the automatic review off. Set it on CI.
+- `SWAGPERF_PM_MODEL` picks the model (default `sonnet`).
+
+Reviews only follow runs in the project's own `history.db`. One review runs at a
+time, and runs recorded during a review get one more pass. Logs are in
+`.claude/pm/logs/`.
+
 ## Install
 
 ```bash
@@ -923,6 +970,9 @@ swagperf/
                   benchmarks, stress tests, Copilot threads and pins
   analyst.py      model backends + deterministic fallback
   copilot.py      the Copilot's answers, computed from the run history
+  triage.py       what new runs raised, as signals for the tracker (no LLM)
+  pm.py           the automatic PM review after each recorded run
+  llm.py          finds the local claude and codex CLIs
   capture.py      on-device capture via adb (one-shot, cold/warm, manual)
   live.py         incremental reads of a trace still being recorded
   jobs.py         background jobs for dashboard-started captures and stress tests
@@ -935,7 +985,9 @@ frontend/         the dashboard's source (React + TypeScript)
 web/dist/         the built dashboard, served by server.py
 web/tokens.html   the token-consumption page
 tests/            117 tests over the pipeline, the store, the server and the Copilot
-docs/             backlog, decisions and plans
+docs/             TRACKER.md (the live list), issues/ (perf issues from runs),
+                  backlog, decisions and plans
+.claude/agents/   the product-manager agent
 ```
 
 ## Adapting it
