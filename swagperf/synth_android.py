@@ -107,7 +107,7 @@ def gen_android_trace(seed=0, *, pkg="com.example.app", cold=True,
     return bytes(out), {"launch_start_ns": launch_start, "first_frame_ns": t, "pkg": pkg}
 
 
-def gen_swagpay_trace(seed=0, *, pkg="com.swagpay", flow=None, regress=None):
+def gen_swagpay_trace(seed=0, *, pkg="com.swag.pay", flow=None, regress=None):
     """Synthetic trace carrying SwagTrace screen/action/nav markers.
 
     Mirrors what the instrumented Swag Pay app emits so `screens.py` can be

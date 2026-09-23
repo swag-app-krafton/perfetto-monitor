@@ -29,12 +29,28 @@ def _read(path):
         return json.load(f)
 
 
+def _is_placeholder(a):
+    """An entry the tool wrote on its own, with nothing a person decided.
+
+    Profiling an unknown package records it as an unlabelled competitor so the
+    run is attributable. That must never *override* a real built-in entry: it
+    is how Swag Pay's own package ended up shown as a nameless competitor --
+    the built-in listed a mistyped package, the real one was auto-added as a
+    placeholder, and the placeholder then won the merge even once the typo was
+    fixed. `auto` marks new placeholders; the name-equals-package test catches
+    ones written before that flag existed.
+    """
+    return bool(a.get("auto")) or a.get("name") == a.get("pkg")
+
+
 def load():
     """Built-in catalogue with any local additions merged in by package name."""
     base = {a["pkg"]: a for a in _read(BUILTIN).get("apps", [])}
     for a in _read(USER).get("apps", []):
         if a.get("_deleted"):
             base.pop(a["pkg"], None)
+            continue
+        if a["pkg"] in base and _is_placeholder(a):
             continue
         base[a["pkg"]] = {**base.get(a["pkg"], {}), **a}
     return sorted(base.values(),
@@ -70,7 +86,8 @@ def save_user(apps):
 
 
 def add(pkg, *, name=None, role="competitor", category=None, vendor=None,
-        region=None, instrumented=False, notes=None, verified=False, budgets=None):
+        region=None, instrumented=False, notes=None, verified=False, budgets=None,
+        auto=False):
     if role not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     cur = _read(USER).get("apps", [])
@@ -78,7 +95,7 @@ def add(pkg, *, name=None, role="competitor", category=None, vendor=None,
     entry = {"pkg": pkg, "name": name or pkg, "role": role,
              "instrumented": bool(instrumented), "verified": bool(verified)}
     for k, v in (("category", category), ("vendor", vendor), ("region", region),
-                 ("notes", notes), ("budgets", budgets)):
+                 ("notes", notes), ("budgets", budgets), ("auto", auto)):
         if v:
             entry[k] = v
     cur.append(entry)

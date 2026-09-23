@@ -90,6 +90,25 @@ class TestRegression(unittest.TestCase):
         self.assertEqual(store.regressions(rid, db=db2), [])
 
 
+class TestRegressionFloor(unittest.TestCase):
+    def test_tiny_absolute_move_is_not_a_regression(self):
+        """process_start 2.61ms -> 6.17ms is +136% and many sigma, and still not
+        something a user can perceive. It used to fail a real device run."""
+        db = os.path.join(tempfile.mkdtemp(), "h.db")
+        c = store.connect(db)
+        ids = []
+        for i, d in enumerate([2.6, 2.5, 2.7, 2.6, 2.55, 2.65, 6.17]):
+            cur = c.execute("insert into runs (ts, path_kind, device) values (?, 'cold', 'x')",
+                            (f"2026-01-0{i+1}",))
+            c.execute("insert into step_metrics (run_id, step, dur_ms) values (?, 'step:process_start', ?)",
+                      (cur.lastrowid, d))
+            ids.append(cur.lastrowid)
+        c.commit(); c.close()
+        self.assertEqual(store.regressions(ids[-1], db=db, use_benchmark=False), [])
+        # The same relative move on a step large enough to matter still fires.
+        self.assertTrue(store.regressions(ids[-1], db=db, use_benchmark=False, min_delta_ms=1.0))
+
+
 class TestOrderingViolation(unittest.TestCase):
     def test_deferred_work_on_critical_path_is_caught(self):
         """A first_run trace judged as returning_user must flag Hermes."""
@@ -262,7 +281,7 @@ class TestGenericAppDerivation(unittest.TestCase):
         """An app the catalogue marks instrumented bypasses derivation entirely."""
         tmp = tempfile.mkdtemp()
         p, _ = _trace(tmp, 700)
-        m = extract_any(p, app_pkg="com.swagpay")
+        m = extract_any(p, app_pkg="com.swag.pay")
         self.assertFalse(m["derived"])
         self.assertEqual(m["startup"]["budget_ms"], 420)
 
@@ -277,7 +296,7 @@ class TestCatalogue(unittest.TestCase):
         catalogue.USER = self._orig_user
 
     def test_own_app_is_instrumented_by_default(self):
-        self.assertTrue(catalogue.is_instrumented("com.swagpay"))
+        self.assertTrue(catalogue.is_instrumented("com.swag.pay"))
 
     def test_add_and_remove_round_trip(self):
         catalogue.add("com.test.app", name="Test App", role="competitor")
@@ -286,9 +305,9 @@ class TestCatalogue(unittest.TestCase):
         self.assertIsNone(catalogue.get("com.test.app"))
 
     def test_remove_can_hide_a_builtin_entry(self):
-        self.assertIsNotNone(catalogue.get("com.swagpay"))
-        catalogue.remove("com.swagpay")
-        self.assertIsNone(catalogue.get("com.swagpay"))
+        self.assertIsNotNone(catalogue.get("com.swag.pay"))
+        catalogue.remove("com.swag.pay")
+        self.assertIsNone(catalogue.get("com.swag.pay"))
 
     def test_competitor_has_no_budgets_unless_explicitly_given(self):
         catalogue.add("com.rival.app", name="Rival", role="competitor")
@@ -757,3 +776,168 @@ class TestHeuristic(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestDeviceTraceAccuracy(unittest.TestCase):
+    """Faults found against a real Android 16 device, each of which produced a
+    plausible-looking wrong number rather than an error."""
+
+    def _fake_rows(self, answers):
+        """Stand in for _rows: return the first answer whose key is in the SQL."""
+        def fake(tp, sql):
+            for key, rows in answers:
+                if key in sql:
+                    return rows
+            return []
+        return fake
+
+    def test_no_frames_is_unmeasured_not_perfect(self):
+        """Zero frames used to report 0% slow -- which read as a clean pass and
+        hid the doFrame naming bug on every device run."""
+        import swagperf.extract as ex
+        real = ex._rows
+        ex._rows = self._fake_rows([("count(*) total", [{"total": 0}])])
+        try:
+            f = ex._frames(object())
+        finally:
+            ex._rows = real
+        self.assertIsNone(f["slow_pct"])
+        self.assertIsNone(f["janky_pct"])
+        self.assertIsNone(f["thermal_drift_pct"])
+
+    def test_frames_match_the_android12_vsync_suffix(self):
+        """Android 12+ names the slice `Choreographer#doFrame <vsync>`."""
+        import swagperf.extract as ex
+        self.assertTrue(ex.DOFRAME.endswith("%"))
+        self.assertTrue("Choreographer#doFrame 5887310".startswith(ex.DOFRAME[:-1]))
+
+    def test_frames_and_memory_are_scoped_to_the_app(self):
+        """Unscoped, peak RAM was system_server's 803MB and growth subtracted one
+        process's minimum from another process's maximum."""
+        import swagperf.extract as ex
+        seen = []
+        real = ex._rows
+        def fake(tp, sql):
+            seen.append(sql)
+            return [{"total": 0}] if "count(*) total" in sql else [{"mx": 1, "mn": 1}]
+        ex._rows = fake
+        try:
+            ex._frames(object(), upids=[1223])
+            ex._memory(object(), upids=[1223])
+        finally:
+            ex._rows = real
+        self.assertTrue(any("th.upid in (1223)" in q for q in seen))
+        self.assertTrue(any("t.upid in (1223)" in q for q in seen))
+
+    def test_short_trace_has_no_drift(self):
+        """Too few sustained frames is too short a window to see throttling."""
+        import swagperf.extract as ex
+        real = ex._rows
+        ex._rows = self._fake_rows([
+            ("count(*) total", [{"total": 50, "slow": 0, "janky": 0,
+                                 "avg_dur": 5_000_000, "max_dur": 9_000_000}]),
+            ("first_half", [{"first_half": 30e6, "second_half": 5e6, "n": 40}]),
+        ])
+        try:
+            f = ex._frames(object())
+        finally:
+            ex._rows = real
+        self.assertIsNone(f["thermal_drift_pct"])
+
+
+class TestCataloguePlaceholders(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self._orig = catalogue.USER
+        catalogue.USER = os.path.join(self.tmp, "apps.local.json")
+
+    def tearDown(self):
+        catalogue.USER = self._orig
+
+    def test_auto_added_placeholder_never_overrides_a_builtin(self):
+        """How Swag Pay itself came to be listed as a nameless competitor."""
+        catalogue.add("com.swag.pay", name="com.swag.pay", role="competitor", auto=True)
+        a = catalogue.get("com.swag.pay")
+        self.assertEqual(a["role"], "own")
+        self.assertEqual(a["name"], "Swag Pay")
+        self.assertTrue(a["instrumented"])
+
+    def test_legacy_placeholder_without_flag_is_also_ignored(self):
+        """Placeholders written before `auto` existed have name == pkg."""
+        catalogue.save_user([{"pkg": "com.swag.pay", "name": "com.swag.pay",
+                              "role": "competitor"}])
+        self.assertEqual(catalogue.get("com.swag.pay")["role"], "own")
+
+    def test_a_deliberate_local_override_still_wins(self):
+        catalogue.add("com.swag.pay", name="Swag Pay (dogfood)", role="own",
+                      budgets={"ttid_ms": 380})
+        self.assertEqual(catalogue.get("com.swag.pay")["budgets"]["ttid_ms"], 380)
+
+
+class TestBreachSeverity(unittest.TestCase):
+    def _m(self, breaches):
+        return {"ordering_violations": [], "breaches": breaches}
+
+    def test_far_over_budget_fails(self):
+        """A 4x RAM-growth breach used to read WARN: every breach was 'medium'."""
+        res = analyst.heuristic(self._m([
+            {"metric": "rss_growth_mb", "value": 256.0, "budget": 60, "over_by_pct": 326.7},
+            {"metric": "janky_frame_pct", "value": 0.52, "budget": 0.5, "over_by_pct": 4.0},
+        ]), [])
+        self.assertEqual(res["verdict"], "fail")
+        self.assertTrue(res["headline"].startswith("RAM growth over budget"))
+        self.assertIn("+1 more", res["headline"])
+
+    def test_marginal_breach_only_warns(self):
+        res = analyst.heuristic(self._m([
+            {"metric": "janky_frame_pct", "value": 0.52, "budget": 0.5, "over_by_pct": 4.0},
+        ]), [])
+        self.assertEqual(res["verdict"], "warn")
+
+    def test_clean_run_headline_says_so(self):
+        res = analyst.heuristic(self._m([]), [])
+        self.assertEqual(res["verdict"], "pass")
+        self.assertIn("within budget", res["headline"])
+
+
+class TestAppProcessResolution(unittest.TestCase):
+    """The app's process must be found, and if it cannot be, nothing may be
+    silently measured across the whole device instead."""
+
+    def test_falls_back_to_the_process_that_emitted_markers(self):
+        import swagperf.extract as ex
+        real = ex._rows
+        ex._rows = lambda tp, sql: [] if "from process where name" in sql else [{"upid": 42}]
+        try:
+            self.assertEqual(ex._app_upids(object(), "com.swag.pay"), [42])
+        finally:
+            ex._rows = real
+
+    def test_named_process_wins(self):
+        import swagperf.extract as ex
+        real = ex._rows
+        ex._rows = lambda tp, sql: [{"upid": 7}] if "from process where name" in sql else [{"upid": 42}]
+        try:
+            self.assertEqual(ex._app_upids(object(), "com.swag.pay"), [7])
+        finally:
+            ex._rows = real
+
+    def test_unfound_app_is_unmeasured_not_device_wide(self):
+        import swagperf.extract as ex
+        f = ex._unmeasured_frames()
+        self.assertIsNone(f["slow_pct"])
+        self.assertIsNone(f["thermal_drift_pct"])
+
+
+class TestLeanManualConfig(unittest.TestCase):
+    def test_no_unread_high_volume_sources(self):
+        """cpu_idle / cpu_frequency / camera / binder filled 975MB in 4 minutes."""
+        from swagperf.capture import MANUAL_CONFIG
+        for noisy in ("power/cpu_idle", "power/cpu_frequency", '"camera"', '"binder_driver"', '"freq"'):
+            self.assertNotIn(noisy, MANUAL_CONFIG)
+
+    def test_keeps_what_extraction_reads(self):
+        from swagperf.capture import MANUAL_CONFIG
+        for needed in ("sched/sched_switch", "task/task_newtask", "task/task_rename",
+                       '"view"', '"am"', "atrace_apps", "frametimeline", "process_stats"):
+            self.assertIn(needed, MANUAL_CONFIG)

@@ -3,7 +3,7 @@
   "_note": "Package names marked verified:false were seeded from memory and should be confirmed against a real device with `swagperf apps discover`. Play Store listings and package names drift.",
   "apps": [
     {
-      "pkg": "com.swagpay", "name": "Swag Pay", "role": "own",
+      "pkg": "com.swag.pay", "name": "Swag Pay", "role": "own",
       "category": "upi_payments", "vendor": "KRAFTON", "region": "IN",
       "instrumented": true, "verified": true,
       "budgets": {"ttid_ms": 420},

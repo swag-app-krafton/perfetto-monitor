@@ -76,7 +76,7 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
             if not app:
                 _log(jid, f"{pkg} is not in the catalogue yet; recording it as an "
                           "unlabelled competitor so this run is still attributable.")
-                catalogue.add(pkg, name=pkg, role="competitor")
+                catalogue.add(pkg, name=pkg, role="competitor", auto=True)
 
             out = f"traces/{pkg}_{'cold' if cold else 'warm'}_{jid}.pftrace"
             _log(jid, f"{'force-stopping and cold-launching' if cold else 'capturing warm'} "
@@ -163,7 +163,7 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
                 raise RuntimeError("No adb device connected.")
             dev_label = info.get("model") or info.get("device")
             if not catalogue.get(pkg):
-                catalogue.add(pkg, name=pkg, role="competitor")
+                catalogue.add(pkg, name=pkg, role="competitor", auto=True)
 
             stress_id = store.stress_create(
                 app_pkg=pkg, device=dev_label, label=label, sessions=sessions,
@@ -264,7 +264,7 @@ def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
             m = ex.extract_any(out, app_pkg=app_pkg)
             pkg = m.get("app_pkg") or app_pkg
             if pkg and not catalogue.get(pkg):
-                catalogue.add(pkg, name=pkg, role="competitor")
+                catalogue.add(pkg, name=pkg, role="competitor", auto=True)
 
             # A manual session is driven by hand, so it legitimately may contain
             # no launch at all -- the user may have traced an already-open app.
