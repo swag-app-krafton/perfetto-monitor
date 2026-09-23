@@ -63,6 +63,40 @@ def device_info(serial=None):
             "release": prop("ro.build.version.release")}
 
 
+def device_health(serial=None):
+    """Battery level, battery temperature and the on-device Perfetto version.
+
+    Best-effort: each is a separate adb call, and any one failing leaves that
+    field None rather than failing device detection. Temperature is the
+    battery's, which is what Android exposes without root and is a fair proxy
+    for how hot the phone is before a run.
+    """
+    devs = devices()
+    if not devs:
+        return {}
+    serial = serial or devs[0]
+
+    def sh(cmd):
+        try:
+            return subprocess.run(["adb", "-s", serial, "shell", cmd],
+                                  capture_output=True, text=True, timeout=10).stdout
+        except (subprocess.SubprocessError, OSError):
+            return ""
+
+    out = {"battery_pct": None, "battery_temp_c": None, "perfetto_version": None}
+    for line in sh("dumpsys battery").splitlines():
+        k, _, v = line.strip().partition(":")
+        v = v.strip()
+        if k == "level" and v.isdigit():
+            out["battery_pct"] = int(v)
+        elif k == "temperature" and v.lstrip("-").isdigit():
+            out["battery_temp_c"] = int(v) / 10
+    ver = sh("perfetto --version").strip().splitlines()
+    if ver:
+        out["perfetto_version"] = ver[0].replace("Perfetto", "").strip() or None
+    return out
+
+
 def force_stop(pkg, serial=None):
     serial = serial or (devices() or [None])[0]
     subprocess.run(["adb", "-s", serial, "shell", "am", "force-stop", pkg],

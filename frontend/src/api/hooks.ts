@@ -21,6 +21,7 @@ export const keys = {
   stressList: ['stress'] as const,
   stress: (id: number) => ['stress', id] as const,
   job: (id: string) => ['job', id] as const,
+  jobs: ['jobs'] as const,
 }
 
 export const useHistory = () =>
@@ -69,11 +70,13 @@ export const useStressList = () =>
     queryFn: () => api.get<{ stress_tests: StressTest[] }>('/api/stress').then((r) => r.stress_tests),
   })
 
-export const useStress = (id: number | null) =>
+/** One stress test. `live` polls while its sessions are still landing. */
+export const useStress = (id: number | null, live = false) =>
   useQuery({
     queryKey: keys.stress(id ?? -1),
     queryFn: () => api.get<StressTest>(`/api/stress?id=${id}`),
     enabled: id != null,
+    refetchInterval: live ? 1_500 : false,
   })
 
 /** Polls a background job until it finishes. */
@@ -108,3 +111,12 @@ export const startStress = (v: { pkg: string; sessions: number; cold: boolean; d
 export const manualStart = (v: { pkg: string; cold: boolean }) => api.post('/api/manual/start', v)
 export const manualStop = (v: { pkg: string }) => api.post<{ job_id: string }>('/api/manual/stop', v)
 export const manualAbort = () => api.post('/api/manual/abort')
+
+/** Recent background jobs, so a page can find its running job again after a
+ *  tab change or a reload. Polls only while one is still running. */
+export const useRecentJobs = () =>
+  useQuery({
+    queryKey: keys.jobs,
+    queryFn: () => api.get<{ jobs: (Job & { kind: string; pkg?: string; started: number; duration_ms?: number; cold?: boolean })[] }>('/api/jobs').then((r) => r.jobs),
+    refetchInterval: (q) => (q.state.data?.some((j) => j.state === 'queued' || j.state === 'running') ? 1_500 : false),
+  })

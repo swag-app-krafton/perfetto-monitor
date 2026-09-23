@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { useScreens } from '@/api/hooks'
 import type { Run, ScreenSummary, ScreensPayload } from '@/api/types'
 import {
@@ -45,7 +46,9 @@ type VisitMetric = (typeof METRIC_OPTS)[number]['value']
 export function ScreensPage() {
   const { scope, isLoading } = useScope()
   const traced = useMemo(() => (scope?.allRuns ?? []).filter((r) => r.trace_path), [scope])
-  const [pick, setPick] = useState<number | null>(null)
+  const [params] = useSearchParams()
+  // Manual's "Open run" lands here with ?run=<id>.
+  const [pick, setPick] = useState<number | null>(() => Number(params.get('run')) || null)
   const [view, setView] = useState<'usage' | 'launch'>('usage')
   const runId = pick ?? traced[traced.length - 1]?.id ?? null
   const q = useScreens(runId)
