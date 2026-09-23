@@ -941,3 +941,183 @@ class TestLeanManualConfig(unittest.TestCase):
         for needed in ("sched/sched_switch", "task/task_newtask", "task/task_rename",
                        '"view"', '"am"', "atrace_apps", "frametimeline", "process_stats"):
             self.assertIn(needed, MANUAL_CONFIG)
+
+
+class TestDeviceShapedSession(unittest.TestCase):
+    """End-to-end on a trace shaped like a real device capture: every process
+    on the phone, Android 12+ frame names, FrameTimeline, per-process RSS and
+    scheduler data. The generator returns the answers it built in, so these
+    check numbers, not just that something came out."""
+
+    @classmethod
+    def setUpClass(cls):
+        from swagperf.synth_android import gen_device_session
+        from swagperf.screens import extract_screens
+        cls.bytes, cls.exp = gen_device_session(3)
+        cls.path = os.path.join(tempfile.mkdtemp(), "device.pftrace")
+        with open(cls.path, "wb") as fh:
+            fh.write(cls.bytes)
+        cls.m = extract_any(cls.path, app_pkg="com.swag.pay")
+        cls.d = extract_screens(cls.path, use_cache=False)
+
+    def test_frames_are_the_apps_own(self):
+        """system_server renders slow frames all session; none may count."""
+        self.assertEqual(self.m["frames"]["total"], self.exp["frames"])
+        self.assertEqual(self.m["frames"]["slow"], self.exp["slow"])
+
+    def test_ram_is_the_apps_not_system_servers(self):
+        self.assertEqual(self.m["memory"]["rss"]["peak_mb"], self.exp["app_rss_peak_mb"])
+        self.assertLess(self.m["memory"]["rss"]["peak_mb"], self.exp["sys_rss_mb"])
+
+    def test_drift_is_unmeasured_when_screens_change(self):
+        self.assertIsNone(self.m["frames"]["thermal_drift_pct"])
+
+    def test_app_jank_is_split_from_buffer_stuffing(self):
+        j = {r["route"]: r["jank"] for r in self.d["screen_summary"]}
+        self.assertEqual(j["Send"]["app"], self.exp["app_jank"]["Send"])
+        self.assertEqual(j["History"]["buffer_stuffing"], self.exp["stuffing"]["History"])
+        self.assertEqual(j["History"]["app"], 0)
+        self.assertEqual(j["Home"]["app"], 0)
+
+    def test_transitions_listed_once_and_costed_to_first_frame(self):
+        """Each is emitted twice (plain and kind-tagged) at the same instant."""
+        got = {(n["from"], n["to"]): n for n in self.d["navigations"]}
+        self.assertEqual(set(got), set(self.exp["transitions"]))
+        for key, ms in self.exp["transitions"].items():
+            self.assertEqual(got[key]["count"], 1)
+            self.assertAlmostEqual(got[key]["median_ms"], ms, delta=1.0)
+
+    def test_timeline_follows_the_app(self):
+        tl = self.d["timeline"]
+        self.assertEqual(max(r[1] for r in tl["rss"]), self.exp["app_rss_peak_mb"])
+        self.assertAlmostEqual(max(c[1] for c in tl["cpu"]), 60.0, delta=5.0)
+        # Same clock as the visits, so the dashboard can overlay them directly.
+        first_visit = self.d["screens"][0]["start_ms"]
+        self.assertLess(abs(tl["rss"][0][0] - first_visit), 1000)
+
+    def test_per_screen_cpu_follows_the_work(self):
+        cpu = {}
+        for v in self.d["screens"]:
+            cpu.setdefault(v["route"], v["cpu_pct_of_wall"])
+        self.assertGreater(cpu["Home"], cpu["Send"])
+        self.assertGreater(cpu["Send"], cpu["Store"])
+
+    def test_stack_depth_from_push_and_pop(self):
+        self.assertEqual([v["depth"] for v in self.d["screens"]], [1, 2, 1, 1, 1])
+
+    def test_unknown_package_is_unmeasured_not_device_wide(self):
+        """An app the trace does not contain must not borrow system_server's numbers."""
+        m = extract_any(self.path, app_pkg="com.not.installed")
+        self.assertNotEqual(m["memory"].get("rss", {}).get("peak_mb"), self.exp["sys_rss_mb"])
+        self.assertIsNone(m["frames"]["slow_pct"])
+
+
+class TestLiveTrace(unittest.TestCase):
+    """Reading a trace that is still being written, a chunk per poll."""
+
+    def test_holds_back_a_partial_packet(self):
+        from swagperf.live import packet_starts
+        from swagperf.synth import packet, slice_begin
+        whole = slice_begin(10, 1, "screen:Home") + slice_begin(20, 1, "screen:Send")
+        starts, cut = packet_starts(whole + whole[:5])
+        self.assertEqual(cut, len(whole))
+        self.assertEqual(len(starts), 2)
+
+    def _replay(self, data, step, lead):
+        from swagperf.live import LiveTrace
+        from swagperf.screens import marker_rows
+        lt = LiveTrace(lambda off: data[off:off + step], marker_rows, lead_bytes=lead)
+        rows = []
+        for _ in range(len(data) // step + 3):
+            rows = lt.poll()
+        return lt, rows
+
+    def test_chunked_replay_matches_a_full_parse(self):
+        """Replayed in small polls, every marker arrives exactly once."""
+        from swagperf.synth_android import gen_device_session
+        from swagperf.screens import marker_rows
+        data, _ = gen_device_session(4)
+        p = os.path.join(tempfile.mkdtemp(), "d.pftrace")
+        with open(p, "wb") as fh:
+            fh.write(data)
+        full = sorted((n, t) for n, t, _ in marker_rows(p))
+        # Each poll spawns the trace reader (~1s), so the steps are sized to
+        # cross many packet boundaries without running a hundred polls.
+        for step in (8 * 1024, 32 * 1024):
+            _, rows = self._replay(data, step, lead=4 * 1024)
+            self.assertEqual(sorted((n, t) for n, t, _ in rows), full)
+
+    def test_reset_starts_a_new_session(self):
+        from swagperf.synth_android import gen_device_session
+        data, _ = gen_device_session(5)
+        lt, rows = self._replay(data, 64 * 1024, lead=8 * 1024)
+        self.assertTrue(rows)
+        lt.reset()
+        self.assertEqual((lt.offset, lt.rows), (0, {}))
+
+    def test_screen_durations_derived_across_chunks(self):
+        """A screen that opened in an earlier chunk never shows its close."""
+        from swagperf.screens import summarise_markers
+        rows = [("screen:Home#native_view", 0, -1),
+                ("screen:Send#compose", 2_000_000_000, -1),
+                ("screen:Home#native_view", 3_500_000_000, -1)]
+        s = summarise_markers(rows)
+        durs = [e["duration_ms"] for e in s["events"]]
+        self.assertEqual(durs, [2000.0, 1500.0, None])
+        self.assertEqual(s["current_screen"], "Home")
+        self.assertEqual(s["current_screen_kind"], "Native view")
+
+
+class TestZygoteNamedApp(unittest.TestCase):
+    """A capture that missed the app's rename leaves it named `zygote64`."""
+
+    @classmethod
+    def setUpClass(cls):
+        from swagperf.synth_android import gen_device_session
+        cls.bytes, cls.exp = gen_device_session(6, process_name="zygote64")
+        cls.path = os.path.join(tempfile.mkdtemp(), "zygote.pftrace")
+        with open(cls.path, "wb") as fh:
+            fh.write(cls.bytes)
+
+    def test_instrumented_app_is_found_by_its_markers(self):
+        m = extract_any(self.path, app_pkg="com.swag.pay")
+        self.assertEqual(m["memory"]["rss"]["peak_mb"], self.exp["app_rss_peak_mb"])
+        self.assertEqual(m["frames"]["total"], self.exp["frames"])
+
+    def test_other_package_does_not_borrow_those_markers(self):
+        m = extract_any(self.path, app_pkg="com.not.installed")
+        self.assertIsNone(m["memory"].get("rss"))
+        self.assertIsNone(m["frames"]["slow_pct"])
+
+
+class TestLiveServerFallback(unittest.TestCase):
+    """If the phone cannot serve partial reads, the feed must still work."""
+
+    def test_misaligned_read_falls_back_to_full_copy(self):
+        import shutil
+        import swagperf.capture as cap
+        import swagperf.server as srv
+        from swagperf.synth_android import gen_device_session
+        data, _ = gen_device_session(7)
+        p = os.path.join(tempfile.mkdtemp(), "live.pftrace")
+        with open(p, "wb") as fh:
+            fh.write(data)
+        saved = (cap.manual_status, cap.manual_remote_size, cap.manual_read_from,
+                 cap.manual_snapshot, srv._live, srv._LIVE_TTL_S)
+        try:
+            cap.manual_status = lambda serial=None: {"device": True, "recording": True}
+            cap.manual_remote_size = lambda serial=None: len(data)
+            # A tail that ignores the offset: bytes from mid-packet.
+            cap.manual_read_from = lambda off, serial=None, max_bytes=0: data[7:4096]
+            cap.manual_snapshot = lambda out, serial=None: shutil.copy(p, out)
+            srv._live, srv._LIVE_TTL_S = None, 0
+            srv._live_reset()
+            out = srv._live_markers()
+            self.assertEqual(out.get("mode"), "full-copy fallback")
+            self.assertTrue(out["counts"].get("screen"))
+            srv._live_reset()
+            self.assertTrue(srv._live_mode["incremental"])
+        finally:
+            (cap.manual_status, cap.manual_remote_size, cap.manual_read_from,
+             cap.manual_snapshot, srv._live, srv._LIVE_TTL_S) = saved
+            srv._live_reset()
