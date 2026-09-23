@@ -16,6 +16,8 @@ interface UiState {
   path: string
   range: RangeKey
   copilot: { open: boolean; maximised: boolean; width: number }
+  /** A prompt a page asked the Copilot to send ("Ask Copilot why"). */
+  copilotPrompt: { id: number; text: string } | null
   toast: { id: number; text: string } | null
 
   setTheme: (t: Theme) => void
@@ -25,6 +27,7 @@ interface UiState {
   setFilters: (f: Partial<Pick<UiState, 'app' | 'path' | 'range'>>) => void
   setCopilot: (c: Partial<UiState['copilot']>) => void
   showToast: (text: string) => void
+  askCopilot: (text: string) => void
 }
 
 export const COPILOT_MIN = 340
@@ -41,6 +44,7 @@ export const useUi = create<UiState>()(
       range: '30',
       copilot: { open: false, maximised: false, width: 400 },
       toast: null,
+      copilotPrompt: null,
 
       setTheme: (theme) => set({ theme }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
@@ -54,6 +58,8 @@ export const useUi = create<UiState>()(
           return { copilot: next }
         }),
       showToast: (text) => set({ toast: { id: Date.now(), text } }),
+      askCopilot: (text) =>
+        set((s) => ({ copilot: { ...s.copilot, open: true }, copilotPrompt: { id: Date.now(), text } })),
     }),
     {
       name: 'swagperf-ui',
