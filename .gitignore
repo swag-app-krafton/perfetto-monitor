@@ -10,3 +10,7 @@ issues_screenshots/
 # the shared agent definitions are committed.
 .claude/*
 !.claude/agents/
+# Phase 0 experiment: its dependencies and its captures
+experiments/*/node_modules/
+experiments/*/results/
+flashlight/node_modules/
