@@ -1,6 +1,11 @@
 """Optional on-device capture via adb. Analysis never depends on this."""
-import subprocess, time, os, shlex
+import os, re, shlex, subprocess, time
 
+# android.packages_list records installed packages' version codes in the
+# trace, so a trace names the app build it measured even when analysed away
+# from the device. No package filter: an unknown config field would make an
+# older Perfetto reject the whole config, while an unknown data source is
+# simply ignored.
 CONFIG = """
 buffers: {{ size_kb: 131072 fill_policy: RING_BUFFER }}
 buffers: {{ size_kb: 8192 fill_policy: DISCARD }}
@@ -21,6 +26,7 @@ data_sources: {{
 data_sources: {{ config {{ name: "linux.process_stats"
   process_stats_config {{ scan_all_processes_on_start: true proc_stats_poll_ms: 1000 }} }} }}
 data_sources: {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
+data_sources: {{ config {{ name: "android.packages_list" }} }}
 duration_ms: {dur}
 """
 
@@ -95,6 +101,156 @@ def device_health(serial=None):
     if ver:
         out["perfetto_version"] = ver[0].replace("Perfetto", "").strip() or None
     return out
+
+
+# ------------------------------------------------------------ run metadata
+#
+# What a run was measured on, recorded with the run. Each reading is a parser
+# over one adb command's output, kept pure so it can be tested without a
+# device; `run_metadata` runs the commands. Any one failing leaves its fields
+# out rather than failing the capture.
+
+def parse_getprop(text):
+    """`getprop` prints `[key]: [value]` per line."""
+    out = {}
+    for line in text.splitlines():
+        m = re.match(r"\[(.+?)\]: \[(.*)\]", line.strip())
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def device_from_props(props):
+    g = lambda k: props.get(k) or None
+    soc = " ".join(x for x in (g("ro.soc.manufacturer"), g("ro.soc.model")) if x) or None
+    return {k: v for k, v in {
+        "manufacturer": g("ro.product.manufacturer"),
+        "brand": g("ro.product.brand"),
+        "model": g("ro.product.model"),
+        "market_name": g("ro.product.marketname") or g("ro.vendor.vivo.market.name") or g("ro.config.marketing_name"),
+        "codename": g("ro.product.device"),
+        "android_release": g("ro.build.version.release"),
+        "sdk": int(props["ro.build.version.sdk"]) if (props.get("ro.build.version.sdk") or "").isdigit() else None,
+        "security_patch": g("ro.build.version.security_patch"),
+        "build_id": g("ro.build.display.id") or g("ro.build.id"),
+        "build_type": g("ro.build.type"),
+        "fingerprint": g("ro.build.fingerprint"),
+        "soc": soc,
+        "hardware": g("ro.hardware"),
+        "abi": g("ro.product.cpu.abi"),
+    }.items() if v is not None}
+
+
+def parse_dumpsys_package(text, pkg):
+    """App version and install facts from `dumpsys package <pkg>`. Only the
+    section for `pkg` is read: the output also lists other packages that
+    reference it (shared users, queries)."""
+    start = text.find(f"Package [{pkg}]")
+    if start < 0:
+        return {}
+    sec = text[start:]
+    nxt = re.search(r"\n\s*Package \[", sec[1:])
+    if nxt:
+        sec = sec[:nxt.start() + 1]
+    def first(pattern):
+        m = re.search(pattern, sec)
+        return m.group(1).strip() if m else None
+    code = first(r"versionCode=(\d+)")
+    flags = first(r"\bflags=\[([^\]]*)\]") or ""
+    out = {
+        "version_name": first(r"versionName=(\S+)"),
+        "version_code": int(code) if code else None,
+        "min_sdk": int(v) if (v := first(r"minSdk=(\d+)")) else None,
+        "target_sdk": int(v) if (v := first(r"targetSdk=(\d+)")) else None,
+        "first_install": first(r"firstInstallTime=([^\n]+)"),
+        "last_update": first(r"lastUpdateTime=([^\n]+)"),
+        "installer": first(r"installerPackageName=(\S+)") or first(r"installInitiatingPackageName=(\S+)"),
+        "debuggable": "DEBUGGABLE" in flags.split(),
+    }
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def parse_battery(text):
+    kv = {}
+    for line in text.splitlines():
+        k, _, v = line.strip().partition(":")
+        kv[k.strip()] = v.strip()
+    out = {}
+    if kv.get("level", "").isdigit():
+        out["battery_pct"] = int(kv["level"])
+    if kv.get("temperature", "").lstrip("-").isdigit():
+        out["battery_temp_c"] = int(kv["temperature"]) / 10
+    plugged = [src for src, key in (("AC", "AC powered"), ("USB", "USB powered"), ("wireless", "Wireless powered"))
+               if kv.get(key) == "true"]
+    if any(k in kv for k in ("AC powered", "USB powered")):
+        out["charging"] = " + ".join(plugged) if plugged else "not charging"
+    return out
+
+
+THERMAL = {0: "none", 1: "light", 2: "moderate", 3: "severe", 4: "critical", 5: "emergency", 6: "shutdown"}
+
+
+def parse_thermal(text):
+    m = re.search(r"Thermal Status:\s*(\d+)", text)
+    return {"thermal_status": THERMAL.get(int(m.group(1)), m.group(1))} if m else {}
+
+
+def parse_meminfo(text):
+    m = re.search(r"MemTotal:\s*(\d+)\s*kB", text)
+    return {"ram_gb": round(int(m.group(1)) / 1024 / 1024, 1)} if m else {}
+
+
+def parse_display(size_text, density_text, display_text=""):
+    out = {}
+    sizes = re.findall(r"(Physical|Override) size:\s*(\d+x\d+)", size_text)
+    if sizes:
+        out["screen"] = dict(sizes).get("Override") or dict(sizes)["Physical"]
+    dens = re.findall(r"(Physical|Override) density:\s*(\d+)", density_text)
+    if dens:
+        out["density_dpi"] = int(dict(dens).get("Override") or dict(dens)["Physical"])
+    # The highest rate the display offers (its modes list them); the current
+    # rate moves with what is on screen.
+    rates = [float(r) for r in re.findall(r"(?:refreshRate|fps)[=:\s]+(\d+(?:\.\d+)?)", display_text, re.I)]
+    if rates:
+        out["refresh_hz"] = round(max(rates))
+    return out
+
+
+def run_metadata(pkg=None, serial=None):
+    """Device and app details at the moment a run is captured: the device's
+    identity and build, its state (battery, temperature, thermal status), and
+    the app's version and install. Best-effort throughout."""
+    devs = devices()
+    if not devs:
+        return {}
+    serial = serial or devs[0]
+
+    def sh(cmd, timeout=15):
+        try:
+            return subprocess.run(["adb", "-s", serial, "shell", cmd],
+                                  capture_output=True, text=True, timeout=timeout).stdout
+        except (subprocess.SubprocessError, OSError):
+            return ""
+
+    device = {"serial": serial, **device_from_props(parse_getprop(sh("getprop")))}
+    device.update(parse_meminfo(sh("cat /proc/meminfo")))
+    cores = sh("nproc").strip()
+    if cores.isdigit():
+        device["cpu_cores"] = int(cores)
+    device.update(parse_display(sh("wm size"), sh("wm density"), sh("dumpsys display | grep -m 5 -iE 'refreshRate|fps='")))
+    state = {**parse_battery(sh("dumpsys battery")), **parse_thermal(sh("dumpsys thermalservice"))}
+    ver = sh("perfetto --version").strip().splitlines()
+    if ver:
+        state["perfetto_version"] = ver[0].replace("Perfetto", "").strip() or None
+    out = {"device": device, "state": state, "source": "device", "recorded_at": _utc_now()}
+    if pkg:
+        out["app"] = {"package": pkg, **parse_dumpsys_package(sh(f"dumpsys package {pkg}", timeout=20), pkg)}
+    return out
+
+
+def _utc_now():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def force_stop(pkg, serial=None):
@@ -217,6 +373,7 @@ data_sources: {{ config {{ name: "linux.sys_stats"
   sys_stats_config {{ stat_period_ms: 500 stat_counters: STAT_CPU_TIMES
     stat_counters: STAT_FORK_COUNT meminfo_period_ms: 500 }} }} }}
 data_sources: {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
+data_sources: {{ config {{ name: "android.packages_list" }} }}
 """
 
 

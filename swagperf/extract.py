@@ -3,6 +3,8 @@
 No LLM involvement. Everything here is measurement: TraceProcessor SQL in,
 a typed metrics dict out. The LLM only ever sees this output, never a raw trace.
 """
+import re
+
 from perfetto.trace_processor import TraceProcessor
 from .budgets import (FRAME_NS, ORDERING_TOLERANCE_MS, STEP_BUDGETS_MS, GLOBAL_BUDGETS, DEFERRED_STEPS,
                       CRITICAL_PATH_RETURNING, CRITICAL_PATH_FIRST_RUN)
@@ -467,3 +469,62 @@ def _extract(tp, path_kind, pkg=None):
         "budget_checks": checks,
         "breaches": breaches,
     }
+
+
+# ------------------------------------------------------------ trace metadata
+
+def parse_fingerprint(fp):
+    """`brand/product/device:release/build_id/incremental:type/tags`."""
+    m = re.match(r"([^/]+)/([^/]+)/([^:]+):([^/]+)/([^/]+)/([^:]+):([^/]+)/", fp or "")
+    if not m:
+        return {}
+    brand, product, codename, release, build_id, _incr, build_type = m.groups()
+    return {"brand": brand, "product": product, "codename": codename,
+            "android_release": release, "build_id": build_id, "build_type": build_type}
+
+
+def trace_metadata(trace_path, app_pkg=None):
+    """What the trace itself says about where it was recorded: the device's
+    build, SoC and kernel, the Perfetto version, and the trace's own size and
+    length. When the trace carries the package list, the app's version code
+    too. This is how a run recorded before capture-time metadata existed
+    still gets its device details."""
+    tp = TraceProcessor(trace=trace_path)
+    try:
+        meta = {r.name: (r.str_value if r.str_value is not None else r.int_value)
+                for r in tp.query("select name, str_value, int_value from metadata")}
+        app = {}
+        if app_pkg:
+            try:
+                row = next(iter(tp.query(
+                    "select version_code, debuggable from package_list "
+                    f"where package_name = '{app_pkg.replace(chr(39), '')}' limit 1")), None)
+                if row is not None:
+                    app = {"package": app_pkg, "version_code": row.version_code,
+                           "debuggable": bool(row.debuggable)}
+            except Exception:
+                pass  # older trace processors have no package_list table
+    finally:
+        tp.close()
+    fp = meta.get("android_build_fingerprint")
+    device = {k: v for k, v in {
+        "manufacturer": meta.get("android_device_manufacturer"),
+        **parse_fingerprint(fp),
+        "sdk": meta.get("android_sdk_version"),
+        "soc": meta.get("android_soc_model"),
+        "fingerprint": fp,
+        "kernel": meta.get("system_release"),
+        "abi": meta.get("system_machine"),
+    }.items() if v not in (None, "")}
+    started, stopped = meta.get("tracing_started_ns"), meta.get("tracing_disabled_ns")
+    trace = {k: v for k, v in {
+        "perfetto_version": (meta.get("tracing_service_version") or "").replace("Perfetto", "").replace("(N/A)", "").strip() or None,
+        "size_mb": round(meta["trace_size_bytes"] / 1e6, 1) if meta.get("trace_size_bytes") else None,
+        "duration_s": round((stopped - started) / 1e9, 1) if started and stopped and stopped > started else None,
+        "utc_offset_min": meta.get("timezone_off_mins"),
+        "uuid": meta.get("trace_uuid"),
+    }.items() if v is not None}
+    out = {"device": device, "trace": trace, "source": "trace"}
+    if app:
+        out["app"] = app
+    return out

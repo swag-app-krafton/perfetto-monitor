@@ -50,6 +50,16 @@ def recent(limit=10):
         return sorted(_JOBS.values(), key=lambda j: -j["started"])[:limit]
 
 
+def _run_metadata(cap, pkg, device, moment):
+    """Device, device state and app version to record with a run. Never fails
+    the capture: a device that answers nothing just leaves the run without."""
+    try:
+        meta = cap.run_metadata(pkg, device)
+    except Exception:
+        return None
+    return {**meta, "moment": moment} if meta else None
+
+
 def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=False,
                   device=None):
     """Validate inputs, then run capture + extract + record on a background
@@ -78,6 +88,7 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
                           "unlabelled competitor so this run is still attributable.")
                 catalogue.add(pkg, name=pkg, role="competitor", auto=True)
 
+            meta = _run_metadata(cap, pkg, device, "before capture")
             out = f"traces/{pkg}_{'cold' if cold else 'warm'}_{jid}.pftrace"
             _log(jid, f"{'force-stopping and cold-launching' if cold else 'capturing warm'} "
                       f"{pkg} for {duration_ms}ms…")
@@ -110,7 +121,7 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
 
             dev_label = info.get("model") or info.get("device")
             rid = store.record(m, label=label or f"{'cold' if cold else 'warm'}-capture",
-                               device=dev_label, trace_path=out, app_pkg=m.get("app_pkg"))
+                               device=dev_label, trace_path=out, app_pkg=m.get("app_pkg"), meta=meta)
             _log(jid, f"recorded as run {rid} ({m['path_kind']})")
 
             from .cli import _analyse_run
@@ -179,6 +190,9 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
                 _set(jid, progress={"current": i, "total": sessions})
                 out = f"traces/stress{stress_id}_{pkg}_{i:02d}.pftrace"
                 try:
+                    # Per session: battery temperature and thermal state move
+                    # over a run of back-to-back cold starts.
+                    meta = _run_metadata(cap, pkg, device, "before capture")
                     cap.capture(out, pkg=pkg, duration_ms=duration_ms, cold=cold,
                                 serial=device)
                     m = ex.extract_any(out, app_pkg=pkg)
@@ -189,7 +203,7 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
                         raise RuntimeError(fatal[0])
                     rid = store.record(
                         m, label=f"stress{stress_id}-s{i:02d}", device=dev_label,
-                        trace_path=out, app_pkg=m.get("app_pkg"))
+                        trace_path=out, app_pkg=m.get("app_pkg"), meta=meta)
                     from .cli import _analyse_run
                     _analyse_run(rid, m, use_llm=use_llm)
                     ttid = m["startup"]["time_to_first_camera_frame_ms"]
@@ -273,9 +287,10 @@ def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
             for p in problems:
                 _log(jid, "note: " + p)
 
+            meta = _run_metadata(cap, pkg, device, "end of session")
             rid = store.record(m, label=label or "manual-session",
                                device=info.get("model") or info.get("device"),
-                               trace_path=out, app_pkg=pkg)
+                               trace_path=out, app_pkg=pkg, meta=meta)
             _log(jid, f"recorded as run {rid}")
 
             screens = None

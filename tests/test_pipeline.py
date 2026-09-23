@@ -1135,6 +1135,98 @@ class TestStressInterrupted(unittest.TestCase):
         self.assertEqual(store.stress_get(done, db=db)["state"], "done")
 
 
+class TestRunMetadata(unittest.TestCase):
+    """Where a run was measured: parsed from adb output at capture time, read
+    from the trace for older runs, merged without inventing anything."""
+
+    DUMPSYS = """Packages:
+  Package [com.swag.pay] (4c1e2a1):
+    userId=10321
+    versionCode=231 minSdk=26 targetSdk=35
+    versionName=2.3.1
+    flags=[ DEBUGGABLE HAS_CODE ALLOW_CLEAR_USER_DATA ]
+    firstInstallTime=2026-09-20 10:00:01
+    lastUpdateTime=2026-09-23 09:14:52
+    installerPackageName=com.android.shell
+  Package [com.swag.pay.helper] (77aa):
+    versionCode=9 minSdk=26 targetSdk=35
+    versionName=0.9
+"""
+
+    def test_dumpsys_package_reads_only_the_named_package(self):
+        from swagperf.capture import parse_dumpsys_package
+        a = parse_dumpsys_package(self.DUMPSYS, "com.swag.pay")
+        self.assertEqual((a["version_name"], a["version_code"], a["min_sdk"], a["target_sdk"]), ("2.3.1", 231, 26, 35))
+        self.assertTrue(a["debuggable"])
+        self.assertEqual(a["installer"], "com.android.shell")
+        self.assertEqual(a["last_update"], "2026-09-23 09:14:52")
+        self.assertEqual(parse_dumpsys_package(self.DUMPSYS, "com.swag.pay.helper")["version_code"], 9)
+        self.assertEqual(parse_dumpsys_package(self.DUMPSYS, "com.absent"), {})
+
+    def test_device_readings(self):
+        from swagperf import capture as c
+        props = c.parse_getprop("[ro.product.manufacturer]: [vivo]\n[ro.product.model]: [V2514]\n"
+                                "[ro.build.version.release]: [16]\n[ro.build.version.sdk]: [36]\n"
+                                "[ro.soc.manufacturer]: [Mediatek]\n[ro.soc.model]: [MT6993]\n[ro.empty]: []")
+        d = c.device_from_props(props)
+        self.assertEqual((d["manufacturer"], d["model"], d["android_release"], d["sdk"], d["soc"]),
+                         ("vivo", "V2514", "16", 36, "Mediatek MT6993"))
+        b = c.parse_battery("  AC powered: false\n  USB powered: true\n  level: 82\n  temperature: 314\n")
+        self.assertEqual(b, {"battery_pct": 82, "battery_temp_c": 31.4, "charging": "USB"})
+        self.assertEqual(c.parse_thermal("Thermal Status: 2\n"), {"thermal_status": "moderate"})
+        self.assertEqual(c.parse_meminfo("MemTotal:       11761884 kB\n"), {"ram_gb": 11.2})
+        disp = c.parse_display("Physical size: 1260x2800\nOverride size: 1080x2400",
+                               "Physical density: 480", "mRefreshRate=120.00001 fps=60.0")
+        self.assertEqual(disp, {"screen": "1080x2400", "density_dpi": 480, "refresh_hz": 120})
+
+    def test_fingerprint(self):
+        from swagperf.extract import parse_fingerprint
+        f = parse_fingerprint("vivo/V2514i/V2514:16/BP2A.250605.031.A3_V000L1/compiler260904164110:user/release-keys")
+        self.assertEqual((f["brand"], f["codename"], f["android_release"], f["build_type"]), ("vivo", "V2514", "16", "user"))
+        self.assertEqual(parse_fingerprint("garbage"), {})
+
+    def test_merge_prefers_capture_then_trace_then_columns(self):
+        from swagperf.runmeta import merge
+        run = {"device": "V2514", "app_pkg": "com.swag.pay", "app_version": "2.3.0", "git_sha": "abc123",
+               "trace_path": "traces/x.pftrace"}
+        raw = {"capture": {"device": {"model": "V2514", "ram_gb": 11.2}, "app": {"version_name": "2.3.1"},
+                           "state": {"battery_pct": 80, "perfetto_version": "v49.0"}, "moment": "before capture"},
+               "from_trace": {"device": {"model": "ignored", "soc": "MT6993"}, "trace": {"size_mb": 75.9}}}
+        m = merge(run, raw, "Swag Pay")
+        self.assertEqual(m["device"], {"model": "V2514", "soc": "MT6993", "ram_gb": 11.2})
+        self.assertEqual(m["app"]["version_name"], "2.3.1", "capture-time version wins over the CLI column")
+        self.assertEqual((m["app"]["name"], m["app"]["git_sha"]), ("Swag Pay", "abc123"))
+        self.assertEqual(m["trace"], {"size_mb": 75.9, "perfetto_version": "v49.0", "path": "traces/x.pftrace"})
+        self.assertNotIn("perfetto_version", m["state"])
+        self.assertEqual(m["sources"], ["capture", "from_trace"])
+        bare = merge({"device": "V2514", "app_pkg": "com.x"}, {})
+        self.assertEqual((bare["device"], bare["app"], bare["sources"]), ({"model": "V2514"}, {"package": "com.x"}, []))
+
+    def test_store_keeps_metadata_sections(self):
+        db = os.path.join(tempfile.mkdtemp(), "h.db")
+        m = extract(self._synthetic_trace())
+        rid = store.record(m, device="V2514", trace_path="t.pftrace", meta={"device": {"model": "V2514"}}, db=db)
+        self.assertEqual(store.run_id_for_trace("t.pftrace", db=db), rid)
+        meta = store.set_run_meta(rid, "from_trace", {"device": {"soc": "MT6993"}}, db=db)
+        self.assertEqual(set(meta), {"capture", "from_trace"})
+        with self.assertRaises(ValueError):
+            store.set_run_meta(99999, "from_trace", {}, db=db)
+
+    def _synthetic_trace(self):
+        from swagperf.synth import gen_trace
+        path = os.path.join(tempfile.mkdtemp(), "s.pftrace")
+        data, _ = gen_trace(seed=3)
+        with open(path, "wb") as f:
+            f.write(data)
+        return path
+
+    def test_capture_configs_record_the_package_list_without_a_filter(self):
+        from swagperf import capture
+        for cfg in (capture.CONFIG, capture.MANUAL_CONFIG):
+            self.assertIn('name: "android.packages_list"', cfg)
+            self.assertNotIn("package_name_filter", cfg)
+
+
 class TestStaticRouting(unittest.TestCase):
     """The built React app owns every client route; the old dashboard is gone."""
 
