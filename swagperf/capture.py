@@ -137,6 +137,20 @@ MANUAL_REMOTE = "/data/misc/perfetto-traces/swagperf_manual.pftrace"
 # short one. The ring buffer is drained to the on-device file every few
 # seconds (see write_into_file below), so a long session accumulates in the
 # file instead of overwriting itself in memory.
+# Lean on purpose. A manual session is open-ended, and the original config grew
+# at ~230MB a minute (975MB for a 4-minute session on a V2514): cpu_idle and
+# cpu_frequency were 5.3M counter events, the `camera` category 2.2M camera-HAL
+# slices, `binder_driver` ~600K, SurfaceFlinger (`gfx`) ~900K more -- none read
+# by any extractor. Every live poll pulled that file over adb (~30s a poll) and
+# stopping took ~70s. Measured on the same device and flow, this config runs at
+# ~53MB/min, stops in ~7s, and gives the same startup steps, RAM, frames and
+# per-screen data as the full set.
+#
+# task_newtask / task_rename are what name the app's process. Dropping `gfx`
+# without them left the app unnamed, and anything scoped by package name then
+# silently measured the whole device (an 876MB "peak"). Our own app can also be
+# found through its markers; a competitor cannot, so the names matter.
+# The short automated capture config keeps the full set.
 MANUAL_CONFIG = """
 buffers: {{ size_kb: 262144 fill_policy: RING_BUFFER }}
 buffers: {{ size_kb: 8192 fill_policy: DISCARD }}
@@ -155,11 +169,9 @@ data_sources: {{
       ftrace_events: "sched/sched_switch"
       ftrace_events: "sched/sched_process_exit"
       ftrace_events: "power/suspend_resume"
-      ftrace_events: "power/cpu_frequency"
-      ftrace_events: "power/cpu_idle"
-      atrace_categories: "gfx" atrace_categories: "view" atrace_categories: "am"
-      atrace_categories: "camera" atrace_categories: "res" atrace_categories: "sched"
-      atrace_categories: "freq" atrace_categories: "binder_driver"
+      ftrace_events: "task/task_newtask"
+      ftrace_events: "task/task_rename"
+      atrace_categories: "view" atrace_categories: "am" atrace_categories: "res"
       atrace_apps: "{pkg}"
       buffer_size_kb: 32768
     }}
