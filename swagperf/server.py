@@ -78,24 +78,45 @@ def _payload(limit=100):
 
 # ----------------------------------------------------------- live marker view
 
-# Pulling and parsing a partial trace costs seconds on a long session, and the
-# dashboard polls while recording. Serve a cached answer inside this window so
-# an impatient poll (or several open tabs) cannot queue up overlapping adb
-# pulls of a file that is hundreds of megabytes by then.
-_LIVE_TTL_S = 4.0
+# The dashboard polls while a manual session records. Each poll reads only the
+# bytes written since the last one (see live.py), so its cost no longer grows
+# with the session. The short TTL just stops several open tabs from each
+# triggering their own adb read within the same couple of seconds.
+_LIVE_TTL_S = 2.0
 _live_cache = {"at": 0.0, "value": None}
 _live_lock = threading.Lock()
+_live = None
+_live_mode = {"incremental": True}
+
+
+def _live_trace():
+    global _live
+    if _live is None:
+        from .capture import manual_read_from
+        from .live import LiveTrace
+        from .screens import marker_rows
+        _live = LiveTrace(manual_read_from, marker_rows)
+    return _live
+
+
+def _live_reset():
+    """Forget the previous session's position and markers."""
+    with _live_lock:
+        if _live is not None:
+            _live.reset()
+        _live_mode["incremental"] = True   # each new session tries the fast path again
+        _live_cache["value"] = None
 
 
 def _live_markers():
     """Markers seen so far in the in-progress manual session.
 
-    Snapshotting is best-effort by design: the session keeps recording whatever
-    happens here, so a failed pull or an unparseable partial trace degrades to
-    an empty marker list with a note rather than disturbing the capture.
+    Best-effort by design: the session keeps recording whatever happens here,
+    so a failed read degrades to the last good answer with a note rather than
+    disturbing the capture.
     """
-    from .capture import manual_snapshot, manual_status
-    from .screens import live_markers
+    from .capture import manual_remote_size, manual_snapshot, manual_status
+    from .screens import live_markers, summarise_markers
 
     st = manual_status()
     if not st.get("recording"):
@@ -106,18 +127,34 @@ def _live_markers():
         c = _live_cache["value"]
         if c and (now - _live_cache["at"]) < _LIVE_TTL_S:
             return {**c, "cached": True}
-
-        tmp = os.path.join(tempfile.gettempdir(), "swagperf_live.pftrace")
+        lt = _live_trace()
         try:
-            manual_snapshot(tmp)
-            data = live_markers(tmp)
-            out = {"recording": True, **data}
+            t0 = time.time()
+            if _live_mode["incremental"]:
+                try:
+                    size = manual_remote_size()
+                    # A file smaller than what was already read is a new session.
+                    if size is not None and size < lt.offset:
+                        lt.reset()
+                    rows = lt.poll()
+                    out = {"recording": True, **summarise_markers(rows),
+                           "read_mb": round(lt.offset / 1e6, 1),
+                           "remote_mb": round(size / 1e6, 1) if size is not None else None}
+                except (ValueError, RuntimeError):
+                    # The phone's tail/head, or exec-out, did not hand back the
+                    # bytes asked for (misaligned or failed). Rather than a blank
+                    # feed, fall back to copying the whole file for the rest of
+                    # this session: slower, but known to work.
+                    _live_mode["incremental"] = False
+                    lt.reset()
+            if not _live_mode["incremental"]:
+                tmp = os.path.join(tempfile.gettempdir(), "swagperf_live.pftrace")
+                manual_snapshot(tmp)
+                out = {"recording": True, **live_markers(tmp), "mode": "full-copy fallback"}
+            out["poll_s"] = round(time.time() - t0, 2)
         except Exception as e:
-            # A partial trace whose last window is half-written parses as a
-            # hard error. That is expected mid-drain, not a failure worth
-            # breaking the page over -- report it and let the next poll retry.
-            out = {"recording": True, "events": [], "counts": {},
-                   "note": f"markers unavailable this poll: {e}"}
+            prev = _live_cache["value"] or {"recording": True, "events": [], "counts": {}}
+            out = {**prev, "note": f"markers unavailable this poll: {e}"}
         _live_cache["at"] = time.time()
         _live_cache["value"] = out
         return out
@@ -248,6 +285,7 @@ class H(SimpleHTTPRequestHandler):
         if u.path == "/api/manual/start":
             from .capture import manual_start
             try:
+                _live_reset()
                 r = manual_start(pkg=(payload.get("pkg") or "com.swag.pay").strip(),
                                  cold=bool(payload.get("cold")))
             except RuntimeError as e:
