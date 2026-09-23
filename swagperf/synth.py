@@ -77,7 +77,7 @@ def gen_trace(seed=0, *, path="returning_user", regress=None, duration_scan_s=6)
     out = bytearray()
     pid = 4242
 
-    out += packet(0, track_desc(T_MAIN, "com.swagpay", pid=pid, tid=pid))
+    out += packet(0, track_desc(T_MAIN, "com.swag.pay", pid=pid, tid=pid))
     out += packet(0, track_desc(T_JS, "mqt_js", pid=pid, tid=pid + 1))
     out += packet(0, track_desc(T_CAM, "CameraX", pid=pid, tid=pid + 2))
     out += packet(0, track_desc(T_RSS, "mem.rss", counter=True))

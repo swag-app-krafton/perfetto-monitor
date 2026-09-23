@@ -103,23 +103,30 @@ def derive_steps(tp, *, pkg=None):
     # present simultaneously for the target app (255ms), com.jio.myjio (984ms)
     # and a Google process (243ms). Matching by slice name alone across all
     # processes would silently measure whichever app happened to be slowest.
+    #
+    # The process is found by the same resolver extract.py uses, which falls
+    # back to "whoever emitted the app's own markers" when the trace never
+    # recorded the process's name. Matching by name alone lost the app on a
+    # capture without the gfx category and then read phases from every process:
+    # a 334ms layout_inflate that belonged to some other app.
+    from .extract import _app_upids
     proc_filter = ""
     target_slices = 0
-    if pkg:
+    upids = _app_upids(tp, pkg) if pkg else []
+    if upids:
+        ids = ",".join(str(int(u)) for u in upids)
         rows = list(tp.query(f"""
             select count(*) c from slice s
             join thread_track tt on s.track_id = tt.id
             join thread th on tt.utid = th.utid
-            join process p on th.upid = p.upid
-            where p.name = '{pkg}'"""))
+            where th.upid in ({ids})"""))
         target_slices = (rows[0].c or 0) if rows else 0
         if target_slices > 0:
             proc_filter = f"""
                 and s.track_id in (
                   select tt.id from thread_track tt
                   join thread th on tt.utid = th.utid
-                  join process p on th.upid = p.upid
-                  where p.name = '{pkg}')"""
+                  where th.upid in ({ids}))"""
 
     # The launch window: prefer the platform's own `launching:` async slice,
     # which IS the launch by the framework's definition. Only fall back to
@@ -134,7 +141,8 @@ def derive_steps(tp, *, pkg=None):
         win_start, win_end = rows[0].ts, rows[0].ts + rows[0].dur
 
     if win_start is None:
-        frame_like = " or ".join(f"name = '{n}'" for n in FRAME_SLICES)
+        # Prefix match: Android 12+ suffixes doFrame with a vsync id.
+        frame_like = " or ".join(f"name like '{n}%'" for n in FRAME_SLICES)
         first_frame = list(tp.query(f"""
             select ts, dur from slice where {frame_like} order by ts limit 1"""))
         ff_end = (first_frame[0].ts + max(first_frame[0].dur or 0, 0)) if first_frame else None

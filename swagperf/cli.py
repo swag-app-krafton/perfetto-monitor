@@ -47,7 +47,7 @@ def _print(res, regs, metrics):
     if metrics.get("derived"):
         print(f"  app  {metrics.get('app_pkg') or 'unknown'}  (derived steps -- not instrumented)")
     f = metrics["frames"]
-    print(f"  frames  {f['total']} total · {f['slow_pct']}% slow · {f['janky_pct']}% janky · drift {f['thermal_drift_pct']}%")
+    print(f"  frames  {f['total']} total · {f['slow_pct']}% slow · {f['janky_pct']}% janky · drift {'not measured' if f['thermal_drift_pct'] is None else str(f['thermal_drift_pct']) + '%'}")
     if metrics.get("memory", {}).get("rss"):
         m = metrics["memory"]["rss"]
         print(f"  RAM  peak {m['peak_mb']}MB · growth {m['growth_mb']}MB")
@@ -540,6 +540,28 @@ def main(argv=None):
         print(f"  re-extracted {res['reextracted']} run(s)")
         if res["missing_trace"]:
             print(f"  skipped (trace file gone): {res['missing_trace']}")
+        # A verdict is computed from metrics, so new metrics leave the stored
+        # verdict describing numbers that no longer exist -- a run re-extracted
+        # into four budget breaches would still read PASS. Rules-only verdicts
+        # are cheap and deterministic, so they are recomputed. An LLM-written
+        # analysis is not regenerated behind the user's back (it costs API
+        # calls); those runs are listed so they can be re-analysed on purpose.
+        c = store.connect()
+        latest = {r["run_id"]: r["model"] for r in c.execute(
+            """select a.run_id, a.model from analyses a join
+               (select run_id, max(id) mid from analyses group by run_id) m
+               on a.id = m.mid""")}
+        c.close()
+        redone, stale = 0, []
+        for rid, m in res.get("metrics", {}).items():
+            if latest.get(rid, "heuristic") == "heuristic":
+                _analyse_run(rid, m, use_llm=False)
+                redone += 1
+            else:
+                stale.append(rid)
+        print(f"  re-analysed {redone} rules-only verdict(s)")
+        if stale:
+            print(f"  left as-is (LLM analysis; re-run `analyse` to refresh): {stale}")
         return 0
 
     if n.cmd == "list":

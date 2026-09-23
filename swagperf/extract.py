@@ -26,10 +26,10 @@ def _rows(tp, q):
     return [dict(r.__dict__) if hasattr(r, "__dict__") else dict(r) for r in tp.query(q)]
 
 
-def extract(trace_path, *, path_kind="returning_user"):
+def extract(trace_path, *, path_kind="returning_user", app_pkg=None):
     tp = TraceProcessor(trace=trace_path)
     try:
-        return _extract(tp, path_kind)
+        return _extract(tp, path_kind, pkg=app_pkg)
     finally:
         tp.close()
 
@@ -91,18 +91,30 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
         pkg = app_pkg or detected.get("pkg")
         instrumented = (catalogue.is_instrumented(pkg) if pkg else False) and not force_derive
 
+        fallback_note = None
         if instrumented:
-            m = _extract(tp, path_kind or "returning_user")
-            m["app_pkg"] = pkg
-            m["derived"] = False
-            m["startup_metric"] = "time to first camera frame"
-            m["detected_app"] = detected
-            return m
+            m = _extract(tp, path_kind or "returning_user", pkg=pkg)
+            # "Instrumented" means the app emits *timed* step: spans. A build
+            # that only emits instant step: markers (zero-length milestones)
+            # gives nothing to measure: every step is 0ms and startup reads as
+            # 0ms, which the dashboard would then show as the fastest launch on
+            # record. Fall back to deriving the launch from Android's own slices
+            # in that case, and say so.
+            if (m["startup"]["time_to_first_camera_frame_ms"] or 0) > 0 and \
+                    any((st.get("dur_ms") or 0) > 0 for st in m["steps"]):
+                m["app_pkg"] = pkg
+                m["derived"] = False
+                m["startup_metric"] = "time to first camera frame"
+                m["detected_app"] = detected
+                return m
+            fallback_note = ("step: markers present but untimed (instants only), "
+                             "so startup was derived from Android launch slices")
 
         d = derive_steps(tp, pkg=pkg)
         target_slices = d.get("target_slices", 0)
-        frames = _frames(tp)
-        mem = _memory(tp)
+        upids = _app_upids(tp, pkg)
+        frames = _frames(tp, upids) if (upids or not pkg) else _unmeasured_frames()
+        mem = _memory(tp, upids) if (upids or not pkg) else {}
         # Cold vs warm is classified from what was actually derived rather than
         # from the stdlib's label, which can misfire: a process_start phase only
         # exists when the process was genuinely created for this launch.
@@ -125,8 +137,17 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
             breaches.append({"metric": "time_to_first_camera_frame_ms", "value": ttid,
                              "budget": ttid_budget,
                              "over_by_pct": round((ttid - ttid_budget) / ttid_budget * 100, 1)})
-        for k in ("slow_frame_pct", "janky_frame_pct"):
+        # Frame budgets are platform-wide (60fps is 60fps for anyone). Memory and
+        # thermal budgets are this project's own product decisions, so they are
+        # asserted only against our own app, never a competitor's.
+        own = (catalogue.get(pkg) or {}).get("role") == "own"
+        asserted = ["slow_frame_pct", "janky_frame_pct"]
+        if own:
+            asserted += ["peak_rss_mb", "rss_growth_mb", "thermal_drift_pct"]
+        for k in asserted:
             b = GLOBAL_BUDGETS[k]
+            if not checks[k]:
+                continue  # unmeasured, not zero: never a breach, never a pass
             if checks[k] > b:
                 breaches.append({"metric": k, "value": checks[k], "budget": b,
                                  "over_by_pct": round((checks[k] - b) / b * 100, 1)})
@@ -148,20 +169,94 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
             "breaches": breaches,
             "derive_window": d["window"],
             "target_slices": target_slices,
+            "own_app": own,
+            "note": fallback_note,
         }
     finally:
         tp.close()
 
 
-def _frames(tp):
+def _app_upids(tp, pkg):
+    """Process ids (upid) belonging to the app under test, or [] if unknown.
+
+    Device traces carry every process on the phone. Anything not scoped to the
+    app measures the device instead: an unscoped RAM peak was system_server's
+    803MB against the app's real 456MB, and the "growth" subtracted one
+    process's minimum from a different process's maximum. A relaunch gives the
+    same package a second upid, so all of them are returned.
+    """
+    if not pkg:
+        return []
+    ids = [r["upid"] for r in _rows(tp, f"""
+        select upid from process where name = '{pkg.replace("'", "''")}'""")]
+    if ids:
+        return ids
+    # A process's name is not always recorded: on a V2514, a capture without the
+    # gfx atrace category never named the app's process at all. The app still
+    # identifies itself through the markers it emits (screen:/step:/action:
+    # via atrace_apps), so the process that owns those is the app.
+    return [r["upid"] for r in _rows(tp, """
+        select distinct coalesce(pt.upid, th.upid) as upid from slice s
+        left join process_track pt on s.track_id = pt.id
+        left join thread_track tt on s.track_id = tt.id
+        left join thread th on tt.utid = th.utid
+        where (s.name like 'screen:%' or s.name like 'step:%' or s.name like 'action:%')
+          and coalesce(pt.upid, th.upid) is not null""")]
+
+
+def _unmeasured_frames():
+    """Frame metrics when the app's process cannot be found in the trace.
+
+    The alternative -- counting every process's frames -- is what reported a
+    device-wide 876MB "peak" and other processes' launch steps as the app's. A
+    known app that cannot be located is unmeasured, never the whole device.
+    """
+    return {"total": 0, "slow": 0, "janky": 0, "slow_pct": None, "janky_pct": None,
+            "avg_ms": None, "max_ms": None, "thermal_drift_pct": None,
+            "note": "app process not found in trace"}
+
+
+def _in(col, ids):
+    return f" and {col} in ({','.join(str(int(i)) for i in ids)})" if ids else ""
+
+
+# Matched by prefix: Android 12+ names the slice `Choreographer#doFrame <vsync>`,
+# so an exact match on the bare name counted zero frames on every real device --
+# and a frame count of zero then reported 0% slow, which reads as perfect.
+DOFRAME = "Choreographer#doFrame%"
+DRIFT_SKIP_NS = 1_000_000_000   # launch + first composition
+DRIFT_MIN_FRAMES = 120          # two seconds of sustained 60fps
+
+
+def _workload_changed(tp):
+    """Whether the app moved between screens during the trace.
+
+    Thermal drift compares later frames with earlier ones on the premise that
+    the work is the same -- a sustained scan -- so a slowdown can only be heat.
+    In a manual session that walks Home -> Store -> Send the frames differ
+    because the screens do: one real session read -41% "drift", shown as an
+    improvement, purely from spending the second half on lighter screens. With
+    more than one screen in the trace, drift is not a thermal signal at all.
+    """
+    r = _rows(tp, """
+        select count(distinct substr(name, 1, instr(name || '#', '#') - 1)) as n
+        from slice where name like 'screen:%'""")
+    return bool(r and (r[0].get("n") or 0) > 1)
+
+
+def _frames(tp, upids=None):
     """Frame-pacing metrics. Shared by the instrumented and derived paths."""
+    scope = ""
+    if upids:
+        scope = f""" and s.track_id in (select tt.id from thread_track tt
+                     join thread th using(utid) where 1=1{_in('th.upid', upids)})"""
     fr = _rows(tp, f"""
         select count(*) total,
                sum(case when dur > {FRAME_NS} then 1 else 0 end) slow,
                sum(case when dur > {3 * FRAME_NS} then 1 else 0 end) janky,
                cast(avg(dur) as int) avg_dur,
                cast(max(dur) as int) max_dur
-        from slice where name = 'Choreographer#doFrame'
+        from slice s where s.name like '{DOFRAME}'{scope}
     """)
     f = fr[0] if fr else {}
     total = f.get("total") or 0
@@ -169,30 +264,44 @@ def _frames(tp):
         "total": total,
         "slow": f.get("slow") or 0,
         "janky": f.get("janky") or 0,
-        "slow_pct": round((f.get("slow") or 0) / total * 100, 2) if total else 0.0,
-        "janky_pct": round((f.get("janky") or 0) / total * 100, 2) if total else 0.0,
+        # No frames counted is "unmeasured", not "perfect". Reporting 0.0% here
+        # is what hid the Android 12+ doFrame naming bug for every device run:
+        # zero frames read as zero slow frames, which looks like a clean pass.
+        "slow_pct": round((f.get("slow") or 0) / total * 100, 2) if total else None,
+        "janky_pct": round((f.get("janky") or 0) / total * 100, 2) if total else None,
         "avg_ms": round((f.get("avg_dur") or 0) / 1e6, 2),
         "max_ms": round((f.get("max_dur") or 0) / 1e6, 2),
     }
     # Thermal drift: second-half mean frame time against the first half. A rising
     # value means the device is throttling, which is a different problem from
     # scattered jank and needs a different fix.
-    halves = _rows(tp, """
-        with f as (
+    #
+    # The first second after the first frame is excluded. On a cold start it is
+    # launch and first composition, whose frames are far heavier than anything
+    # sustained -- comparing halves then measured startup, not heat: a PhonePe
+    # cold start read -98.55% "drift". Fewer than DRIFT_MIN_FRAMES sustained
+    # frames is too short a window to see throttling at all, so drift is
+    # reported as unmeasured (None) rather than as a number.
+    halves = _rows(tp, f"""
+        with a as (
+          select s.ts, s.dur from slice s where s.name like '{DOFRAME}'{scope}),
+        f as (
           select dur, row_number() over (order by ts) rn, count(*) over () n
-          from slice where name = 'Choreographer#doFrame')
+          from a where ts >= (select min(ts) from a) + {DRIFT_SKIP_NS})
         select avg(case when rn <= n/2 then dur end) first_half,
-               avg(case when rn >  n/2 then dur end) second_half from f
+               avg(case when rn >  n/2 then dur end) second_half,
+               max(n) n from f
     """)
-    drift = 0.0
-    if halves and halves[0].get("first_half"):
+    drift = None
+    if halves and (halves[0].get("n") or 0) >= DRIFT_MIN_FRAMES and halves[0].get("first_half") \
+            and not _workload_changed(tp):
         a, b = halves[0]["first_half"], halves[0]["second_half"]
         drift = round((b - a) / a * 100, 2)
     frames["thermal_drift_pct"] = drift
     return frames
 
 
-def _memory(tp):
+def _memory(tp, upids=None):
     """RAM usage (resident set size) and, where present, the Hermes heap.
 
     `mem.rss` is the counter this project's own captures emit. A trace from
@@ -203,11 +312,22 @@ def _memory(tp):
     mem = {}
     mb = 1024 * 1024
     for key, track in (("rss", "mem.rss"), ("hermes_heap", "mem.hermes_heap")):
-        r = _rows(tp, f"""
-            select max(c.value) mx, min(c.value) mn
-            from counter c join counter_track t on c.track_id=t.id
-            where t.name = '{track}'
-        """)
+        r = None
+        if upids:
+            r = _rows(tp, f"""
+                select max(c.value) mx, min(c.value) mn
+                from counter c join process_counter_track t on c.track_id=t.id
+                where t.name = '{track}'{_in('t.upid', upids)}
+            """)
+        if not (r and r[0].get("mx") is not None):
+            # No per-process track for the app (a synthetic or app-emitted
+            # global counter): only then read a track not owned by any process.
+            r = _rows(tp, f"""
+                select max(c.value) mx, min(c.value) mn
+                from counter c join counter_track t on c.track_id=t.id
+                where t.name = '{track}'
+                  and t.id not in (select id from process_counter_track)
+            """)
         if r and r[0].get("mx") is not None:
             mem[key] = {"peak_mb": round(r[0]["mx"] / mb, 1),
                         "min_mb": round(r[0]["mn"] / mb, 1),
@@ -215,9 +335,9 @@ def _memory(tp):
     if "rss" not in mem:
         try:
             tp.query("INCLUDE PERFETTO MODULE android.memory.process;")
-            r = _rows(tp, """
+            r = _rows(tp, f"""
                 select max(rss_and_swap) mx, min(rss_and_swap) mn
-                from memory_rss_and_swap_per_process""")
+                from memory_rss_and_swap_per_process where 1=1{_in('upid', upids)}""")
             if r and r[0].get("mx") is not None:
                 mem["rss"] = {"peak_mb": round(r[0]["mx"] / mb, 1),
                               "min_mb": round(r[0]["mn"] / mb, 1),
@@ -228,7 +348,7 @@ def _memory(tp):
     return mem
 
 
-def _extract(tp, path_kind):
+def _extract(tp, path_kind, pkg=None):
     # --- steps: top-level automation markers -------------------------------
     steps = _rows(tp, f"""
         select s.name, s.ts, s.dur, s.depth, s.id,
@@ -299,8 +419,9 @@ def _extract(tp, path_kind):
                               "before first usable camera frame",
                 })
 
-    frames = _frames(tp)
-    mem = _memory(tp)
+    upids = _app_upids(tp, pkg)
+    frames = _frames(tp, upids) if (upids or not pkg) else _unmeasured_frames()
+    mem = _memory(tp, upids) if (upids or not pkg) else {}
 
     # --- breaches against architecture budgets -----------------------------
     checks = {
@@ -314,7 +435,7 @@ def _extract(tp, path_kind):
     breaches = [
         {"metric": k, "value": v, "budget": GLOBAL_BUDGETS[k],
          "over_by_pct": round((v - GLOBAL_BUDGETS[k]) / GLOBAL_BUDGETS[k] * 100, 1)}
-        for k, v in checks.items() if v > GLOBAL_BUDGETS[k]
+        for k, v in checks.items() if v is not None and v > GLOBAL_BUDGETS[k]
     ]
 
     return {

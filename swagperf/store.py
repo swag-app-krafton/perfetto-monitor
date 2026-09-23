@@ -168,8 +168,16 @@ def baseline(step, *, exclude_run=None, window=20, device=None, app_pkg=None, db
 BENCH_MIN_DELTA_PCT = 20.0
 
 
+# A step must also move by at least this much in absolute terms. Relative and
+# z-score gates alone fire on steps so small that noise doubles them: a real
+# device run failed on process_start "regressing 136%" -- 6.17ms against
+# 2.61ms, a 3.5ms move no user can perceive in a launch. 5ms is under a third
+# of a 60fps frame.
+MIN_DELTA_MS = 5.0
+
+
 def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True,
-                bench_min_delta_pct=None):
+                bench_min_delta_pct=None, min_delta_ms=MIN_DELTA_MS):
     """Steps in `run_id` that are slow relative to their reference.
 
     Two reference modes:
@@ -214,7 +222,7 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True
                 continue
             delta = r["dur_ms"] - bv
             pct = delta / bv * 100
-            if pct >= gate:
+            if pct >= gate and delta >= min_delta_ms:
                 out.append({"step": r["step"], "dur_ms": r["dur_ms"],
                             "baseline_ms": round(bv, 2), "stdev_ms": None,
                             "n_baseline": 1, "delta_ms": round(delta, 2),
@@ -233,7 +241,7 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True
         delta = r["dur_ms"] - b["median_ms"]
         pct = (delta / b["median_ms"] * 100) if b["median_ms"] else 0.0
         zs = (delta / b["stdev_ms"]) if b["stdev_ms"] > 0.01 else (99.0 if pct > min_delta_pct else 0.0)
-        if zs >= z and pct >= min_delta_pct:
+        if zs >= z and pct >= min_delta_pct and delta >= min_delta_ms:
             out.append({"step": r["step"], "dur_ms": r["dur_ms"],
                         "baseline_ms": b["median_ms"], "stdev_ms": b["stdev_ms"],
                         "n_baseline": b["n"], "delta_ms": round(delta, 2),
@@ -419,7 +427,7 @@ def reextract(db=None, extractor=None):
     rows = list(c.execute(
         """select id, trace_path, path_kind, app_pkg, derived from runs
            where trace_path is not null order by id"""))
-    done, missing = 0, []
+    done, missing, fresh = 0, [], {}
     for r in rows:
         if not r["trace_path"] or not os.path.exists(r["trace_path"]):
             missing.append(r["id"])
@@ -433,7 +441,8 @@ def reextract(db=None, extractor=None):
         else:
             from .extract import extract as _extract_instrumented
             m = _extract_instrumented(r["trace_path"],
-                                      path_kind=r["path_kind"] or "returning_user")
+                                      path_kind=r["path_kind"] or "returning_user",
+                                      app_pkg=r["app_pkg"])
             m.setdefault("app_pkg", r["app_pkg"])
             m.setdefault("derived", False)
         c.execute("delete from step_metrics where run_id=?", (r["id"],))
@@ -453,9 +462,10 @@ def reextract(db=None, extractor=None):
                    mem.get("rss", {}).get("peak_mb"), mem.get("rss", {}).get("growth_mb"),
                    json.dumps(m["breaches"]), json.dumps(m["ordering_violations"]),
                    json.dumps(f), json.dumps(mem), r["id"]))
+        fresh[r["id"]] = m
         done += 1
     c.commit(); c.close()
-    return {"reextracted": done, "missing_trace": missing}
+    return {"reextracted": done, "missing_trace": missing, "metrics": fresh}
 
 
 # ---------------------------------------------------------------- stress tests

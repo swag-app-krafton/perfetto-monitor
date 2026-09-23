@@ -181,6 +181,36 @@ def run_analysis(metrics, regs, baselines, *, model=MODEL, backend=None):
     return heuristic(metrics, regs)
 
 
+# Reader-facing metric names, so a rules-only finding does not show a column key.
+METRIC_NAMES = {
+    "time_to_first_camera_frame_ms": "Startup time",
+    "slow_frame_pct": "Slow frames",
+    "janky_frame_pct": "Janky frames",
+    "peak_rss_mb": "Peak RAM usage",
+    "rss_growth_mb": "RAM growth",
+    "thermal_drift_pct": "Thermal drift",
+}
+
+
+# Where to look next for each breach. Every rules-only finding used to end in
+# the same "investigate or re-baseline", which tells the reader nothing; each
+# of these points at the view that answers the question for that metric.
+NEXT_STEP = {
+    "peak_rss_mb": "Open Screens > Navigation stack: a high peak on a cheap screen usually "
+                   "means screens held open beneath it, not the screen itself.",
+    "rss_growth_mb": "Open Screens > Session timeline and find the screen where RAM steps up "
+                     "and never comes back down; repeat visits to it should be flat.",
+    "janky_frame_pct": "Open Screens and sort by App jank: only 'app deadline missed' frames "
+                       "are the app's fault; buffer stuffing and dropped frames are not.",
+    "slow_frame_pct": "Open Screens and check Slow frames per screen, then App jank to separate "
+                      "the app's misses from the compositor's.",
+    "time_to_first_camera_frame_ms": "Open Startup and compare the step breakdown with the "
+                                     "benchmark run; the largest step's children name the cost.",
+    "thermal_drift_pct": "Re-run as a sustained single-screen session (e.g. a stress test) to "
+                         "confirm it is heat and not a change of workload.",
+}
+
+
 def heuristic(metrics, regs):
     """Deterministic fallback so the tool is useful with no API key at all."""
     findings = []
@@ -199,12 +229,28 @@ def heuristic(metrics, regs):
                          "architectural_risk": None,
                          "recommendation": "Compare child slices against the previous run."})
     for b in metrics["breaches"]:
-        findings.append({"title": f"{b['metric']} over budget", "runtime": "unknown",
-                         "severity": "medium", "kind": "budget_breach",
+        # Same threshold regressions use. Hard-coding every breach as "medium"
+        # meant no budget breach could ever fail a run: a session at 4x its RAM
+        # growth budget and 42% over its peak-RAM budget still read WARN.
+        sev = "high" if (b.get("over_by_pct") or 0) > 25 else "medium"
+        findings.append({"title": f"{METRIC_NAMES.get(b['metric'], b['metric'])} over budget",
+                         "runtime": "unknown",
+                         "severity": sev, "kind": "budget_breach",
                          "evidence": f"{b['value']} vs budget {b['budget']} (+{b['over_by_pct']}%)",
                          "architectural_risk": RISK_MAP.get(b["metric"]),
-                         "recommendation": "Investigate or re-baseline the budget."})
+                         "recommendation": NEXT_STEP.get(b["metric"],
+                                                         "Investigate or re-baseline the budget.")})
     verdict = "fail" if any(f["severity"] == "high" for f in findings) else ("warn" if findings else "pass")
+    # Lead with the worst finding rather than a count: "3 finding(s)" makes the
+    # reader open the list to learn anything, the top finding usually says it.
+    order = {"high": 0, "medium": 1, "low": 2}
+    top = sorted(findings, key=lambda f: order.get(f["severity"], 3))
+    if not top:
+        headline = "Every measured metric is within budget and baseline (rules only, no LLM)."
+    else:
+        headline = f"{top[0]['title']}: {top[0]['evidence']}"
+        if len(top) > 1:
+            headline += f" (+{len(top) - 1} more)"
     return {"verdict": verdict,
-            "headline": f"{len(findings)} finding(s) from deterministic rules (no LLM).",
+            "headline": headline,
             "findings": findings, "dismissed": [], "_heuristic": True}
