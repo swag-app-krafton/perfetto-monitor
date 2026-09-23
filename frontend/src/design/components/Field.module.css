@@ -1,0 +1,55 @@
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 0 12px;
+  background: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--tx3);
+  text-transform: uppercase;
+}
+.select {
+  background: transparent;
+  border: 0;
+  color: var(--tx);
+  font: 500 13px var(--font-ui);
+  cursor: pointer;
+  outline: none;
+  max-width: 260px;
+}
+.select option {
+  background: var(--s1);
+  color: var(--tx);
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  color: var(--tx3);
+  flex: 1;
+  min-width: 180px;
+}
+.search:focus-within {
+  border-color: var(--focus);
+}
+.search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: var(--tx);
+  font: 13px var(--font-ui);
+}
