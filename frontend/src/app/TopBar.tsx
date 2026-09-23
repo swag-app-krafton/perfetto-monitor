@@ -1,10 +1,14 @@
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { Icon, Segmented, SelectField } from '@/design'
+import { useAuditScope } from '@/domain/audits'
 import { pathLabel } from '@/domain/format'
 import type { Scope } from '@/domain/scope'
 import { NO_VERSION, versionLabel } from '@/domain/versions'
+import { AuditPicker } from './AuditPicker'
+import { PROFILERS, useProfiler } from './profiler'
+import { homeOf } from './routes'
 import { RunPicker } from './RunPicker'
-import { useUi, type RangeKey } from './store'
+import { useUi, type Profiler, type RangeKey } from './store'
 import s from './Shell.module.css'
 
 const RANGES: { value: RangeKey; label: string }[] = [
@@ -15,6 +19,11 @@ const RANGES: { value: RangeKey; label: string }[] = [
 
 export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean }) {
   const { app, path, range, version, runId, theme, setFilters, toggleTheme, setDrawer } = useUi()
+  const profiler = useProfiler()
+  const navigate = useNavigate()
+  const audits = useAuditScope().scope
+  // Switching profiler opens its first screen; the page is what says which one is in view.
+  const switchProfiler = (p: Profiler) => p !== profiler && navigate(homeOf(p))
   return (
     <header className={s.top}>
       {narrow && (
@@ -24,10 +33,23 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
       )}
       <div className={s.titleBlock}>
         <div className={s.title}>Swag Pay Performance</div>
-        <div className={s.subtitle}>Perfetto trace regression monitor · three runtimes, one process</div>
+        <div className={s.subtitle}>
+          {profiler === 'perfetto' ? 'Perfetto trace regression monitor · three runtimes, one process' : "Flashlight audits · repeated cold starts, Flashlight's own scoring"}
+        </div>
       </div>
       <div className={s.controls}>
-        {scope && scope.apps.length > 0 && (
+        {/* First: everything to its right shows this profiler's runs only. */}
+        <Segmented label="Profiler" value={profiler} options={PROFILERS} onChange={switchProfiler} />
+        {profiler === 'flashlight' && audits && audits.apps.length > 0 && (
+          <SelectField
+            label="App"
+            value={audits.app}
+            options={audits.apps.map((a) => ({ value: a.pkg, label: `${a.name} · ${a.audits}` }))}
+            onChange={(v) => setFilters({ app: v })}
+          />
+        )}
+        {profiler === 'flashlight' && audits && audits.appAudits.length > 0 && <AuditPicker scope={audits} />}
+        {profiler === 'perfetto' && scope && scope.apps.length > 0 && (
           <SelectField
             label="App"
             value={app}
@@ -35,7 +57,7 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
             onChange={(v) => setFilters({ app: v, path: '' })}
           />
         )}
-        {scope && scope.paths.length > 0 && (
+        {profiler === 'perfetto' && scope && scope.paths.length > 0 && (
           <Segmented
             label="Startup path"
             value={path}
@@ -43,7 +65,7 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
             onChange={(v) => setFilters({ path: v })}
           />
         )}
-        {scope && scope.versions.some((v) => v.key !== NO_VERSION) && (
+        {profiler === 'perfetto' && scope && scope.versions.some((v) => v.key !== NO_VERSION) && (
           <SelectField
             label="Version"
             value={scope.versions.some((v) => v.key === version) ? version : ''}
@@ -55,8 +77,8 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
           />
         )}
         {/* The one place a run is chosen: every screen shows the run picked here. */}
-        {scope && scope.allRuns.length > 0 && <RunPicker scope={scope} runId={runId} />}
-        <SelectField label="Range" value={range} options={RANGES} onChange={(v) => setFilters({ range: v })} />
+        {profiler === 'perfetto' && scope && scope.allRuns.length > 0 && <RunPicker scope={scope} runId={runId} />}
+        {profiler === 'perfetto' && <SelectField label="Range" value={range} options={RANGES} onChange={(v) => setFilters({ range: v })} />}
         <Link className={s.tokensLink} to="/design-system">
           Tokens
         </Link>

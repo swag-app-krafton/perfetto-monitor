@@ -103,6 +103,29 @@ create table if not exists benchmarks (
   note text,
   set_at text not null
 );
+
+-- A Flashlight audit: one app's cold start measured N times by Flashlight.
+-- Flashlight never runs while Perfetto records (it breaks the trace; see
+-- docs/flashlight-perfetto-observations.html), so an audit is never part of a
+-- run. It has its own table and its own ids, and its numbers are Flashlight's
+-- definitions, not Perfetto's: they are never compared with a run's.
+create table if not exists flashlight_audits (
+  id integer primary key autoincrement,
+  ts text not null,
+  app_pkg text not null,
+  device text,
+  label text,
+  iterations integer not null,
+  duration_ms integer not null,
+  state text not null default 'running',
+  error text,
+  finished text,
+  results_path text,
+  flashlight_version text,
+  score real, cpu_pct real, ram_mb real, fps real,
+  summary_json text,
+  meta_json text
+);
 """
 
 BENCH_ANY = "*"
@@ -656,6 +679,79 @@ def set_run_meta(run_id, key, value, db=None):
     c.execute("update runs set meta_json=? where id=?", (json.dumps(meta), run_id))
     c.commit(); c.close()
     return meta
+
+
+# ---------------------------------------------------------------- flashlight audits
+
+def audit_create(*, app_pkg, device=None, label=None, iterations, duration_ms,
+                 meta=None, db=None):
+    c = connect(db)
+    aid = c.execute("""insert into flashlight_audits
+        (ts, app_pkg, device, label, iterations, duration_ms, state, meta_json)
+        values (?,?,?,?,?,?,'running',?)""",
+        (_now(), app_pkg, device, label, int(iterations), int(duration_ms),
+         json.dumps(meta) if meta else None)).lastrowid
+    c.commit(); c.close()
+    return aid
+
+
+def audit_finish(audit_id, *, state="done", error=None, results_path=None,
+                 summary=None, db=None):
+    """Close an audit. `summary` is what flashlight.run_audit returned; its
+    headline numbers are copied into columns so lists need not parse it."""
+    m = (summary or {}).get("metrics") or {}
+    c = connect(db)
+    c.execute("""update flashlight_audits set state=?, error=?, finished=?, results_path=?,
+                 flashlight_version=?, score=?, cpu_pct=?, ram_mb=?, fps=?, summary_json=?
+                 where id=?""",
+              (state, error, _now(), results_path, (summary or {}).get("flashlight_version"),
+               (summary or {}).get("score"), m.get("cpu_pct"), m.get("ram_mb"), m.get("fps"),
+               json.dumps(summary) if summary else None, audit_id))
+    c.commit(); c.close()
+
+
+def _audit(row, full):
+    a = dict(row)
+    summary, meta = a.pop("summary_json"), a.pop("meta_json")
+    a["meta"] = json.loads(meta) if meta else None
+    if full:
+        a["summary"] = json.loads(summary) if summary else None
+    else:
+        # A list shows headline numbers; the per-iteration table and time
+        # series stay on the detail call.
+        s = json.loads(summary) if summary else {}
+        a["summary"] = {k: s.get(k) for k in ("successful", "failed", "metrics", "key_threads")} if s else None
+    return a
+
+
+def audit_get(audit_id, db=None):
+    c = connect(db)
+    r = c.execute("select * from flashlight_audits where id=?", (audit_id,)).fetchone()
+    c.close()
+    return _audit(r, full=True) if r else None
+
+
+def audit_list(app_pkg=None, limit=100, db=None):
+    c = connect(db)
+    q, args = "select * from flashlight_audits", []
+    if app_pkg:
+        q += " where app_pkg=?"; args.append(app_pkg)
+    q += " order by id desc limit ?"; args.append(limit)
+    rows = [_audit(r, full=False) for r in c.execute(q, args)]
+    c.close()
+    return rows
+
+
+def audit_mark_interrupted(db=None):
+    """Close audits left running by a server that stopped, as stress tests are."""
+    c = connect(db)
+    n = c.execute(
+        """update flashlight_audits set state='interrupted',
+               error=coalesce(error, 'the dashboard stopped while this audit was running'),
+               finished=coalesce(finished, ?)
+           where state in ('running', 'queued')""", (_now(),)).rowcount
+    c.commit(); c.close()
+    return n
 
 
 # ---------------------------------------------------------------- copilot

@@ -6,6 +6,7 @@ import {
   Avatar,
   Badge,
   Banner,
+  BarList,
   BarSeries,
   Bubble,
   Button,
@@ -59,6 +60,8 @@ import {
   Switch,
   TableCard,
   TableEmptyRow,
+  Term,
+  TermList,
   Text,
   TextAreaField,
   Toast,
@@ -114,6 +117,11 @@ const RADII: [string, string][] = [
 /* Illustrative values for the component demos only. */
 const EXAMPLE_RUNS = ['#72', '#73', '#74', '#75', '#76', '#77', '#78', '#79', '#80', '#81']
 const EXAMPLE_TTID = [362, 371, 368, 380, 376, 369, 384, 378, 381, 375]
+const EXAMPLE_STEPS: [string, string | null, number, number][] = [
+  ['process_start', 'The system creating the process the app runs in. Mostly outside the app\'s control.', 0, 3.8],
+  ['bind_application', 'The new process loading the app\'s code, then running its Application.onCreate. Heavy SDK set-up there makes it slow.', 4.1, 211.4],
+  ['activity_resume', null, 291.2, 51.3],
+]
 
 function Section({ id, title, intro, children }: { id: string; title: string; intro?: string; children: ReactNode }) {
   return (
@@ -443,6 +451,33 @@ export function DesignSystemPage() {
                 ]}
               />
             </Specimen>
+            <Card title="Term and TermList" hint="A name with what it means. Term puts the description behind a ? for tables, legends and charts; TermList gives it a second line in a short list. No description, no ?.">
+              <Stack gap={16}>
+                <Row gap={16} wrap>
+                  <Term description="Time to initial display: from process start to the first frame the app draws.">TTID</Term>
+                  <Term weight={600} description="The new process loading the app's code, then running its Application.onCreate.">
+                    bind_application
+                  </Term>
+                  <Term tone="secondary">no description</Term>
+                </Row>
+                <TermList
+                  label="Example startup steps"
+                  items={EXAMPLE_STEPS.map(([name, about, start, dur]) => ({
+                    key: name,
+                    term: name,
+                    description: about,
+                    values: [
+                      <Text key="start" variant="body">
+                        +{start.toFixed(1)} ms
+                      </Text>,
+                      <Text key="dur" variant="body" tone="primary" weight={600}>
+                        {dur.toFixed(1)} ms
+                      </Text>,
+                    ],
+                  }))}
+                />
+              </Stack>
+            </Card>
             <Specimen name="Code and disclosure">
               <Disclosure summary="Queried run data · 3 steps · 12 ms">Loaded run #81 → Compared 5 steps → Found 2 findings</Disclosure>
               <CodeBlock lang="Perfetto SQL" code={'SELECT name, dur / 1e6 AS dur_ms\nFROM slice\nWHERE name GLOB \'step:*\''} />
@@ -518,6 +553,21 @@ export function DesignSystemPage() {
             </Card>
             <Card title="BarSeries" hint="Ordered bars with a dashed mean; flagged bars in the fail colour.">
               <BarSeries label="Example session TTIDs" unit="ms" decimals={0} mean={374} bars={EXAMPLE_TTID.map((v, i) => ({ label: `${i + 1}`, value: v, flagged: v > 382 }))} />
+            </Card>
+            <Card title="BarList" hint="Labelled horizontal bars, largest first, each with its value: for names too long to sit under columns. An item's description sits behind a ? (Term).">
+              <BarList
+                label="Example CPU by thread"
+                unit="%"
+                decimals={1}
+                items={[
+                  { label: 'UI Thread', value: 24.8, description: "The app's main thread: input, layout and drawing." },
+                  { label: 'RenderThread', value: 12.4, description: "Turns each frame's drawing commands into GPU work." },
+                  { label: 'mqt_v_js', value: 6.1, description: "React Native's JavaScript thread." },
+                  { label: 'Jit thread pool', value: 2.6, description: 'Compiles often-run code to machine code while the app runs.' },
+                  { label: 'HeapTaskDaemon', value: 0.5, description: 'The background garbage collector.' },
+                  { label: 'sync-worker', value: 0.3 },
+                ]}
+              />
             </Card>
             <Card title="MiniBars" hint="The Copilot's inline chart, from a zero baseline.">
               <MiniBars title="Example peak RAM per run" unit="MB" budget={420} labels={EXAMPLE_RUNS} values={[398, 402, 405, 399, 410, 431, 407, 404, 412, 425]} />

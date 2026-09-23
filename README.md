@@ -97,7 +97,13 @@ budget (16.67 ms, 60 fps) applies to every app.
 
 ### Finding your way around
 
-- **Sidebar:** eleven screens in three groups. **Analyse** is for reading runs,
+- **Profiler** (top bar, the first control): **Perfetto** or **Flashlight**. The
+  two are separate run categories and never mix: the sidebar, the run list and
+  every screen show the chosen profiler's runs only. It is remembered, and a link
+  to a Flashlight page opens Flashlight's view. See
+  [Flashlight audits](#flashlight-audits).
+- **Sidebar:** the chosen profiler's screens, in three groups (eleven for
+  Perfetto, three for Flashlight). **Analyse** is for reading runs,
   **Run** is for making them, **Data** is for comparing and managing them. The
   `«` button collapses it to a rail of two-letter codes. It collapses by itself
   while the Copilot is open on a screen under 1400 px wide.
@@ -233,6 +239,9 @@ the median of the previous 10 runs.
 - **Drill-down** (select a row): P50 and P90 over recent runs, this run and the
   runtime, then every child slice as a bar for this run with a tick for its baseline.
   **Ask Copilot** from here names the step.
+- **What a step is:** the **?** beside a step's name, here and on Startup and
+  Compare, says in plain words what the step covers and what usually makes it slow.
+  The drill-down repeats it. Screens' launch view shows it under each step.
 
 **Watch for:** a step with Δ ≥ 5 ms in the warn or fail colour, then the child
 slice whose bar ends past its tick. That is the part of the step that moved.
@@ -256,7 +265,8 @@ sessions are the richest.
 - **User actions:** every action the app marked, in order, with its screen.
 - **Cost by stack depth:** peak RAM grouped by how many screens were open beneath.
 
-**Launch metrics** view: TTID and the startup steps from the same trace.
+**Launch metrics** view: TTID and the startup steps from the same trace, each with
+a line on what it covers.
 
 **Watch for:** RAM that steps up on the same screen each visit and never comes back
 down (look at the timeline first). Also a visit drawn in red, more than two standard
@@ -461,7 +471,12 @@ ln -sf "$PWD/perfetto" ~/.local/bin/perfetto             # optional, shorter ali
 
 `trace_processor_shell` downloads automatically on first run. The dashboard is
 prebuilt in `web/dist`, so running it needs no Node. Node is only needed to change
-the frontend (see [Frontend development](#frontend-development)).
+the frontend (see [Frontend development](#frontend-development)) and for
+Flashlight audits, which need its pinned packages once:
+
+```bash
+npm ci --prefix flashlight   # only on the machine the phone is plugged into
+```
 
 ### perfetto_init
 
@@ -703,6 +718,54 @@ Three deliberate choices:
 Stress history is kept separate from run history, since a row there is a whole
 test rather than one capture. A test left running when the server stopped is
 marked interrupted at the next start rather than showing as running forever.
+
+## Flashlight audits
+
+Flashlight is a second profiler with its own lane. An **audit** force-stops an app,
+launches it and lets Flashlight sample CPU per thread, RAM and FPS every 500 ms,
+repeated several times; it stores Flashlight's score and averages, the spread
+across cold starts, and the average cold start as a time series.
+
+```bash
+./.venv/bin/python -m swagperf.cli audit run --pkg com.swag.pay -n 5 --duration-ms 10000
+./.venv/bin/python -m swagperf.cli audit list
+./.venv/bin/python -m swagperf.cli audit show 3
+```
+
+Or switch the top bar to **Flashlight**: **Run audit** starts one, **Audit** shows
+the audit in view (score, CPU over a cold start by total, UI thread and React
+Native JS thread, RAM, FPS, CPU by thread, each cold start), and **Audits** lists
+them all. The **Audit** control in the top bar picks the audit in view.
+
+In **CPU by thread**, the **?** beside a thread's name says what the thread is
+(the main thread, RenderThread, React Native's JS thread, ART's garbage collector,
+a Kotlin coroutine worker, an unnamed `Thread-22`…). The names are matched by
+pattern in `swagperf/threads.py`, because Android cuts thread names to 15
+characters and Flashlight adds ` (3)` to the third thread with the same name. A
+name the module does not recognise gets no description rather than a guess.
+
+Three deliberate choices:
+
+- **Never at the same time as Perfetto.** Measured on a real device, Flashlight
+  starting during a Perfetto session stops its scheduler events, app slices,
+  markers and RAM samples for good, and a session started after Flashlight records
+  nothing, in both cases without an error
+  ([the experiment](docs/flashlight-perfetto-observations.html),
+  `experiments/flashlight-concurrency/`). So an audit holds the same device lock
+  as a capture and refuses while a manual session records; a capture refuses to
+  start while Flashlight's profiler or an atrace session runs on the phone; and a
+  device trace whose scheduler events stop before it ends, or never start, is not
+  recorded (the file is kept for inspection). After an audit, atrace is reset,
+  because Flashlight leaves its settings behind.
+- **Flashlight's own numbers.** Audits run Flashlight's test engine and report
+  maths from npm (`flashlight/audit.js`, versions pinned in
+  `flashlight/package.json`), so a score or FPS means what it means in
+  Flashlight's own report; the results file opens with `flashlight report`.
+  They are stored apart from runs (`A-3`, never `#3`) and never compared with
+  Perfetto's numbers, which are defined differently. The standalone `flashlight`
+  binary is not used: it is Intel-only and needs Rosetta on Apple Silicon.
+- **Only the machine with the phone needs it.** Machines that only open the
+  dashboard never run Node.
 
 ## Manual mode
 
@@ -966,6 +1029,7 @@ swagperf/
   extract.py      TraceProcessor SQL → metrics (no LLM)
   derive.py       steps from an uninstrumented app's own slices
   screens.py      per-screen and per-action cost from SwagTrace markers
+  threads.py      what a thread is, from its name, for CPU-by-thread lists
   store.py        SQLite history, trailing baselines, regression detection,
                   benchmarks, stress tests, Copilot threads and pins
   analyst.py      model backends + deterministic fallback
@@ -973,18 +1037,24 @@ swagperf/
   triage.py       what new runs raised, as signals for the tracker (no LLM)
   pm.py           the automatic PM review after each recorded run
   llm.py          finds the local claude and codex CLIs
-  capture.py      on-device capture via adb (one-shot, cold/warm, manual)
+  capture.py      on-device capture via adb (one-shot, cold/warm, manual), and
+                  the guard that keeps other profilers off the device meanwhile
+  flashlight.py   Flashlight audits: runs flashlight/audit.js, resets atrace
   live.py         incremental reads of a trace still being recorded
-  jobs.py         background jobs for dashboard-started captures and stress tests
+  jobs.py         background jobs for dashboard-started captures, stress tests
+                  and Flashlight audits
   catalogue.py    apps under test (apps.json, apps.local.json)
   server.py       dashboard server and JSON API
   tokens.py       token-consumption monitor
   synth*.py       synthetic trace generators for development
   cli.py          the swagperf command
+flashlight/       Flashlight's pinned npm packages, the audit runner and its summary
+experiments/      one-off device experiments (flashlight-concurrency: Phase 0)
 frontend/         the dashboard's source (React + TypeScript)
 web/dist/         the built dashboard, served by server.py
 web/tokens.html   the token-consumption page
-tests/            117 tests over the pipeline, the store, the server and the Copilot
+tests/            154 tests over the pipeline, the store, the server, the Copilot
+                  and Flashlight audits
 docs/             TRACKER.md (the live list), issues/ (perf issues from runs),
                   backlog, decisions and plans
 .claude/agents/   the product-manager agent
@@ -999,6 +1069,11 @@ Step names are matched by the `step:` prefix. Emit them from the app with
 `Trace.beginSection("step:camera_open")` or from the automation harness; child slices
 inside a step are attributed automatically and give the model what it needs to say
 *which part* of a step moved.
+
+Give every new step a plain-language description in `STEP_DESCRIPTIONS`, next to
+`STEP_RUNTIME` in `budgets.py`: what it covers, where it starts and ends, and what
+usually makes it slow. The dashboard shows it wherever the step is named, and a test
+fails for a step without one.
 
 ## Known gaps
 

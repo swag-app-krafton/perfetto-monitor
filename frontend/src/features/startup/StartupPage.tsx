@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Run } from '@/api/types'
-import { Card, EmptyState, Grid, Legend, LineChart, Row, Segmented, SectionTitle, Stack, StackedBars, StatusPill, StatusSquare, Text, type StackRow } from '@/design'
+import { Card, EmptyState, Grid, Legend, LineChart, Row, Segmented, SectionTitle, Stack, StackedBars, StatusPill, StatusSquare, Term, Text, type StackRow } from '@/design'
 import { fmt, signed, stepName } from '@/domain/format'
 import { valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
@@ -62,8 +62,8 @@ export function StartupPage() {
       </Card>
 
       <Grid min={440}>
-        <Composition runs={runs.slice(-12)} latestId={run.id} budget={budget} critical={critical} />
-        <Ordering run={run} benchmark={benchmarkRun} critical={critical} deferred={model.deferred_steps} />
+        <Composition runs={runs.slice(-12)} latestId={run.id} budget={budget} critical={critical} descriptions={model.step_descriptions} />
+        <Ordering run={run} benchmark={benchmarkRun} critical={critical} deferred={model.deferred_steps} descriptions={model.step_descriptions} />
       </Grid>
 
       <SectionTitle>Startup findings</SectionTitle>
@@ -77,7 +77,19 @@ export function StartupPage() {
 
 /** Each run's startup split by its recorded steps. The four steps that take the
  *  most time get the series colours; everything else folds into "Other". */
-function Composition({ runs, latestId, budget, critical }: { runs: Run[]; latestId: number; budget: number | null; critical: string[] | null }) {
+function Composition({
+  runs,
+  latestId,
+  budget,
+  critical,
+  descriptions,
+}: {
+  runs: Run[]
+  latestId: number
+  budget: number | null
+  critical: string[] | null
+  descriptions: Record<string, string>
+}) {
   const onPath = (step: string) => !critical || critical.includes(step)
   const totals = new Map<string, number>()
   for (const r of runs) for (const st of r.steps) if (onPath(st.step)) totals.set(st.step, (totals.get(st.step) ?? 0) + st.dur_ms)
@@ -101,7 +113,12 @@ function Composition({ runs, latestId, budget, critical }: { runs: Run[]; latest
   return (
     <Card data-hl="compose" title="Critical-path composition" hint={`Last ${runs.length} runs, each split by its startup steps. Time no step accounts for is left as a gap.`}>
       <Stack gap={14}>
-        <Legend items={[...top.map((k) => ({ label: stepName(k), color: colors[k]! })), ...(hasOther ? [{ label: 'Other', color: 'var(--tx3)' }] : [])]} />
+        <Legend
+          items={[
+            ...top.map((k) => ({ label: stepName(k), color: colors[k]!, description: descriptions[k] })),
+            ...(hasOther ? [{ label: 'Other', color: 'var(--tx3)', description: 'The remaining startup steps, each its own grey segment. Hover a segment for its name.' }] : []),
+          ]}
+        />
         {rows.length ? <StackedBars rows={rows} colors={colors} budget={budget} unit="ms" /> : <EmptyState>No runs in range.</EmptyState>}
       </Stack>
     </Card>
@@ -111,7 +128,19 @@ function Composition({ runs, latestId, budget, critical }: { runs: Run[]; latest
 /** Deferred work must start after the first frame -- when the app states which
  *  work is deferred. A run derived from Android's own launch slices has no such
  *  statement, and says so rather than showing an empty pass. */
-function Ordering({ run, benchmark, critical, deferred }: { run: Run; benchmark: Run | null; critical: string[] | null; deferred: string[] }) {
+function Ordering({
+  run,
+  benchmark,
+  critical,
+  deferred,
+  descriptions,
+}: {
+  run: Run
+  benchmark: Run | null
+  critical: string[] | null
+  deferred: string[]
+  descriptions: Record<string, string>
+}) {
   const [which, setWhich] = useState<'run' | 'bench'>('run')
   const r = which === 'bench' && benchmark ? benchmark : run
   const tasks = r.steps.filter((st) => deferred.includes(st.step))
@@ -130,7 +159,7 @@ function Ordering({ run, benchmark, critical, deferred }: { run: Run; benchmark:
     const ff = valueOf(r, 'ttff_ms') ?? 0
     const items = tasks.map((st) => {
       const at = (st.start_ms ?? t0) - t0
-      return { name: stepName(st.step), at, dur: st.dur_ms, before: at < ff - 1 }
+      return { name: stepName(st.step), description: descriptions[st.step], at, dur: st.dur_ms, before: at < ff - 1 }
     })
     const span = Math.max(ff, ...items.map((t) => t.at + t.dur), 1) * 1.1
     const X = (v: number) => `${(v / span) * 100}%`
@@ -172,9 +201,11 @@ function Ordering({ run, benchmark, critical, deferred }: { run: Run; benchmark:
           {items.map((t) => (
             <Row key={t.name} gap={10} className={s.task}>
               <StatusSquare tone={t.before ? 'fail' : 'pass'} size={18} fontSize={10} />
-              <Text variant="body" tone="primary" weight={500} className={s.taskName}>
-                {t.name}
-              </Text>
+              <span className={s.taskName}>
+                <Term description={t.description} weight={500}>
+                  {t.name}
+                </Term>
+              </span>
               <Text variant="meta" tone="secondary">
                 starts {fmt(t.at)} ms · {fmt(t.dur)} ms
               </Text>

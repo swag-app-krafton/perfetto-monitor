@@ -18,6 +18,11 @@ PKG_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$")
 _capture_lock = threading.Lock()
 
 
+def busy():
+    """Whether a capture, stress test or Flashlight audit holds the device."""
+    return _capture_lock.locked()
+
+
 def _new(kind, **meta):
     jid = uuid.uuid4().hex[:12]
     with _LOCK:
@@ -60,6 +65,15 @@ def _run_metadata(cap, pkg, device, moment):
     return {**meta, "moment": moment} if meta else None
 
 
+def _require_full_tracing(ex, trace_path):
+    """Refuse a device trace whose kernel tracing did not cover it. It would
+    otherwise become a run that looks fine and is missing most of its data.
+    The file stays on disk, so what happened can still be looked at."""
+    lost = ex.tracing_lost(trace_path)
+    if lost:
+        raise RuntimeError(f"not recorded: {lost} The trace is kept at {trace_path}.")
+
+
 def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=False,
                   device=None):
     """Validate inputs, then run capture + extract + record on a background
@@ -94,6 +108,7 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
                       f"{pkg} for {duration_ms}ms…")
             cap.capture(out, pkg=pkg, duration_ms=duration_ms, cold=cold, serial=device)
             _log(jid, f"trace saved -> {out}")
+            _require_full_tracing(ex, out)
 
             _log(jid, "extracting metrics…")
             m = ex.extract_any(out, app_pkg=pkg)
@@ -197,6 +212,7 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
                     meta = _run_metadata(cap, pkg, device, "before capture")
                     cap.capture(out, pkg=pkg, duration_ms=duration_ms, cold=cold,
                                 serial=device)
+                    _require_full_tracing(ex, out)
                     m = ex.extract_any(out, app_pkg=pkg)
                     problems = ex.capture_problems(m, requested_pkg=pkg)
                     fatal = [p for p in problems
@@ -281,6 +297,7 @@ def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
             _log(jid, "stopping the detached session and pulling the trace…")
             cap.manual_stop(out, serial=device)
             _log(jid, f"trace saved -> {out}")
+            _require_full_tracing(ex, out)
 
             _log(jid, "extracting metrics…")
             m = ex.extract_any(out, app_pkg=app_pkg)
@@ -328,6 +345,91 @@ def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
             _log(jid, f"ERROR: {e}")
             _set(jid, state="error", error=str(e))
         finally:
+            _capture_lock.release()
+
+    threading.Thread(target=run, daemon=True).start()
+    return jid
+
+
+def start_audit(pkg, *, iterations=5, duration_ms=10000, label=None, device=None):
+    """Measure an app's cold start with Flashlight, `iterations` times.
+
+    Flashlight and Perfetto never share a device at once -- Flashlight
+    starting breaks a Perfetto trace -- so an audit takes the same lock as
+    every capture and refuses while a manual Perfetto session is recording.
+    What it records is an audit, not a run: Flashlight's numbers, in their own
+    table, never mixed into Perfetto's baselines.
+    """
+    if not PKG_RE.match(pkg or ""):
+        raise ValueError(f"'{pkg}' does not look like an Android package name")
+    iterations = max(2, min(int(iterations), 20))
+    duration_ms = max(3000, min(int(duration_ms), 60_000))
+    from . import flashlight
+    ready = flashlight.runner_status()
+    if not ready["ready"]:
+        raise ValueError(ready["reason"])
+    jid = _new("audit", pkg=pkg, iterations=iterations, duration_ms=duration_ms)
+
+    def run():
+        if not _capture_lock.acquire(blocking=False):
+            _set(jid, state="error", error="A capture is already running on this device. "
+                 "Wait for it to finish and try again.")
+            return
+        audit_id, serial = None, None
+        from . import capture as cap, store, catalogue
+        try:
+            _set(jid, state="running")
+            info = cap.device_info(device)
+            if not info:
+                raise RuntimeError("No adb device connected.")
+            serial = info["serial"]
+            if cap.manual_status(serial)["recording"]:
+                raise RuntimeError("A Perfetto manual session is recording on this device, and "
+                                   "Flashlight would break its trace. Stop the session first.")
+            if not catalogue.get(pkg):
+                catalogue.add(pkg, name=pkg, role="competitor", auto=True)
+            _log(jid, f"device: {info.get('model')} (Android {info.get('release')})")
+
+            meta = _run_metadata(cap, pkg, serial, "before audit")
+            audit_id = store.audit_create(
+                app_pkg=pkg, device=info.get("model") or info.get("device"), label=label,
+                iterations=iterations, duration_ms=duration_ms, meta=meta)
+            _set(jid, audit_id=audit_id)
+            _log(jid, f"Flashlight audit A-{audit_id}: {iterations} cold starts of {pkg}, "
+                      f"{duration_ms / 1000:g} s measured each")
+            out = f"traces/flashlight/audit{audit_id}_{pkg}.json"
+            summary = flashlight.run_audit(
+                pkg, iterations=iterations, duration_ms=duration_ms, out_path=out,
+                serial=serial, title=f"{pkg} cold start (A-{audit_id})",
+                on_line=lambda line: _log(jid, line),
+                on_progress=lambda i, n: _set(jid, progress={"current": i, "total": n}))
+
+            ok = summary.get("successful") or 0
+            # Some failed iterations are a note on a finished audit; none
+            # succeeding is a failed one.
+            store.audit_finish(audit_id, state="done" if ok else "error",
+                               error=summary.get("failure"), results_path=out, summary=summary)
+            if not ok:
+                raise RuntimeError(summary.get("failure") or "no iteration succeeded")
+            m = summary.get("metrics") or {}
+            _log(jid, f"score {summary.get('score')} · CPU {m.get('cpu_pct')}% · RAM "
+                      f"{m.get('ram_mb')} MB · {m.get('fps')} FPS, over {ok} of "
+                      f"{summary.get('iterations_run')} iteration(s)")
+            _set(jid, state="done",
+                 result={"audit_id": audit_id, "app_pkg": pkg, "score": summary.get("score"),
+                         "successful": ok, "failed": summary.get("failed")})
+        except Exception as e:
+            _log(jid, f"ERROR: {e}")
+            if audit_id and (store.audit_get(audit_id) or {}).get("state") == "running":
+                store.audit_finish(audit_id, state="error", error=str(e))
+            _set(jid, state="error", error=str(e))
+        finally:
+            if serial:
+                try:
+                    if flashlight.reset_atrace(serial):
+                        _log(jid, "atrace reset on the device")
+                except Exception as e:
+                    _log(jid, f"could not reset atrace: {e}")
             _capture_lock.release()
 
     threading.Thread(target=run, daemon=True).start()

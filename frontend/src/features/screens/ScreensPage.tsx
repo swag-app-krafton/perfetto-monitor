@@ -18,6 +18,7 @@ import {
   Stack,
   Stat,
   StatGrid,
+  TermList,
   Text,
 } from '@/design'
 import { fmt, stepName } from '@/domain/format'
@@ -91,7 +92,7 @@ export function ScreensPage() {
         />
       </Row>
       {view === 'launch' && run ? (
-        <LaunchView run={run} />
+        <LaunchView run={run} descriptions={scope.history.startup_model.step_descriptions} />
       ) : q.isLoading ? (
         <EmptyState>
           <Spinner /> &nbsp;Reading the trace…
@@ -315,7 +316,7 @@ function ScreenRow({ r, maxCpu, open, onToggle, metric, setMetric }: { r: Screen
   )
 }
 
-function LaunchView({ run }: { run: Run }) {
+function LaunchView({ run, descriptions }: { run: Run; descriptions: Record<string, string> }) {
   const ttid = valueOf(run, 'ttff_ms')
   if (!run.steps.length && ttid == null) {
     return <EmptyState title="No launch in this trace">A session that begins with the app already open has no launch to measure. Trace a cold start to capture one.</EmptyState>
@@ -328,20 +329,23 @@ function LaunchView({ run }: { run: Run }) {
         <KpiTile label="Startup steps" value={String(run.steps.length)} />
         <KpiTile label="Slowest step" value={run.steps.length ? fmt(Math.max(...run.steps.map((x) => x.dur_ms)), 1) : null} unit="ms" />
       </Grid>
-      <Card title="Startup steps" hint={`Each stage of the launch run #${run.id} recorded, in order. Start is relative to the first step.`}>
-        {run.steps.map((st) => (
-          <div key={st.step} className={s.step}>
-            <Text variant="body" tone="primary" weight={500}>
-              {stepName(st.step)}
-            </Text>
-            <Text variant="body" align="right">
-              +{fmt((st.start_ms ?? t0) - t0, 1)} ms
-            </Text>
-            <Text variant="body" tone="primary" weight={600} align="right">
-              {fmt(st.dur_ms, 1)} ms
-            </Text>
-          </div>
-        ))}
+      <Card title="Startup steps" hint={`Each stage of the launch run #${run.id} recorded, in order, with what it covers. Start is relative to the first step.`}>
+        <TermList
+          label={`Startup steps of run #${run.id}`}
+          items={run.steps.map((st) => ({
+            key: st.step,
+            term: stepName(st.step),
+            description: descriptions[st.step],
+            values: [
+              <Text key="start" variant="body">
+                +{fmt((st.start_ms ?? t0) - t0, 1)} ms
+              </Text>,
+              <Text key="dur" variant="body" tone="primary" weight={600}>
+                {fmt(st.dur_ms, 1)} ms
+              </Text>,
+            ],
+          }))}
+        />
       </Card>
     </>
   )

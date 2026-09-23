@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type {
+  Audit,
   ComparePayload,
   DevicePayload,
   HistoryPayload,
@@ -8,6 +9,7 @@ import type {
   LivePayload,
   ManualStatus,
   RunDetails,
+  RunnerStatus,
   ScreensPayload,
   StressTest,
 } from './types'
@@ -24,6 +26,8 @@ export const keys = {
   job: (id: string) => ['job', id] as const,
   jobs: ['jobs'] as const,
   runMeta: (id: number) => ['run-meta', id] as const,
+  audits: ['audits'] as const,
+  audit: (id: number) => ['audits', id] as const,
 }
 
 export const useHistory = () =>
@@ -132,3 +136,24 @@ export const useRunMeta = (id: number | null) =>
     enabled: id != null,
     staleTime: Infinity,
   })
+
+/** Every Flashlight audit, newest first, and whether Flashlight can run here.
+ *  Polls while one is still running, so its row fills in without a reload. */
+export const useAudits = () =>
+  useQuery({
+    queryKey: keys.audits,
+    queryFn: () => api.get<{ audits: Audit[]; runner: RunnerStatus }>('/api/audits'),
+    refetchInterval: (q) => (q.state.data?.audits.some((a) => a.state === 'running') ? 2_000 : false),
+  })
+
+/** One audit in full: per-iteration numbers and the average iteration's series. */
+export const useAudit = (id: number | null) =>
+  useQuery({
+    queryKey: keys.audit(id ?? -1),
+    queryFn: () => api.get<Audit>(`/api/audits?id=${id}`),
+    enabled: id != null,
+    refetchInterval: (q) => (q.state.data?.state === 'running' ? 2_000 : false),
+  })
+
+export const startAudit = (v: { pkg: string; iterations: number; duration_ms: number }) =>
+  api.post<{ job_id: string }>('/api/audit/start', v)

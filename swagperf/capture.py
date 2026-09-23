@@ -253,6 +253,46 @@ def _utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# ------------------------------------------------------------ other profilers
+#
+# Perfetto shares the kernel's trace buffer with anything else that drives
+# ftrace or atrace. Flashlight is the one this project runs: when it starts it
+# switches sched_switch off, shrinks the buffer and replaces the atrace
+# settings, and a Perfetto session on the same device records nothing from
+# that moment on, without logging an error (measured in
+# docs/flashlight-perfetto-observations.html). So no capture starts while one
+# of them is running.
+
+OTHER_PROFILERS = {"flashlight": "Flashlight's profiler", "atrace": "an atrace session"}
+
+
+def other_profilers(serial=None):
+    """Measurement tools running on the device that would break a Perfetto
+    trace. The bracket in the pattern stops pgrep matching its own shell."""
+    devs = devices()
+    if not devs:
+        return []
+    serial = serial or devs[0]
+    try:
+        out = subprocess.run(
+            ["adb", "-s", serial, "shell",
+             "pgrep -f '[B]AMPerfProfiler' >/dev/null && echo flashlight; "
+             "pgrep -x atrace >/dev/null && echo atrace; true"],
+            capture_output=True, text=True, timeout=15).stdout
+    except (subprocess.SubprocessError, OSError):
+        return []
+    return [OTHER_PROFILERS[w] for w in out.split() if w in OTHER_PROFILERS]
+
+
+def require_no_other_profiler(serial=None):
+    found = other_profilers(serial)
+    if found:
+        raise RuntimeError(
+            f"{' and '.join(found)} is running on the device. Perfetto shares the "
+            "kernel trace buffer with it and would record nothing. Wait for the "
+            "Flashlight audit to finish (or stop it), then capture again.")
+
+
 def force_stop(pkg, serial=None):
     serial = serial or (devices() or [None])[0]
     subprocess.run(["adb", "-s", serial, "shell", "am", "force-stop", pkg],
@@ -287,6 +327,7 @@ def capture(out_path, *, pkg="com.swag.pay", duration_ms=10000, serial=None,
     if not devs:
         raise RuntimeError("No adb device connected. Connect a device or analyse an existing trace file.")
     serial = serial or devs[0]
+    require_no_other_profiler(serial)
     base = ["adb", "-s", serial]
     remote = "/data/misc/perfetto-traces/swagperf.pftrace"
     cfg = CONFIG.format(pkg=pkg, dur=duration_ms)
@@ -408,6 +449,7 @@ def manual_start(*, pkg="com.swag.pay", serial=None, cold=False):
     if manual_status(serial)["recording"]:
         raise RuntimeError(
             "A manual trace is already recording. Stop it before starting another.")
+    require_no_other_profiler(serial)
 
     subprocess.run(base + ["shell", "rm", "-f", MANUAL_REMOTE], capture_output=True)
     if cold:

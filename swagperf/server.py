@@ -31,9 +31,16 @@ def _device_payload():
     rows.sort(key=lambda a: (not a["installed"], a["role"] != "own",
                              not a.get("in_catalogue", True),
                              a["role"] != "competitor", a["name"].lower()))
+    from . import flashlight
+    serial = info.get("serial")
     return {"connected": True, **info, "packages": rows,
-            "health": cap.device_health(info.get("serial")),
-            "devices": cap.devices()}
+            "health": cap.device_health(serial),
+            "devices": cap.devices(),
+            # One profiler at a time per device: the pages use these to say
+            # why a run can't start instead of letting it fail.
+            "profilers": {"flashlight_runner": flashlight.runner_status(),
+                          "other_profilers": cap.other_profilers(serial),
+                          "perfetto_recording": cap.manual_status(serial).get("recording", False)}}
 
 
 def _payload(limit=100):
@@ -73,7 +80,8 @@ def _payload(limit=100):
             GLOBAL_BUDGETS["time_to_first_camera_frame_ms"] if not d.get("derived")
             else (app or {}).get("budgets", {}).get("ttid_ms"))
         out.append(d)
-    from .budgets import CRITICAL_PATH_FIRST_RUN, CRITICAL_PATH_RETURNING, DEFERRED_STEPS, STEP_RUNTIME
+    from .budgets import (CRITICAL_PATH_FIRST_RUN, CRITICAL_PATH_RETURNING, DEFERRED_STEPS,
+                          STEP_DESCRIPTIONS, STEP_RUNTIME)
     return {"runs": out, "step_budgets": STEP_BUDGETS_MS,
             # The instrumented app's stated startup architecture: which steps a
             # user waits through on each path, and which work must wait for the
@@ -81,7 +89,10 @@ def _payload(limit=100):
             "startup_model": {"critical_path": {"returning_user": CRITICAL_PATH_RETURNING,
                                                 "first_run": CRITICAL_PATH_FIRST_RUN},
                               "deferred_steps": DEFERRED_STEPS,
-                              "step_runtime": STEP_RUNTIME},
+                              "step_runtime": STEP_RUNTIME,
+                              # What each step covers, in plain words, shown
+                              # wherever the dashboard names a step.
+                              "step_descriptions": STEP_DESCRIPTIONS},
             "global_budgets": GLOBAL_BUDGETS, "risk_map": RISK_MAP,
             "benchmarks": store.benchmarks(),
             "metric_direction": store.METRIC_DIRECTION,
@@ -320,6 +331,22 @@ class H(SimpleHTTPRequestHandler):
         if u.path == "/api/copilot/pins":
             rid = q.get("run", [None])[0]
             return self._json({"pins": store.copilot_pins(int(rid) if rid else None)})
+        if u.path.startswith("/api/audits"):
+            from . import catalogue, flashlight, threads
+
+            def named(a):
+                app = catalogue.get(a["app_pkg"]) or {}
+                return {**a, "app_name": app.get("name") or a["app_pkg"], "app_role": app.get("role"),
+                        "summary": threads.describe_summary(a.get("summary"))}
+            aid = q.get("id", [None])[0]
+            if aid:
+                try:
+                    a = store.audit_get(int(aid))
+                except ValueError:
+                    return self._json({"error": "id must be a number"}, 400)
+                return self._json(named(a)) if a else self._json({"error": "unknown audit"}, 404)
+            return self._json({"audits": [named(a) for a in store.audit_list(q.get("app", [None])[0])],
+                               "runner": flashlight.runner_status()})
         if u.path.startswith("/api/stress"):
             sid = q.get("id", [None])[0]
             if sid:
@@ -379,6 +406,12 @@ class H(SimpleHTTPRequestHandler):
             return self._json({"ok": True, "cleared": k})
         if u.path == "/api/manual/start":
             from .capture import manual_start
+            from . import jobs
+            # Between two audit iterations Flashlight's profiler is briefly not
+            # running, so the device-side check alone could miss an audit.
+            if jobs.busy():
+                return self._json({"error": "A capture or Flashlight audit is using the device. "
+                                            "Wait for it to finish."}, 409)
             try:
                 _live_reset()
                 r = manual_start(pkg=(payload.get("pkg") or "com.swag.pay").strip(),
@@ -409,6 +442,17 @@ class H(SimpleHTTPRequestHandler):
                     label=payload.get("label"),
                     use_llm=payload.get("use_llm", False))
             except ValueError as e:
+                return self._json({"error": str(e)}, 400)
+            return self._json({"ok": True, "job_id": jid})
+        if u.path == "/api/audit/start":
+            from . import jobs
+            try:
+                jid = jobs.start_audit(
+                    payload.get("pkg", "").strip(),
+                    iterations=payload.get("iterations", 5),
+                    duration_ms=payload.get("duration_ms", 10000),
+                    label=payload.get("label"))
+            except (ValueError, TypeError) as e:
                 return self._json({"error": str(e)}, 400)
             return self._json({"ok": True, "job_id": jid})
         if u.path == "/api/capture/start":
@@ -490,6 +534,7 @@ class H(SimpleHTTPRequestHandler):
 def serve(port=8787):
     print(f"  swagperf dashboard -> http://127.0.0.1:{port}   (ctrl-c to stop)")
     # Jobs live in this process, so nothing can still be running at startup.
+    store.audit_mark_interrupted()
     stale = store.stress_mark_interrupted()
     if stale:
         print(f"  marked {stale} stress test(s) left running by a previous server as interrupted")

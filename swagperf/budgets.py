@@ -71,3 +71,83 @@ STEP_RUNTIME = {
     "step:activity_resume": "Android framework", "step:first_frame": "Android framework",
     "step:fully_drawn": "Android framework",
 }
+
+# What each step covers, in plain words, for a developer who is not an Android
+# performance expert. The dashboard shows it wherever a step is named. A test
+# requires one for every step in derive.PHASES and in STEP_RUNTIME, so a new
+# step cannot ship without one.
+#
+# The Android steps are derived from the framework's own launch slices (see
+# derive.PHASES), so they describe what those slices are. The Swag Pay steps
+# below them are the startup model this file states: its paths, owners and
+# deferred work. The app itself emits only instant `step:` milestones today
+# (SwagTrace.stepInstant), so these descriptions say what each step stands
+# for in that model and no more; tighten them when the app wraps real work.
+STEP_DESCRIPTIONS = {
+    # Android's own launch phases, for any app.
+    "step:process_start": (
+        "Android creating the app's process by forking Zygote, a pre-started process "
+        "with the framework already loaded. Only a cold start has it. Mostly outside "
+        "the app's control; a busy or low-memory device slows it."),
+    "step:bind_application": (
+        "The new process loading the app: ART, the Java/Kotlin runtime, opens its dex "
+        "(code) files, content providers start, then Application.onCreate runs. SDKs "
+        "initialised in onCreate or providers usually make it slow."),
+    "step:activity_create": (
+        "Android creating the first screen (an Activity) and running its onCreate. "
+        "Slow when onCreate does real work before returning, such as reading storage "
+        "or setting up dependencies on the main thread."),
+    "step:layout_inflate": (
+        "Building the first screen's UI: inflating XML layouts into views "
+        "(setContentView), or composing the first Compose frame. Deep or complex "
+        "layouts and heavy work inside composables make it slow."),
+    "step:activity_resume": (
+        "The first screen becoming ready for input: Android runs the Activity's "
+        "onResume. Slow when onResume starts work on the main thread, such as opening "
+        "the camera or registering listeners."),
+    "step:first_frame": (
+        "The app's first frame (the first Choreographer#doFrame): measuring, laying "
+        "out and drawing the first screen on the main thread. A complex first screen "
+        "or work queued ahead of drawing makes it slow."),
+    "step:fully_drawn": (
+        "The app telling Android its first screen is complete, content included, by "
+        "calling reportFullyDrawn(). Only apps that call it have this step; it marks "
+        "time to full display (TTFD)."),
+    # Swag Pay's startup model (CRITICAL_PATH_*, DEFERRED_STEPS above).
+    "step:bootstrap": (
+        "Swag Pay's native start-up work before its first screen. It comes first on "
+        "both the returning-user and first-run paths, so every later step waits for "
+        "it; work the first screen doesn't need belongs later."),
+    "step:session_read": (
+        "Reading the saved user session from on-device storage, on the returning-user "
+        "path; it decides whether the app opens the camera home or onboarding. "
+        "Blocking disk reads make it slow."),
+    "step:compose_shell": (
+        "Swag Pay's Compose shell composed and drawn for the first time: the shared "
+        "UI, such as the bottom navigation, that every screen sits in. Heavy work "
+        "during the first composition makes it slow."),
+    "step:camera_open": (
+        "Opening the camera and starting its preview, on the returning-user path. "
+        "Most of its time is usually the camera hardware and driver setting up "
+        "streams, so starting it earlier helps more than faster code."),
+    "step:first_qr_decode": (
+        "Decoding the first QR code from the camera's frames. The last step on the "
+        "returning-user path: startup time (TTID) ends when it does. Large frames or "
+        "a slow decoder make it slow."),
+    "step:hermes_boot": (
+        "Starting Hermes, the JavaScript engine React Native runs on. On first run, "
+        "onboarding waits for it; for a returning user it must not start before the "
+        "first usable camera frame. JS bundle size usually drives its cost."),
+    "step:rn_onboarding_surface": (
+        "Showing the React Native onboarding screen on first run, after Hermes has "
+        "started: creating the surface and rendering its first view tree. Heavy "
+        "JavaScript work before the first render makes it slow."),
+    "step:cronet_init": (
+        "Starting Cronet, Chromium's networking library, for the app's HTTP requests. "
+        "Deferred work: for a returning user it must not start before the first usable "
+        "camera frame. Loading its native library and building the engine are the cost."),
+    "step:remote_config": (
+        "Fetching or applying remote configuration: settings and feature flags served "
+        "by a backend. Deferred work: for a returning user it must not start before "
+        "the first usable camera frame. Network waits slow it."),
+}
