@@ -357,6 +357,26 @@ def actions(tp):
     return out
 
 
+def action_events(tp, visits, limit=200):
+    """Every action marker in time order, with the screen it happened on.
+
+    The per-action table counts; this is the session as it happened, which is
+    what a reader scans to line a jank burst or a RAM step up with what the
+    user was doing. Times are milliseconds on the visits' clock.
+    """
+    rows = _rows(tp, f"""
+        select name as nm, ts from slice where name like '{ACTION_PREFIX}%'
+        order by ts limit {int(limit)}
+    """)
+    spans = sorted((v["start_ms"], v["start_ms"] + v["duration_ms"], v["route"]) for v in visits)
+    out = []
+    for r in rows:
+        t = r["ts"] / 1e6
+        screen = next((route for a, b, route in spans if a <= t <= b), None)
+        out.append({"at_ms": round(t, 1), "action": r["nm"][len(ACTION_PREFIX):], "screen": screen})
+    return out
+
+
 def screen_stack(tp):
     """Reconstruct the navigation stack over time, one entry per screen visit.
 
@@ -554,7 +574,7 @@ def navigations(tp, upids=None):
 
 # Bump whenever the shape or maths of extract_screens changes, so a cached
 # result computed by older code is never served as if it were current.
-SCREENS_CACHE_VERSION = 4
+SCREENS_CACHE_VERSION = 5
 
 
 def _cache_path(trace_path):
@@ -740,6 +760,7 @@ def _extract_screens(trace_path):
                 "stack_summary": stack_summary(visits),
                 "max_depth": max((v.get("depth", 1) for v in visits), default=0),
                 "actions": actions(tp),
+                "action_events": action_events(tp, visits),
                 "navigations": navigations(tp, upids)}
     finally:
         tp.close()

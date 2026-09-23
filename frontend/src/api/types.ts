@@ -123,7 +123,7 @@ export interface HistoryPayload {
   benchmarks: Benchmark[]
   metric_direction: Record<string, 'lower' | 'higher'>
   signed_metrics: string[]
-  startup_model: { critical_path: Record<string, string[]>; deferred_steps: string[] }
+  startup_model: { critical_path: Record<string, string[]>; deferred_steps: string[]; step_runtime: Record<string, string> }
 }
 
 export interface DevicePackage {
@@ -293,6 +293,7 @@ export type ScreensPayload =
       max_depth: number
       timeline: { rss: [number, number][]; cpu: [number, number][]; bucket_ms: number }
       actions: ActionRow[]
+      action_events: { at_ms: number; action: string; screen: string | null }[]
       navigations: Transition[]
     }
 

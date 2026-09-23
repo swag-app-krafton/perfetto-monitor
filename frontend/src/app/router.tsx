@@ -6,12 +6,16 @@ import { OverviewPage } from '@/features/overview/OverviewPage'
 import { StartupPage } from '@/features/startup/StartupPage'
 import { FramesPage } from '@/features/frames/FramesPage'
 import { MemoryPage } from '@/features/memory/MemoryPage'
+import { StepsPage } from '@/features/steps/StepsPage'
+import { ScreensPage } from '@/features/screens/ScreensPage'
 
 const PAGES: Record<string, React.ReactNode> = {
   overview: <OverviewPage />,
   startup: <StartupPage />,
   frames: <FramesPage />,
   memory: <MemoryPage />,
+  steps: <StepsPage />,
+  screens: <ScreensPage />,
 }
 
 export const router = createBrowserRouter([
