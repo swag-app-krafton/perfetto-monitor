@@ -57,3 +57,17 @@ RISK_MAP = {
     "rss_growth_mb": "Surface teardown / orphaned RN surfaces",
     "thermal_drift_pct": "Sustained-scan thermal throttling",
 }
+
+# Which runtime owns each instrumented step. The dashboard labels steps with
+# it; steps derived from Android's own launch slices belong to the framework.
+STEP_RUNTIME = {
+    "step:bootstrap": "Native", "step:session_read": "Native",
+    "step:camera_open": "Native camera", "step:first_qr_decode": "Native camera",
+    "step:compose_shell": "Compose",
+    "step:hermes_boot": "React Native", "step:rn_onboarding_surface": "React Native",
+    "step:cronet_init": "Native", "step:remote_config": "Native",
+    "step:process_start": "Android framework", "step:bind_application": "Android framework",
+    "step:activity_create": "Android framework", "step:layout_inflate": "Android framework",
+    "step:activity_resume": "Android framework", "step:first_frame": "Android framework",
+    "step:fully_drawn": "Android framework",
+}
