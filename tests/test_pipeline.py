@@ -1133,3 +1133,121 @@ class TestStressInterrupted(unittest.TestCase):
         self.assertEqual(store.stress_mark_interrupted(db=db), 1)
         self.assertEqual(store.stress_get(sid, db=db)["state"], "interrupted")
         self.assertEqual(store.stress_get(done, db=db)["state"], "done")
+
+
+class TestCopilotEngine(unittest.TestCase):
+    """The deterministic Copilot: routing, honesty about data it lacks, and
+    the event stream the panel consumes."""
+
+    def _history(self):
+        run = lambda i, ttid, peak, verdict="fail": {
+            "id": i, "ts": f"2026-09-2{i % 10}T10:00:00+00:00", "app_pkg": "com.swag.pay", "path_kind": "cold",
+            "device": "V2514", "derived": 1, "app_role": "own", "ttid_budget_ms": 420, "ttff_ms": ttid,
+            "slow_pct": 1.0, "janky_pct": 0.4, "peak_rss_mb": peak, "rss_growth_mb": 300.0, "thermal_drift_pct": None,
+            "violations": [], "frames": {"total": 100, "slow_pct": 1.0, "janky_pct": 0.4, "max_ms": 40},
+            "steps": [{"step": "step:bind_application", "dur_ms": ttid / 2}],
+            "analysis": {"verdict": verdict, "headline": f"run {i}", "findings": [
+                {"title": "Peak RAM usage over budget", "severity": "high", "evidence": "x", "recommendation": "y"}]}}
+        return {"runs": [run(1, 300, 400), run(2, 310, 410), run(3, 380, 480)], "benchmarks": [],
+                "global_budgets": {"peak_rss_mb": 320, "rss_growth_mb": 60, "slow_frame_pct": 5, "janky_frame_pct": 0.5,
+                                   "thermal_drift_pct": 15}}
+
+    def _ask(self, text, **kw):
+        from swagperf import copilot
+        ev = []
+        svc = {"stress_tests": lambda: [], "compare": lambda a, b: None,
+               "extract_screens": lambda p: {"instrumented": False}, "trace_path": lambda r: None}
+        copilot.answer(text, history=self._history(), scope={"app": "com.swag.pay", "path": "cold"},
+                       emit=lambda k, d: ev.append((k, d)), services=svc, **kw)
+        return ev
+
+    def test_words_not_substrings_decide_the_intent(self):
+        """'frames' contains 'ram' -- a slow-frames question was answered about RAM."""
+        from swagperf.copilot import route
+        self.assertEqual(route("What is causing slow frames?")[0], "frames")
+        self.assertEqual(route("Compare peak RAM across the last 10 builds")[0], "peak")
+        self.assertEqual(route("Explain finding F-3")[0:2], ("finding", 2))
+
+    def test_stream_shape(self):
+        ev = self._ask("Why did TTID regress?")
+        kinds = [k for k, _ in ev]
+        self.assertEqual(kinds[-1], "done")
+        self.assertIn("step", kinds)
+        self.assertTrue(any(k == "block" and d["type"] == "cites" for k, d in ev))
+
+    def test_paragraphs_are_plain_text(self):
+        """The panel renders para text as-is; Markdown there shows as asterisks."""
+        for q in ("Why did TTID regress?", "Summarise this run for a PR comment", "Which step grew the most?"):
+            for k, d in self._ask(q):
+                if k == "block" and d["type"] in ("para", "verdict", "heading"):
+                    self.assertNotIn("**", d["text"], q)
+
+    def test_says_when_the_named_metric_did_not_regress(self):
+        ev = self._ask("Why did TTID regress in #2?")
+        paras = [d["text"] for k, d in ev if k == "block" and d["type"] == "para"]
+        self.assertTrue(any(p.startswith("TTID regressed") or "did not move" in p for p in paras))
+
+    def test_unknown_run_is_no_data_not_a_guess(self):
+        ev = self._ask("Why did #172 fail?")
+        self.assertEqual(ev[-1][0], "error")
+        self.assertEqual(ev[-1][1]["kind"], "no_data")
+        self.assertEqual(ev[-1][1]["oldest_run_id"], 1)
+
+    def test_mann_whitney_matches_the_frontend_rule(self):
+        from swagperf.copilot import mann_whitney_p
+        a = [300, 302, 305, 298, 301, 303, 299, 304, 300, 302]
+        self.assertLess(mann_whitney_p(a, [x + 40 for x in a]), 0.001)
+        self.assertGreater(mann_whitney_p(a, list(a)), 0.9)
+
+    def test_threads_and_feedback_persist(self):
+        db = os.path.join(tempfile.mkdtemp(), "h.db")
+        tid = store.copilot_thread_new("q", db=db)
+        store.copilot_message_add(tid, "user", {"text": "q"}, db=db)
+        mid = store.copilot_message_add(tid, "assistant", {"blocks": []}, db=db)
+        self.assertEqual(store.copilot_feedback(mid, "up", db=db), 1)
+        t = store.copilot_thread(tid, db=db)
+        self.assertEqual([m["role"] for m in t["messages"]], ["user", "assistant"])
+        self.assertEqual(t["messages"][1]["feedback"], "up")
+        with self.assertRaises(ValueError):
+            store.copilot_feedback(mid, "meh", db=db)
+
+    def _verdicts(self, ev):
+        return [d for k, d in ev if k == "block" and d["type"] == "verdict"]
+
+    def test_a_named_step_gets_its_own_answer(self):
+        """'Why did X grow?' is about step X, not the run's overall verdict."""
+        v = self._verdicts(self._ask("Why did bind_application grow?"))
+        self.assertEqual(v[0]["label"], "GREW")
+        self.assertIn("bind_application", v[0]["text"])
+        self.assertIn("190.0 ms", v[0]["text"])
+
+    def test_a_step_chip_narrows_a_general_question(self):
+        ev = self._ask("Why did this grow?", chips=[{"kind": "step", "id": "step:bind_application", "label": "Step"}])
+        self.assertEqual(self._verdicts(ev)[0]["label"], "GREW")
+
+    def test_finding_citations_only_for_the_run_the_overview_shows(self):
+        """The Overview lists the newest run's findings; citing F-1 of an older
+        run there would ring the wrong card."""
+        kinds = lambda ev: [c["kind"] for k, d in ev if k == "block" and d["type"] == "cites" for c in d["items"]]
+        self.assertIn("finding", kinds(self._ask("Explain finding F-1")))
+        self.assertNotIn("finding", kinds(self._ask("Explain finding F-1 on run #2")))
+
+    def test_done_names_the_run_answered_about(self):
+        self.assertEqual(self._ask("Why did #2 fail?")[-1][1]["run_id"], 2)
+
+    def test_pin_builds_the_finding_from_the_saved_answer(self):
+        db = os.path.join(tempfile.mkdtemp(), "h.db")
+        tid = store.copilot_thread_new("Why?", db=db)
+        store.copilot_message_add(tid, "user", {"text": "Why did TTID regress?"}, db=db)
+        mid = store.copilot_message_add(tid, "assistant", {
+            "blocks": [{"type": "verdict", "tone": "fail", "label": "FAIL", "text": "TTID is 480 ms."}],
+            "result": {"kind": "done", "run_id": 3}}, db=db)
+        pin = store.copilot_pin(mid, db=db)
+        self.assertEqual((pin["run_id"], pin["title"], pin["severity"], pin["evidence"]),
+                         (3, "Why did TTID regress?", "high", "TTID is 480 ms."))
+        self.assertEqual(store.copilot_pin(mid, db=db)["id"], pin["id"], "pinning twice keeps one pin")
+        self.assertEqual([x["id"] for x in store.copilot_pins(3, db=db)], [pin["id"]])
+        self.assertEqual(store.copilot_pins(2, db=db), [])
+        self.assertEqual(store.copilot_unpin(pin["id"], db=db), 1)
+        with self.assertRaises(ValueError):
+            store.copilot_pin(999, db=db)
