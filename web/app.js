@@ -785,6 +785,11 @@ function liveFeedHTML() {
     </div>
     ${MAN.liveErr ? `<p class="hint" style="color:var(--warn)">Feed stale: ${esc(MAN.liveErr)}</p>` : ''}
     ${L.note ? `<p class="hint">${esc(L.note)}</p>` : ''}
+    ${L.mode ? `<p class="hint">This phone did not return partial reads, so each refresh copies
+        the whole trace. Updates will slow down as the session grows.</p>` : ''}
+    ${L.remote_mb != null && L.read_mb != null && L.remote_mb - L.read_mb > 8
+      ? `<p class="hint">Catching up: read ${fmt(L.read_mb, 0)} of ${fmt(L.remote_mb, 0)} MB recorded so far.
+          Earlier markers may still be arriving.</p>` : ''}
     ${L.truncated ? `<p class="hint">Showing the most recent ${all.length} of ${L.total} markers.</p>` : ''}
     <div class="scroll" style="max-height:320px"><table>
       <thead><tr><th>At</th><th>Kind</th><th>Marker</th><th>Duration</th></tr></thead>

@@ -758,73 +758,91 @@ _LIVE_PREFIXES = ((SCREEN_PREFIX, "screen"), (ACTION_PREFIX, "action"),
                   (NAV_PREFIX, "nav"), (STEP_PREFIX, "step"))
 
 
-def live_markers(trace_path, *, limit=500):
-    """Markers seen so far in a partial trace, newest last.
-
-    Returns a flat timeline plus per-kind counts. `open_ended` marks a screen
-    slice that has not closed yet, which for the live view is the normal state
-    of the screen currently on display rather than an anomaly.
-    """
+def marker_rows(trace_path):
+    """Raw `(name, ts, dur)` rows for every SwagTrace marker in a trace."""
     from perfetto.trace_processor import TraceProcessor
     tp = TraceProcessor(trace=trace_path)
     try:
         where = " or ".join(f"s.name like '{p}%'" for p, _ in _LIVE_PREFIXES)
-        rows = _rows(tp, f"""
+        return [(r["nm"], r["ts"], r["dur"]) for r in _rows(tp, f"""
             select s.name as nm, s.ts as ts, s.dur as dur
             from slice s where {where}
             order by s.ts
-        """)
-        # Timestamps are boot-relative, which means nothing on their own. The
-        # first marker is the natural zero for a session view: it makes the
-        # numbers read as "N seconds into this session".
-        base = rows[0]["ts"] if rows else 0
-
-        events, counts = [], {}
-        for r in rows:
-            nm = r["nm"]
-            kind = label = None
-            for prefix, k in _LIVE_PREFIXES:
-                if nm.startswith(prefix):
-                    kind, label = k, nm[len(prefix):]
-                    break
-            if kind is None:
-                continue
-            dur = r["dur"] or 0
-            counts[kind] = counts.get(kind, 0) + 1
-            ev = {
-                "kind": kind,
-                "name": label,
-                "at_ms": round((r["ts"] - base) / 1e6, 1),
-                "duration_ms": round(dur / 1e6, 2) if dur > 0 else None,
-                "open_ended": dur < 0,
-            }
-            if kind == "screen":
-                # Strip the `#kind` tag out of the displayed name and report it
-                # as its own field, so the feed reads as a screen name rather
-                # than a wire format.
-                meta = parse_route(label)
-                ev["name"] = meta["route"]
-                ev["screen_kind"] = meta["kind"]
-                ev["screen_kind_label"] = meta["kind_label"]
-                ev["parent"] = meta["parent"]
-                ev["step"] = meta["step"]
-            events.append(ev)
-
-        # Several screen slices can be open at once now: a parent route and the
-        # sub-screen inside it. The innermost one is what the user is looking
-        # at, so prefer a sub-screen over the parent that contains it.
-        open_screens = [e for e in events
-                        if e["kind"] == "screen" and e["open_ended"]]
-        current_ev = next((e for e in reversed(open_screens) if e.get("step")),
-                          open_screens[-1] if open_screens else None)
-        current = current_ev["name"] if current_ev else None
-        return {
-            "events": events[-limit:],
-            "truncated": len(events) > limit,
-            "total": len(events),
-            "counts": counts,
-            "current_screen": current,
-            "current_screen_kind": (current_ev or {}).get("screen_kind_label"),
-        }
+        """)]
     finally:
         tp.close()
+
+
+def summarise_markers(rows, *, limit=500):
+    """The live feed from marker rows: a timeline, per-kind counts, and the
+    screen currently on display.
+
+    Screen durations are derived from the sequence rather than read from each
+    slice. A screen slot holds one screen at a time, so a screen ends when the
+    next one in its slot begins -- which stays true when the rows came from
+    separately parsed chunks of a trace still being recorded, where a screen
+    that opened in an earlier chunk never shows its closing event.
+    """
+    rows = sorted(rows, key=lambda r: r[1])
+    # Timestamps are boot-relative, which means nothing on their own. The
+    # first marker is the natural zero for a session view: it makes the
+    # numbers read as "N seconds into this session".
+    base = rows[0][1] if rows else 0
+
+    events, counts = [], {}
+    last_in_slot = {}
+    for nm, ts, dur in rows:
+        kind = label = None
+        for prefix, k in _LIVE_PREFIXES:
+            if nm.startswith(prefix):
+                kind, label = k, nm[len(prefix):]
+                break
+        if kind is None:
+            continue
+        dur = dur or 0
+        counts[kind] = counts.get(kind, 0) + 1
+        ev = {
+            "kind": kind,
+            "name": label,
+            "at_ms": round((ts - base) / 1e6, 1),
+            "duration_ms": round(dur / 1e6, 2) if dur > 0 else None,
+            "open_ended": dur < 0,
+        }
+        if kind == "screen":
+            # Strip the `#kind` tag out of the displayed name and report it
+            # as its own field, so the feed reads as a screen name rather
+            # than a wire format.
+            meta = parse_route(label)
+            ev["name"] = meta["route"]
+            ev["screen_kind"] = meta["kind"]
+            ev["screen_kind_label"] = meta["kind_label"]
+            ev["parent"] = meta["parent"]
+            ev["step"] = meta["step"]
+            slot = "sub" if meta["step"] else "top"
+            prev = last_in_slot.get(slot)
+            if prev is not None and prev["open_ended"]:
+                prev["open_ended"] = False
+                prev["duration_ms"] = round(ev["at_ms"] - prev["at_ms"], 2)
+            last_in_slot[slot] = ev
+        events.append(ev)
+
+    # Several screen slices can be open at once: a parent route and the
+    # sub-screen inside it. The innermost one is what the user is looking
+    # at, so prefer a sub-screen over the parent that contains it.
+    open_screens = [e for e in events if e["kind"] == "screen" and e["open_ended"]]
+    current_ev = next((e for e in reversed(open_screens) if e.get("step")),
+                      open_screens[-1] if open_screens else None)
+    current = current_ev["name"] if current_ev else None
+    return {
+        "events": events[-limit:],
+        "truncated": len(events) > limit,
+        "total": len(events),
+        "counts": counts,
+        "current_screen": current,
+        "current_screen_kind": (current_ev or {}).get("screen_kind_label"),
+    }
+
+
+def live_markers(trace_path, *, limit=500):
+    """Markers seen so far in a (possibly partial) trace file, newest last."""
+    return summarise_markers(marker_rows(trace_path), limit=limit)

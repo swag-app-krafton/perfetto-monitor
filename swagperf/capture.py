@@ -313,3 +313,41 @@ def manual_snapshot(out_path, *, serial=None):
         raise RuntimeError(f"failed to pull the partial trace: "
                            f"{(pull.stderr or pull.stdout)[:300]}")
     return out_path
+
+
+def manual_remote_size(serial=None):
+    """Current size of the in-progress manual trace on the device, or None."""
+    devs = devices()
+    if not devs:
+        return None
+    serial = serial or devs[0]
+    p = subprocess.run(["adb", "-s", serial, "shell", f"stat -c %s {MANUAL_REMOTE}"],
+                       capture_output=True, text=True, timeout=20)
+    try:
+        return int(p.stdout.strip())
+    except ValueError:
+        return None
+
+
+def manual_read_from(offset, serial=None, max_bytes=64 * 1024 * 1024):
+    """Bytes of the in-progress manual trace from `offset` on, capped per call.
+
+    Only what was appended since the last read crosses the USB link, so a poll
+    stays cheap however long the session has run -- `adb pull` of the whole
+    file took ~30s four minutes into a session on the original config.
+    `exec-out` is binary-safe, unlike `shell`, which would mangle line endings.
+    The cap keeps a first read of a long-running session (the dashboard
+    restarted mid-recording) from arriving as one enormous chunk; the rest
+    comes on the following polls.
+    """
+    devs = devices()
+    if not devs:
+        raise RuntimeError("No adb device connected.")
+    serial = serial or devs[0]
+    p = subprocess.run(
+        ["adb", "-s", serial, "exec-out",
+         f"tail -c +{int(offset) + 1} {MANUAL_REMOTE} | head -c {int(max_bytes)}"],
+        capture_output=True, timeout=180)
+    if p.returncode != 0:
+        raise RuntimeError(f"failed to read the live trace: {p.stderr[:300]!r}")
+    return p.stdout
