@@ -155,6 +155,8 @@ def main(argv=None):
                    help="auto (default): claude CLI, then API key, then rules")
     a.add_argument("--json", action="store_true")
     a.add_argument("--fail-on", default="fail", choices=["never", "fail", "warn"])
+    # `capture --repeat` analyses each trace and asks for one review at the end.
+    a.add_argument("--no-review", action="store_true", help=argparse.SUPPRESS)
 
     c = sub.add_parser("capture", help="capture a trace from a connected device")
     c.add_argument("-o", "--out", default=None)
@@ -210,6 +212,21 @@ def main(argv=None):
     d.add_argument("--no-open", action="store_true")
 
     sub.add_parser("list", help="list recorded runs")
+
+    tr = sub.add_parser("triage", help="what runs since the last PM review raised, for the tracker")
+    tr.add_argument("--after", type=int, help="review runs after this id (default: the tracker's marker)")
+    tr.add_argument("--lookback", type=int, default=10,
+                    help="runs before the window checked to tell an ongoing signal from a new one")
+    tr.add_argument("--screens", action="store_true",
+                    help="attribute RAM signals to screens (reads the traces; slower)")
+    tr.add_argument("--json", action="store_true")
+    tr.add_argument("--mark", type=int, metavar="RUN_ID",
+                    help="move the tracker's 'Runs reviewed through' marker to RUN_ID and exit")
+
+    pmp = sub.add_parser("pm", help="the PM agent's automatic run review")
+    pmx = pmp.add_subparsers(dest="pcmd", required=True)
+    pmx.add_parser("status", help="is a review running, and where is its log")
+    pmx.add_parser("review", help="review runs since the last review now, in the background")
     sub.add_parser("reextract", help="recompute metrics for all runs whose traces still exist")
 
     appsp = sub.add_parser("apps", help="the catalogue of apps under test")
@@ -279,6 +296,9 @@ def main(argv=None):
                               "regressions": regs}, indent=2))
         else:
             _print(res, regs, m)
+        if not n.no_review:
+            from . import pm
+            print(f"  {pm.request_review()}", file=sys.stderr)
         if n.fail_on == "fail" and res.get("verdict") == "fail":
             return 1
         if n.fail_on == "warn" and res.get("verdict") in ("fail", "warn"):
@@ -309,11 +329,14 @@ def main(argv=None):
                 if dev:
                     args += ["--device", dev]
                 lbl = n.label or f"{'cold' if n.cold else 'warm'}-{i:02d}"
-                args += ["--label", lbl]
+                args += ["--label", lbl, "--no-review"]
                 rc = main(args) or rc
                 rid = store.run_id_for_trace(p)
                 if meta and rid:
                     store.set_run_meta(rid, "capture", {**meta, "moment": "before capture"})
+        if n.analyse:
+            from . import pm
+            print(f"  {pm.request_review()}", file=sys.stderr)
         return rc
 
     if n.cmd == "seed":
@@ -596,6 +619,30 @@ def main(argv=None):
         print(f"  re-analysed {redone} rules-only verdict(s)")
         if stale:
             print(f"  left as-is (LLM analysis; re-run `analyse` to refresh): {stale}")
+        return 0
+
+    if n.cmd == "triage":
+        from . import triage
+        if n.mark is not None:
+            print(f"  reviewed through #{triage.write_marker(n.mark)}")
+            return 0
+        after = n.after if n.after is not None else triage.read_marker()
+        if after is None:
+            print(f"  {os.path.relpath(triage.TRACKER)} has no 'Runs reviewed through: #N' line; pass --after N.",
+                  file=sys.stderr)
+            return 2
+        screens_of = None
+        if n.screens:
+            from .screens import extract_screens
+            screens_of = extract_screens
+        t = triage.review(triage.load_history(after, n.lookback), after=after,
+                          lookback=n.lookback, screens_of=screens_of)
+        print(json.dumps(t, indent=1) if n.json else triage.format_text(t))
+        return 0
+
+    if n.cmd == "pm":
+        from . import pm
+        print(pm.status() if n.pcmd == "status" else f"  {pm.request_review('asked from the command line')}")
         return 0
 
     if n.cmd == "list":

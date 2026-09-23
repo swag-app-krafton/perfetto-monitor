@@ -6,4 +6,7 @@ __pycache__/
 *.pyc
 apps.local.json
 issues_screenshots/
-.claude
+# Local Claude Code state (issue inbox, handoffs, PM review logs) stays private;
+# the shared agent definitions are committed.
+.claude/*
+!.claude/agents/
