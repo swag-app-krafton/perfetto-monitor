@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flashlight + Perfetto: observations and recommended path</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5f6b76;
+      --paper: #f5f3ed;
+      --card: #fffdf8;
+      --line: #d9d4c8;
+      --blue: #155e75;
+      --blue-soft: #e5f2f4;
+      --green: #287a52;
+      --green-soft: #e7f4ec;
+      --amber: #9a5c0b;
+      --amber-soft: #fff2d9;
+      --red: #a13935;
+      --red-soft: #fbe9e7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--paper);
+      font: 15px/1.55 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 42px 0 60px; }
+    header { padding: 30px; color: white; background: linear-gradient(135deg, #123748, #155e75); border-radius: 18px; }
+    h1 { max-width: 820px; margin: 7px 0 10px; font-size: clamp(30px, 5vw, 48px); line-height: 1.05; letter-spacing: -.035em; }
+    h2 { margin: 0 0 15px; font-size: 23px; line-height: 1.2; }
+    h3 { margin: 0 0 8px; font-size: 16px; }
+    p { margin: 7px 0; }
+    a { color: var(--blue); }
+    header a { color: #d9f4f7; }
+    code { padding: 2px 5px; border-radius: 5px; background: rgba(21, 94, 117, .09); font-size: .92em; }
+    section { margin-top: 18px; padding: 24px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+    .eyebrow { color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
+    header .eyebrow { color: #b9dde3; }
+    .lede { max-width: 850px; color: #e6f3f5; font-size: 17px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 18px; }
+    .card { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .good { border-top: 4px solid var(--green); }
+    .warn { border-top: 4px solid var(--amber); }
+    .stop { border-top: 4px solid var(--red); }
+    .good h3 { color: var(--green); }
+    .warn h3 { color: var(--amber); }
+    .stop h3 { color: var(--red); }
+    .flow { display: grid; grid-template-columns: 1fr 38px 1fr 38px 1fr; gap: 8px; align-items: stretch; margin-top: 16px; }
+    .node { min-height: 110px; padding: 15px; border: 1px solid #b7d2d8; border-radius: 12px; background: var(--blue-soft); }
+    .node b { display: block; margin-bottom: 5px; }
+    .arrow { align-self: center; color: var(--blue); text-align: center; font-size: 23px; }
+    .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 15px; }
+    .lane { padding: 18px; border-radius: 13px; border: 1px solid var(--line); }
+    .lane.canonical { background: var(--green-soft); border-color: #b8d9c5; }
+    .lane.audit { background: var(--amber-soft); border-color: #e6c98b; }
+    ul, ol { margin: 9px 0 0; padding-left: 21px; }
+    li { margin: 6px 0; }
+    .steps { counter-reset: step; display: grid; gap: 10px; margin-top: 15px; }
+    .step { position: relative; padding: 15px 16px 15px 56px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    .step::before { counter-increment: step; content: counter(step); position: absolute; left: 16px; top: 15px; display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; color: white; background: var(--blue); font-weight: 700; }
+    .badge { display: inline-block; margin: 3px 4px 3px 0; padding: 3px 8px; border-radius: 999px; color: var(--muted); background: #eef0ee; font-size: 12px; font-weight: 650; }
+    .decision { padding: 15px; border-left: 5px solid var(--blue); background: var(--blue-soft); border-radius: 8px; }
+    .caution { padding: 15px; border-left: 5px solid var(--amber); background: var(--amber-soft); border-radius: 8px; }
+    .contract { overflow-x: auto; margin-top: 12px; padding: 15px; color: #e5f1f3; background: #132d38; border-radius: 10px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+    .sources { color: var(--muted); font-size: 13px; }
+    footer { margin-top: 18px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 800px) {
+      .grid, .lanes { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .arrow { transform: rotate(90deg); }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Decision note · 23 September 2026</div>
+    <h1>Flashlight + Perfetto: observations and the path to take</h1>
+    <p class="lede">Flashlight is useful for repeatable Android performance audits across native and React Native code. Perfetto should remain this repository's only canonical event timeline. The controlled experiment has now run: the two cannot share a device at the same time, in either order, so they run as separate lanes.</p>
+  </header>
+
+  <section>
+    <div class="eyebrow">Phase 0 result · 23 September 2026</div>
+    <h2>Running both at once destroys the Perfetto trace</h2>
+    <p>Tested on a Vivo V2514 with Swag Pay, using Flashlight's own sampler (<code>@perf-profiler/profiler</code> 0.10.11, the code <code>flashlight test</code> runs) and swagperf's manual Perfetto session. Four modes, three repetitions each, in rotating order. Every run tapped the bottom tabs 10 times in each of three 10-second windows, logging each tap on the device's boot clock, so each window should hold exactly 10 screen markers. Medians across repetitions:</p>
+    <div class="contract">mode                       window  scheduler/s  doFrame/s  screen markers  frame timeline/s  RAM samples/s
+Perfetto only (control)    1–3     13,702–15,568  58–60     30/30 each      54–55             2.0
+Flashlight joins at W2     W1      14,133       58.2       30/30           54.6              2.0
+                           W2      0            0          0/30            56.3              0
+                           W3      0            0          0/30            55.5              0
+Flashlight already running 1–3     0            0          0/30 each       0 (app not found) 0</div>
+    <div class="grid">
+      <div class="card stop">
+        <h3>Flashlight joins a recording</h3>
+        <p>From the moment it starts, Perfetto records no scheduler events, no app slices, no screen markers and no RAM samples. It does not recover after Flashlight stops. The app kept rendering normally: the frame timeline, which reaches Perfetto from SurfaceFlinger rather than the kernel, held at 102–105% of the control.</p>
+      </div>
+      <div class="card stop">
+        <h3>Perfetto starts second</h3>
+        <p>The session starts without error but records no scheduler events, no counters and no process names, so nothing can be attributed to the app. Perfetto logs no error that the control does not also log: the failure is silent.</p>
+      </div>
+      <div class="card">
+        <h3>Flashlight is unaffected</h3>
+        <p>Its sampler parsed 17.5–18.3 frames per 500 ms measure in every mode, 98–103% of running alone. The damage runs one way.</p>
+      </div>
+    </div>
+    <p><b>Why.</b> Snapshots of the device's tracing state at each step show what Flashlight's start does to a running Perfetto session: it switches the <code>sched_switch</code> event off, shrinks the kernel trace buffer from 32 MB to 2 MB, replaces the atrace categories with <code>view</code> alone, and clears the app list that lets Swag Pay's markers through. Stopping it sets <code>tracing_on</code> to 0 while Perfetto is still recording. Its source explains the first part: it runs <code>atrace --async_stop</code>, starts <code>atrace -c view</code>, and reads <code>trace_pipe</code> from the same kernel buffer. It also leaves its atrace settings behind after it exits.</p>
+    <p class="decision"><b>Decision (confirmed 23 September 2026):</b> the two profilers stay separate. Same-run sampling with Flashlight is ruled out, and not something tuning will fix. Flashlight runs only as a separate audit lane, on a device nothing else is recording. Anything that must line up with Perfetto's timeline is derived from the Perfetto trace itself. Two requirements follow: a Perfetto capture must refuse to start while Flashlight's profiler is running on the device, because the failure is otherwise silent; and a Flashlight audit must reset atrace when it finishes. The experiment is reproducible with <code>experiments/flashlight-concurrency/</code>.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Executive decision</div>
+    <h2>Use both tools, but give them different ownership</h2>
+    <div class="grid">
+      <div class="card good">
+        <h3>Adopt</h3>
+        <p>Use Flashlight for repeated audits, portable reports, JS-thread visibility, and external/production-app comparisons.</p>
+      </div>
+      <div class="card stop">
+        <h3>Tested: ruled out</h3>
+        <p>Its programmatic polling was run beside Perfetto on a real device. It stops Perfetto's scheduler, marker and RAM data outright, in either order. See the Phase 0 result above.</p>
+      </div>
+      <div class="card stop">
+        <h3>Do not assume</h3>
+        <p>Do not treat two independent captures as one event-level timeline or allow two measurement controllers to own the device concurrently.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">What was observed</div>
+    <h2>Fit, benefits, and caveats</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Hybrid-app fit</h3>
+        <ul>
+          <li>Flashlight explicitly targets Android native, React Native, and Flutter apps.</li>
+          <li>Its process/thread measurements cover a native + RN hybrid because both execute inside Android processes.</li>
+          <li>RN insight depends on recognizable JS thread names; it does not know product screens or CTAs without app markers.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Useful output</h3>
+        <ul>
+          <li>Repeated test runs and averaged results.</li>
+          <li>CPU, memory, frame/performance score, and per-thread views.</li>
+          <li>JSON output plus a shareable report.</li>
+          <li>Official Maestro integration.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Measurement caveats</h3>
+        <ul>
+          <li>Scores vary materially with user behavior; automation and multiple iterations are required.</li>
+          <li>Maestro process startup can pollute command-runtime/TTI measurements.</li>
+          <li>Polling consumes device resources and ADB bandwidth; overhead must be measured on target devices.</li>
+          <li>Flashlight and Perfetto metric definitions must not be compared as if identical.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="caution"><b>Concurrency status:</b> tested and ruled out. Full Flashlight <code>measure/test</code> and the narrower <code>pollPerformanceMeasures</code> API start the same sampler, and it breaks a Perfetto recording on the same device. Run one measurement tool per device.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Correlation model</div>
+    <h2>Exact correlation needs one clock and one canonical capture</h2>
+    <div class="flow">
+      <div class="node"><b>Frozen Maestro plan</b>Same funnel IDs, inputs, assertions, build, and test data.</div>
+      <div class="arrow">→</div>
+      <div class="node"><b>Perfetto measured run</b>One trace with screen, action, navigation, API and runtime markers.</div>
+      <div class="arrow">→</div>
+      <div class="node"><b>Deterministic extraction</b>Per-screen CPU/RAM/frames and action latency on the exact same timeline.</div>
+    </div>
+    <div class="lanes">
+      <div class="lane canonical">
+        <h3>Lane A · Canonical regression</h3>
+        <p><b>Perfetto + Maestro + app markers</b></p>
+        <p>Use for event-level diagnosis, CI regression gates, screen/action waterfalls, and native ↔ RN transitions.</p>
+        <span class="badge">same run</span><span class="badge">exact timestamps</span><span class="badge">blocking</span>
+      </div>
+      <div class="lane audit">
+        <h3>Lane B · Flashlight audit</h3>
+        <p><b>Flashlight test + the same Maestro plan</b></p>
+        <p>Use repeated runs for score/report trends and JS-thread observations. Correlate by build, device, funnel, and environment—not by event timestamp.</p>
+        <span class="badge">separate runs</span><span class="badge">contextual correlation</span><span class="badge">advisory first</span>
+      </div>
+    </div>
+    <p class="decision"><b>If exact same-run correlation is mandatory:</b> first derive equivalent metrics from the existing Perfetto trace. Only add Flashlight's programmatic sampler when it supplies a unique metric and passes the compatibility gates below.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Recommended implementation path</div>
+    <h2>Roll out in five controlled steps</h2>
+    <div class="steps">
+      <div class="step"><b>Define metric ownership.</b> Perfetto owns time-aligned screen/action/API, CPU, RAM and frame evidence. Flashlight initially owns only its audit score/report and RN thread summary.</div>
+      <div class="step"><b>Run a compatibility matrix.</b> <i>Done, 23 September 2026:</i> Perfetto only, Flashlight only, and the sampler joining or preceding Perfetto, three repetitions each. The sampler breaks the trace every time, so the remaining steps assume separate runs.</div>
+      <div class="step"><b>Add a separate Flashlight CI lane.</b> Reuse the exact approved Maestro flow, device class, build, test data and thermal preparation. Store <code>results.json</code> as an immutable artifact.</div>
+      <div class="step"><b>Import summaries, not a false timeline.</b> Add Flashlight aggregates to the dashboard beside the Perfetto run group. Display whether evidence is <code>same_run</code>, <code>same_cohort</code>, or <code>unrelated</code>.</div>
+      <div class="step"><b>Derive same-run metrics from Perfetto.</b> Same-run sampling failed the trace-integrity gate outright, so per-thread CPU (including the React Native JS thread) comes from the Perfetto trace's own scheduler data instead.</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Proposed go/no-go gates</div>
+    <h2>Compatibility must be demonstrated, not inferred</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Trace integrity: failed</h3>
+        <ul>
+          <li>No missing Perfetto data sources.</li>
+          <li>No lost screen/action markers.</li>
+          <li>No trace start/stop interference.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Observer overhead</h3>
+        <ul>
+          <li>Proposed gate: ≤3% median and ≤5% p95 funnel-duration change.</li>
+          <li>No material jank, CPU, RAM, or thermal shift caused by sampling.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Operational safety</h3>
+        <ul>
+          <li>One leased device and one executor.</li>
+          <li>No competing ADB commands during critical transitions.</li>
+          <li>Clean shutdown and artifact recovery after failure.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Combined-view contract</div>
+    <h2>Store provenance so the dashboard cannot overstate correlation</h2>
+    <div class="contract">{
+  "run_group_id": "uuid",
+  "build_sha": "...",
+  "funnel_id": "pay_qr_v3",
+  "plan_hash": "...",
+  "device_class": "pixel_7_android_15",
+  "evidence": [
+    {"source": "perfetto", "relation": "canonical_same_run", "trace": "...pftrace"},
+    {"source": "flashlight", "relation": "same_cohort", "results": "results.json"}
+  ],
+  "controls": {
+    "iterations": 10,
+    "thermal_state": "nominal",
+    "network_profile": "wifi_lab"
+  }
+}</div>
+    <p>The UI may show both evidence sets together, but it must label Flashlight events as event-aligned only when they were captured by an approved same-run sampler and synchronized to the Perfetto clock.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Sources</div>
+    <h2>Primary references</h2>
+    <ul class="sources">
+      <li><a href="https://github.com/bamlab/flashlight">Flashlight repository</a> — supported Android app types and CLI/report positioning.</li>
+      <li><a href="https://docs.flashlight.dev/test/maestro/">Flashlight with Maestro</a> — integration and test-runtime caveat.</li>
+      <li><a href="https://docs.flashlight.dev/test/api/">Flashlight test API</a> — iterations, duration, hooks, JSON output.</li>
+      <li><a href="https://docs.flashlight.dev/advanced-usage/use-custom-script/">Programmatic polling</a> — candidate API for the compatibility spike.</li>
+      <li><a href="https://docs.flashlight.dev/guides/react-native/js-fps/">React Native JS performance</a> — JS-thread CPU interpretation.</li>
+      <li><a href="https://docs.flashlight.dev/test/ci/">CI guidance</a> — full ADB requirement and physical-device preference.</li>
+    </ul>
+  </section>
+
+  <footer>Architecture recommendation, updated with the Phase 0 device experiment (experiments/flashlight-concurrency, 23 September 2026).</footer>
+</main>
+</body>
+</html>

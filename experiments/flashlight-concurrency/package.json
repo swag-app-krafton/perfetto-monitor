@@ -1,0 +1,9 @@
+{
+  "name": "flashlight-concurrency",
+  "private": true,
+  "description": "Phase 0: does Flashlight's sampler damage a Perfetto trace recorded at the same time?",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@perf-profiler/profiler": "0.10.11"
+  }
+}
