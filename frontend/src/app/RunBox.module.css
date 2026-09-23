@@ -1,0 +1,18 @@
+.box {
+  min-width: 260px;
+  max-width: 380px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--s1);
+}
+@media (max-width: 759px) {
+  .box {
+    max-width: none;
+    width: 100%;
+  }
+}
+.id {
+  font: 800 16px/1 var(--font-display);
+  letter-spacing: 0.02em;
+}

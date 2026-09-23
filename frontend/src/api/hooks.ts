@@ -7,6 +7,7 @@ import type {
   Job,
   LivePayload,
   ManualStatus,
+  RunDetails,
   ScreensPayload,
   StressTest,
 } from './types'
@@ -22,6 +23,7 @@ export const keys = {
   stress: (id: number) => ['stress', id] as const,
   job: (id: string) => ['job', id] as const,
   jobs: ['jobs'] as const,
+  runMeta: (id: number) => ['run-meta', id] as const,
 }
 
 export const useHistory = () =>
@@ -119,4 +121,14 @@ export const useRecentJobs = () =>
     queryKey: keys.jobs,
     queryFn: () => api.get<{ jobs: (Job & { kind: string; pkg?: string; started: number; duration_ms?: number; cold?: boolean })[] }>('/api/jobs').then((r) => r.jobs),
     refetchInterval: (q) => (q.state.data?.some((j) => j.state === 'queued' || j.state === 'running') ? 1_500 : false),
+  })
+
+/** A run's full metadata. The first request for an older run reads its trace
+ *  once server-side (a few seconds); after that it is stored. */
+export const useRunMeta = (id: number | null) =>
+  useQuery({
+    queryKey: keys.runMeta(id ?? -1),
+    queryFn: () => api.get<{ run_id: number; meta: RunDetails }>(`/api/run/meta?id=${id}`).then((r) => r.meta),
+    enabled: id != null,
+    staleTime: Infinity,
   })

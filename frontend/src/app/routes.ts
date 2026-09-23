@@ -14,7 +14,7 @@ export interface ScreenDef {
 }
 
 export const SCREENS: ScreenDef[] = [
-  { id: 'overview', path: '/overview', label: 'Overview', code: 'OV', group: 'ANALYSE', hint: 'Latest run against the pinned benchmark.' },
+  { id: 'overview', path: '/overview', label: 'Overview', code: 'OV', group: 'ANALYSE', hint: 'The run in view against the pinned benchmark, or the run before it.' },
   { id: 'startup', path: '/startup', label: 'Startup', code: 'ST', group: 'ANALYSE', hint: 'Time to initial display, critical-path composition and the ordering constraint.' },
   { id: 'frames', path: '/frames', label: 'Frame pacing', code: 'FP', group: 'ANALYSE', hint: 'Slow and janky frames, and whether the device throttled.' },
   { id: 'memory', path: '/memory', label: 'Memory', code: 'ME', group: 'ANALYSE', hint: 'Peak RAM and growth across the session.' },

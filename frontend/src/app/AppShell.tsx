@@ -1,7 +1,8 @@
 import { Suspense, useCallback, useEffect, useRef, type ReactNode } from 'react'
-import { Outlet, useLocation } from 'react-router'
+import { Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { Spinner, Toast } from '@/design'
-import { useScope } from '@/domain/scope'
+import { useHistory } from '@/api/hooks'
+import { useScope, useSelectRun } from '@/domain/scope'
 import { useHighlightTarget } from '@/lib/highlight'
 import { useIsNarrow, useIsWide } from '@/lib/useMediaQuery'
 import { PageHeader } from './PageHeader'
@@ -28,6 +29,21 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
 
   useApplyTheme()
 
+  // `?run=<id>` in any link puts that run in view everywhere, then leaves the
+  // URL: the top bar is where the run in view lives.
+  const selectRun = useSelectRun()
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const runParam = Number(params.get('run')) || null
+  const historyLoaded = !!useHistory().data
+  useEffect(() => {
+    if (runParam == null || !historyLoaded) return
+    selectRun(runParam)
+    const next = new URLSearchParams(params)
+    next.delete('run')
+    navigate({ pathname: loc.pathname, search: next.toString() ? `?${next}` : '' }, { replace: true })
+  }, [runParam, historyLoaded, selectRun, navigate, params, loc.pathname])
+
   // A tab change starts at the top of the page (a deep link then scrolls itself).
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 })
@@ -53,7 +69,7 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
         <TopBar scope={scope} narrow={narrow} />
         <main ref={mainRef} className={s.main} id="main">
           <div className={s.page}>
-            <PageHeader group={screen.group} title={screen.label} hint={screen.hint} run={scope?.latest ?? null} />
+            <PageHeader group={screen.group} title={screen.label} hint={screen.hint} run={scope?.run ?? null} isLatest={scope?.isLatest ?? true} />
             <Suspense fallback={<Spinner />}>
               <Outlet />
             </Suspense>

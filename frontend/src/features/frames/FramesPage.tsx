@@ -6,15 +6,15 @@ import { useScope } from '@/domain/scope'
 export function FramesPage() {
   const { scope, isLoading } = useScope()
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
-  const { latest, runs, allRuns, benchmarkRun, history } = scope
-  if (!latest) return <EmptyState title="No runs yet">Capture a trace to see frame pacing.</EmptyState>
-  const base = benchmarkRun ?? allRuns.filter((r) => r.id < latest.id).pop() ?? null
+  const { run, runs, allRuns, benchmarkRun, history } = scope
+  if (!run) return <EmptyState title="No runs yet">Capture a trace to see frame pacing.</EmptyState>
+  const base = benchmarkRun ?? allRuns.filter((r) => r.id < run.id).pop() ?? null
   const labels = runs.map((r) => `#${r.id}`)
-  const f = latest.frames
+  const f = run.frames
 
   const tile = (key: MetricDef['key'], label: string) => {
     const m = metricByKey(key)
-    const v = valueOf(latest, key)
+    const v = valueOf(run, key)
     const b = valueOf(base, key)
     return (
       <KpiTile
@@ -33,7 +33,7 @@ export function FramesPage() {
         label={`${m.label} per run`}
         labels={labels}
         series={[{ name: m.label, color, values: runs.map((r) => valueOf(r, key)) }]}
-        budget={m.budget(latest, history.global_budgets)}
+        budget={m.budget(run, history.global_budgets)}
         unit={m.unit}
         decimals={m.dp}
       />

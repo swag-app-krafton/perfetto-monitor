@@ -48,7 +48,7 @@ export function StressPage() {
     }
   }
 
-  const budget = scope?.latest?.ttid_budget_ms ?? null
+  const budget = scope?.run?.ttid_budget_ms ?? null
   const appName = scope?.apps.find((a) => a.pkg === app)?.name ?? app
 
   return (

@@ -55,14 +55,14 @@
 }
 .cell {
   height: 44px;
-  border: 0;
-  padding: 0;
+  display: grid;
+  place-items: center;
   color: var(--on-st);
   font: 800 11px var(--font-ui);
-  cursor: pointer;
   outline-offset: 2px;
 }
-.cell[aria-pressed='true'] {
+/* The run in view (picked in the top bar). */
+.cell[aria-current='true'] {
   outline: 2px solid var(--tx);
 }
 .bMark {

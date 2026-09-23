@@ -1,4 +1,4 @@
-/* The latest TTID, large, in the chart card's header. */
+/* The TTID of the run in view, large, in the chart card's header. */
 .ttid {
   font: 700 28px/1 var(--font-display);
 }

@@ -66,6 +66,7 @@ boundary holds.
 
 - [Shareable architecture plan](docs/nlp-mobile-automation-ci-plan.html)
 - [ADR 0001: NLP mobile automation in CI](docs/decisions/0001-nlp-mobile-automation-ci.md)
+- [Flashlight + Perfetto observations and recommended path](docs/flashlight-perfetto-observations.html)
 - [Reusable architecture skill](.cursor/skills/nlp-mobile-ci-architect/SKILL.md)
 
 ## What it measures
@@ -102,9 +103,28 @@ budget (16.67 ms, 60 fps) applies to every app.
   while the Copilot is open on a screen under 1400 px wide.
 - **Top bar:** everything is filtered by **App** (package), **Path** (cold, warm,
   returning user, first run — whichever exist for that app) and **Range** (last 30
-  runs, last 10 runs, last 7 days). The choice is remembered.
-- **Page header:** names the run you are looking at: run number, device, path,
-  label and time.
+  runs, last 10 runs, last 7 days). The app, path and range are remembered.
+- **Run** (top bar) is the one place a run is chosen. *Latest* follows the newest
+  run as new ones land. Pick any other run and every screen shows that run. Links
+  that name a run (History's **Open**, a Copilot source, **View results** after a
+  capture) set it here too. Changing the app or path goes back to that scope's
+  latest run.
+- **Run box** (top right of every screen): the run in view. It shows the run ID and
+  verdict, whether it is the latest (**Older run · go to latest** when it is not),
+  the device and Android version, and the app and its version and build number. It
+  also shows when the run was recorded, its start path and what kind of run it
+  was. **Run details** opens everything recorded about the run:
+  - **App:** version, build number, git SHA, target/min SDK, debuggable, installer
+    and install dates.
+  - **Device:** manufacturer, model, Android and SDK, security patch, build ID and
+    fingerprint, SoC, CPU cores, RAM, screen, refresh rate, kernel and serial.
+  - **Device state:** battery, battery temperature, charging and thermal status,
+    read before the capture.
+  - **Trace:** file, size, length, Perfetto version.
+
+  **Copy details** puts it on the clipboard for a bug report. A field that was not
+  recorded says *not recorded*.
+- **Page header:** the screen's name and what it is for.
 - **Status is never colour alone.** ✓ pass, ! warn, ✕ fail. A metric warns within
   10% of its budget and fails over it. ▲ is worse, ▼ is better, = is unchanged.
   Moves under 5 ms on a step are treated as noise and are not coloured.
@@ -142,8 +162,8 @@ The latest run in scope, judged.
 - **Release gates:** every budgeted metric against its budget, as a bar.
 - **KPI tiles:** TTID, slow frames, janky frames, peak RAM, RAM growth and
   thermal drift. Each shows its change against the baseline and a 12-run trend.
-- **Verdict by run:** one cell per run in range, oldest to newest. Select one to
-  see its numbers. A "B" marks the benchmark.
+- **Verdict by run:** one cell per run in range, oldest to newest. The run in view
+  is outlined and its numbers are shown under the strip. A "B" marks the benchmark.
 - **Findings:** the analyst's findings, by severity, each with its evidence,
   recommendation and architectural risk. **Ask Copilot** explains one. Answers you
   pin from the Copilot appear here too, marked *Pinned from Copilot*.
@@ -211,8 +231,9 @@ slice whose bar ends past its tick. That is the part of the step that moved.
 
 ### Screens
 
-Per-screen cost, read from the app's own `SwagTrace` markers (see
-[Per-screen CPU and RAM](#per-screen-cpu-and-ram)). Pick any traced run. Manual
+Per-screen cost for the run in view, read from the app's own `SwagTrace` markers
+(see [Per-screen CPU and RAM](#per-screen-cpu-and-ram)). Only a run with a trace has
+screens; for one without, the screen offers the latest run that has one. Manual
 sessions are the richest.
 
 **Screen usage** view:
@@ -227,8 +248,7 @@ sessions are the richest.
 - **User actions:** every action the app marked, in order, with its screen.
 - **Cost by stack depth:** peak RAM grouped by how many screens were open beneath.
 
-**Launch metrics** view: TTID and the startup steps from the same trace, so a manual
-session's launch is readable without switching the run on Startup.
+**Launch metrics** view: TTID and the startup steps from the same trace.
 
 **Watch for:** RAM that steps up on the same screen each visit and never comes back
 down (look at the timeline first). Also a visit drawn in red, more than two standard
@@ -287,8 +307,9 @@ a flow that never reached a screen emits nothing for it.
 
 ### Compare
 
-- **Against the benchmark** (default) or **between two runs** (pick Run A and Run B;
-  any run of the app, across paths).
+- **Run A** is the run in view (change it with **Run** in the top bar). Compare it
+  **against the benchmark** (default) or **with another run** (pick Run B: any run
+  of the app, across paths).
 - **Banners:** *Same run*, *Different devices* (compare with care), *Not comparable*
   (different app or path: different critical paths and budgets).
 - **Top-line metrics:** each metric in both runs with Δ, Δ % and ▲ worse / ▼ better.
@@ -302,8 +323,9 @@ them moved.
 
 - **Runs:** every run of the app, searchable (run, label, device, build), filterable
   by verdict, sortable on any column. TTID over budget is shown in the fail colour.
-- **Per row:** **Open** (Overview for that run), **Compare** (against the latest run),
-  **Pin as benchmark**.
+- **Per row:** **Open** (puts the run in view on every screen, and opens Overview),
+  **Compare** (with the run in view), **Pin as benchmark**. The run in view is
+  highlighted.
 - **Pinned benchmarks:** one per app, path and device. Regressions are measured
   against the active one. Unpin or compare from here.
 
@@ -332,6 +354,11 @@ them moved.
 1. **Capture** the competitor's package (cold, several runs or a **Stress** test).
 2. Switch **App** in the top bar. Every screen scopes to it. No Swag Pay budget is
    applied to it.
+
+**Look back at an older run**
+1. Pick it in **Run** (top bar), or **Open** it from **History**.
+2. Every screen now shows it. The run box says it is an older run, and
+   **Run details** shows the device and app build it was measured on.
 
 **Establish a baseline for a device**
 1. Capture several cold starts of a known-good build on that device.
@@ -548,6 +575,17 @@ Two things this does not do, deliberately:
 Runs are scoped by app throughout: the top bar's app selector filters every screen,
 because plotting several different applications as one trend line is meaningless.
 
+**What a run records about where it ran.** Each capture, stress session and manual
+session reads the device over adb before it starts (at the end, for a manual
+session): `getprop` for the device and its build, `/proc/meminfo`, `nproc`, `wm`
+and `dumpsys display` for its hardware, `dumpsys battery` and `dumpsys
+thermalservice` for its state, and `dumpsys package <pkg>` for the app's version
+name, version code (the build number), SDK levels and install. Traces also record
+the package list (`android.packages_list`), so a trace names the app build even
+when analysed elsewhere. For a run recorded before this existed, the device's
+build, SoC, kernel and Perfetto version are read from its trace the first time the
+run is viewed, and kept (`GET /api/run/meta?id=N`).
+
 ### Known limits, found against a real device
 
 Validated on a vivo V2514 (Android 16) against PhonePe, Google Pay, CRED and
@@ -643,8 +681,7 @@ has two views over the same run:
 - **Screen usage** — per-screen attribution plus the navigation stack.
   Selecting a row charts every visit to that screen separately.
 - **Launch metrics** — the startup steps from the same trace. A manual session
-  records both halves at once, so its launch is readable here without re-picking
-  the run on the Startup screen.
+  records both halves at once, so both are readable from one run.
 
 ### Navigation stack
 
@@ -880,7 +917,7 @@ swagperf/
 frontend/         the dashboard's source (React + TypeScript)
 web/dist/         the built dashboard, served by server.py
 web/tokens.html   the token-consumption page
-tests/            108 tests over the pipeline, the store, the server and the Copilot
+tests/            114 tests over the pipeline, the store, the server and the Copilot
 docs/             backlog, decisions and plans
 ```
 

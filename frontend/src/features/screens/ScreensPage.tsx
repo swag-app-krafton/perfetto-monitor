@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router'
+import { useState } from 'react'
 import { useScreens } from '@/api/hooks'
 import type { Run, ScreenSummary, ScreensPayload } from '@/api/types'
 import {
   BandedTimeline,
   BarSeries,
+  Button,
   Card,
   EmptyState,
   FlushCard,
@@ -14,16 +14,15 @@ import {
   Meter,
   Row,
   Segmented,
-  SelectField,
   Spinner,
   Stack,
   Stat,
   StatGrid,
   Text,
 } from '@/design'
-import { fmt, shortDate, stepName } from '@/domain/format'
+import { fmt, stepName } from '@/domain/format'
 import { valueOf } from '@/domain/metrics'
-import { useScope } from '@/domain/scope'
+import { useScope, useSelectRun } from '@/domain/scope'
 import s from './Screens.module.css'
 
 type Instrumented = Extract<ScreensPayload, { instrumented: true }>
@@ -52,39 +51,45 @@ type VisitMetric = (typeof METRIC_OPTS)[number]['value']
 
 export function ScreensPage() {
   const { scope, isLoading } = useScope()
-  const traced = useMemo(() => (scope?.allRuns ?? []).filter((r) => r.trace_path), [scope])
-  const [params] = useSearchParams()
-  // Manual's "Open run" lands here with ?run=<id>.
-  const [pick, setPick] = useState<number | null>(() => Number(params.get('run')) || null)
+  const selectRun = useSelectRun()
   const [view, setView] = useState<'usage' | 'launch'>('usage')
-  const runId = pick ?? traced[traced.length - 1]?.id ?? null
-  const q = useScreens(runId)
-  const run = runId != null ? scope?.byId(runId) : undefined
+  // The run in view comes from the top bar; only a run with a trace has screens.
+  const run = scope?.run ?? null
+  const q = useScreens(run?.trace_path ? run.id : null)
+  const lastTraced = [...(scope?.allRuns ?? [])].reverse().find((r) => r.trace_path)
 
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
-  if (!traced.length) return <EmptyState title="No traced runs">Record a manual session or capture a trace to attribute cost to screens.</EmptyState>
+  if (!run) return <EmptyState title="No runs yet">Record a manual session or capture a trace to attribute cost to screens.</EmptyState>
+  if (!run.trace_path) {
+    return (
+      <EmptyState
+        title={`Run #${run.id} has no trace`}
+        actions={
+          lastTraced && (
+            <Button variant="primary" onClick={() => selectRun(lastTraced.id)}>
+              Show run #{lastTraced.id}, the latest with a trace
+            </Button>
+          )
+        }
+      >
+        Screens are read from a run's trace, and this run did not keep one (a synthetic or imported run).
+      </EmptyState>
+    )
+  }
 
   return (
     <Stack as="section" gap={20}>
-      <Card>
-        <Row gap={12} wrap>
-          <SelectField
-            label="Run"
-            value={String(runId)}
-            options={[...traced].reverse().map((r) => ({ value: String(r.id), label: `#${r.id} · ${shortDate(r.ts, true)} · ${r.label ?? r.device ?? ''}` }))}
-            onChange={(v) => setPick(Number(v))}
-          />
-          <Segmented
-            label="View"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: 'usage', label: 'Screen usage' },
-              { value: 'launch', label: 'Launch metrics' },
-            ]}
-          />
-        </Row>
-      </Card>
+      <Row gap={12} wrap>
+        <Segmented
+          label="View"
+          value={view}
+          onChange={setView}
+          options={[
+            { value: 'usage', label: 'Screen usage' },
+            { value: 'launch', label: 'Launch metrics' },
+          ]}
+        />
+      </Row>
       {view === 'launch' && run ? (
         <LaunchView run={run} />
       ) : q.isLoading ? (

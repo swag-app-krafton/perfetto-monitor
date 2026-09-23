@@ -64,6 +64,56 @@ export interface MemoryStats {
   hermes_heap?: { peak_mb: number; min_mb: number; growth_mb: number }
 }
 
+/** Where a run was measured, merged server-side from what adb read at
+ *  capture time, what the trace records, and the run's own columns. A field
+ *  nothing recorded is absent, never guessed. */
+export interface RunDetails {
+  device: Partial<{
+    manufacturer: string
+    brand: string
+    model: string
+    market_name: string
+    codename: string
+    product: string
+    android_release: string
+    sdk: number
+    security_patch: string
+    build_id: string
+    build_type: string
+    fingerprint: string
+    soc: string
+    hardware: string
+    abi: string
+    kernel: string
+    cpu_cores: number
+    ram_gb: number
+    screen: string
+    density_dpi: number
+    refresh_hz: number
+    serial: string
+  }>
+  app: Partial<{
+    package: string
+    name: string
+    version_name: string
+    version_code: number
+    min_sdk: number
+    target_sdk: number
+    debuggable: boolean
+    installer: string
+    first_install: string
+    last_update: string
+    git_sha: string
+  }>
+  state: Partial<{ battery_pct: number; battery_temp_c: number; charging: string; thermal_status: string }>
+  /** When `state` was read: "before capture" or "end of session". */
+  state_moment?: string | null
+  trace: Partial<{ path: string; size_mb: number; duration_s: number; perfetto_version: string; utc_offset_min: number; uuid: string }>
+  /** Which sources contributed: "capture" (adb at capture time), "from_trace". */
+  sources: string[]
+  trace_error?: string | null
+}
+
 export interface Run {
   id: number
   ts: string
@@ -90,6 +140,7 @@ export interface Run {
   frames: FrameStats | null
   memory: MemoryStats | null
   analysis: Analysis | null
+  meta: RunDetails
 }
 
 export interface Benchmark {

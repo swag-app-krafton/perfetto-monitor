@@ -40,9 +40,9 @@ export function StepsPage() {
     if (focus) setOpen(focus)
   }
 
-  const latest = scope?.latest ?? null
+  const run = scope?.run ?? null
   const runtimeOf = scope?.history.startup_model.step_runtime ?? NO_RUNTIME
-  const deltas = latest && scope ? stepDeltas(latest, scope.allRuns, scope.benchmarkRun) : []
+  const deltas = run && scope ? stepDeltas(run, scope.allRuns, scope.benchmarkRun) : []
   const get = useCallback(
     (d: StepDelta, k: Key) =>
       k === 'name' ? stepName(d.step) : k === 'runtime' ? (runtimeOf[d.step] ?? '') : k === 'current' ? d.current : k === 'baseline' ? d.baseline : k === 'deltaMs' ? d.deltaMs : d.deltaPct,
@@ -51,15 +51,15 @@ export function StepsPage() {
   const { sorted, sort, toggle } = useSort(deltas, get, { key: 'deltaMs', dir: 'desc' })
 
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
-  if (!latest) return <EmptyState title="No runs yet">Capture a trace to see its steps.</EmptyState>
-  if (!deltas.length) return <EmptyState>Run #{latest.id} recorded no startup steps.</EmptyState>
+  if (!run) return <EmptyState title="No runs yet">Capture a trace to see its steps.</EmptyState>
+  if (!deltas.length) return <EmptyState>Run #{run.id} recorded no startup steps.</EmptyState>
   const from = scope.benchmarkRun ? `pinned benchmark #${scope.benchmarkRun.id}` : 'the median of the previous 10 runs'
-  const kids = latest.steps.reduce((n, st) => n + st.children.length, 0)
+  const kids = run.steps.reduce((n, st) => n + st.children.length, 0)
 
   return (
     <FlushCard
       title="Step durations"
-      hint={`Run #${latest.id} against ${from}. Select a row to drill down.`}
+      hint={`Run #${run.id} against ${from}. Select a row to drill down.`}
       aside={
         <Text variant="meta">
           {deltas.length} top-level steps · {kids} child slices
@@ -107,7 +107,7 @@ export function StepsPage() {
                 </Text>
                 <Sparkline values={d.history.slice(-12)} height={24} color={tone === 'fail' ? 'var(--fail)' : 'var(--c1)'} />
               </button>
-              {isOpen && <Drill d={d} latest={latest} prior={scope.allRuns} bench={scope.benchmarkRun} runtime={runtimeOf[d.step]} onAsk={() => askCopilot(`Why did ${stepName(d.step)} change in run #${latest.id}?`)} />}
+              {isOpen && <Drill d={d} run={run} prior={scope.allRuns} bench={scope.benchmarkRun} runtime={runtimeOf[d.step]} onAsk={() => askCopilot(`Why did ${stepName(d.step)} change in run #${run.id}?`)} />}
             </div>
           )
         })}
@@ -116,12 +116,12 @@ export function StepsPage() {
   )
 }
 
-function Drill({ d, latest, prior, bench, runtime, onAsk }: { d: StepDelta; latest: Run; prior: Run[]; bench: Run | null; runtime?: string; onAsk: () => void }) {
+function Drill({ d, run, prior, bench, runtime, onAsk }: { d: StepDelta; run: Run; prior: Run[]; bench: Run | null; runtime?: string; onAsk: () => void }) {
   // Each child's baseline comes from the same place as its step's.
   const baseKids = (name: string): number | null => {
     if (bench) return bench.steps.find((x) => x.step === d.step)?.children.find((c) => c.name === name)?.dur_ms ?? null
     const vals = prior
-      .filter((r) => r.id < latest.id)
+      .filter((r) => r.id < run.id)
       .slice(-10)
       .map((r) => r.steps.find((x) => x.step === d.step)?.children.find((c) => c.name === name)?.dur_ms)
       .filter((v): v is number => v != null)

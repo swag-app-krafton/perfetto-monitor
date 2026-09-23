@@ -1,17 +1,14 @@
-import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
+import { useNavigate } from 'react-router'
 import type { Run } from '@/api/types'
 import { Button, Card, GLYPH, Legend, Row, Spacer, Stack, StatusPill, Text, toneColor } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
 import { verdictTone } from '@/domain/metrics'
 import s from './Overview.module.css'
 
-export function VerdictStrip({ runs, latest, benchmarkId }: { runs: Run[]; latest: Run; benchmarkId: number | null }) {
+/** Every run in range as a verdict cell, oldest to newest. The run in view
+ *  (picked in the top bar) is outlined and its numbers are shown below. */
+export function VerdictStrip({ runs, run: sel, latest, benchmarkId }: { runs: Run[]; run: Run; latest: Run | null; benchmarkId: number | null }) {
   const navigate = useNavigate()
-  const [params] = useSearchParams()
-  // History's "Open" lands here with ?run=<id> selected in the strip.
-  const [selId, setSelId] = useState(() => Number(params.get('run')) || latest.id)
-  const sel = runs.find((r) => r.id === selId) ?? latest
   const counts = { pass: 0, warn: 0, fail: 0 }
   for (const r of runs) {
     const t = verdictTone(r.analysis?.verdict)
@@ -25,7 +22,7 @@ export function VerdictStrip({ runs, latest, benchmarkId }: { runs: Run[]; lates
     <Card
       data-hl="strip"
       title="Verdict by run"
-      hint={`${runs.length === 1 ? 'One run' : `Last ${runs.length} runs`}, oldest to newest. Select a run to see its numbers.`}
+      hint={`${runs.length === 1 ? 'One run' : `Last ${runs.length} runs`}, oldest to newest. The outlined run is the one in view; pick another in the top bar.`}
       actions={<Legend label="Verdict counts" items={(['pass', 'warn', 'fail'] as const).map((k) => ({ label: `${counts[k]} ${k}`, color: `var(--${k})` }))} />}
     >
       <Row gap={4} align="stretch" className={s.strip}>
@@ -34,17 +31,16 @@ export function VerdictStrip({ runs, latest, benchmarkId }: { runs: Run[]; lates
           const label = `Run #${r.id}, ${shortDate(r.ts)}, ${t === 'neutral' ? 'no verdict' : t.toUpperCase()}, TTID ${fmt(r.ttff_ms)} ms`
           return (
             <Stack key={r.id} gap={6} align="stretch" grow>
-              <button
-                type="button"
+              <span
+                role="img"
                 className={s.cell}
                 aria-label={label}
                 title={label}
-                aria-pressed={r.id === sel.id}
+                aria-current={r.id === sel.id}
                 style={{ background: t === 'neutral' ? 'var(--s3)' : toneColor(t) }}
-                onClick={() => setSelId(r.id)}
               >
                 {t === 'warn' || t === 'fail' ? GLYPH[t] : ''}
-              </button>
+              </span>
               <span className={s.bMark}>{r.id === benchmarkId ? 'B' : ''}</span>
             </Stack>
           )
@@ -72,9 +68,9 @@ export function VerdictStrip({ runs, latest, benchmarkId }: { runs: Run[]; lates
           <b>{fmt(sel.peak_rss_mb)} MB</b>
         </Text>
         <Spacer />
-        {sel.id !== latest.id && (
-          <Button variant="mini" onClick={() => navigate(`/compare?a=${latest.id}&b=${sel.id}`)}>
-            Compare with #{latest.id}
+        {latest && sel.id !== latest.id && (
+          <Button variant="mini" onClick={() => navigate(`/compare?mode=run&a=${sel.id}&b=${latest.id}`)}>
+            Compare with latest #{latest.id}
           </Button>
         )}
       </Row>

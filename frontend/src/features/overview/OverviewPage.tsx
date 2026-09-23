@@ -18,7 +18,7 @@ export function OverviewPage() {
   const { unpin } = usePinMutations()
   if (isLoading) return <EmptyState>Loading runs…</EmptyState>
   if (error) return <EmptyState title="Could not load runs">{error.message}</EmptyState>
-  if (!scope?.latest) {
+  if (!scope?.run) {
     return (
       <EmptyState title="No runs yet" actions={<Link to="/capture">Profile an app</Link>}>
         Capture a trace from a connected device, or record a manual session, and its verdict appears here.
@@ -26,31 +26,32 @@ export function OverviewPage() {
     )
   }
 
-  const { latest, runs, allRuns, benchmarkRun, history } = scope
-  const prior = allRuns.filter((r) => r.id < latest.id)
+  const { run, latest, runs, allRuns, benchmarkRun, history } = scope
+  const prior = allRuns.filter((r) => r.id < run.id)
   const previous = prior[prior.length - 1] ?? null
   const base = benchmarkRun ?? previous
-  const deltas = stepDeltas(latest, allRuns, benchmarkRun)
+  const deltas = stepDeltas(run, allRuns, benchmarkRun)
   const ttidBase = valueOf(base, 'ttff_ms')
-  const ttid = valueOf(latest, 'ttff_ms')
+  const ttid = valueOf(run, 'ttff_ms')
   const worst = worstRegression(deltas, ttid != null && ttidBase != null ? ttid - ttidBase : null)
   const trendRuns = runs.slice(-12)
-  const findings = latest.analysis?.findings ?? []
-  const pinned = (pins.data ?? []).filter((p) => p.run_id === latest.id)
+  const findings = run.analysis?.findings ?? []
+  const pinned = (pins.data ?? []).filter((p) => p.run_id === run.id)
 
   return (
     <Stack as="section" gap={28}>
       <VerdictHero
-        run={latest}
+        run={run}
         benchmark={benchmarkRun}
         baselineLabel={previous ? `previous run #${previous.id}` : 'no earlier run'}
         worst={worst}
         budgets={history.global_budgets}
+        isLatest={scope.isLatest}
       />
 
       <Grid min={160} gap={12}>
         {METRICS.map((m) => {
-          const v = valueOf(latest, m.key)
+          const v = valueOf(run, m.key)
           const b = valueOf(base, m.key)
           const delta =
             v != null && b != null
@@ -71,7 +72,7 @@ export function OverviewPage() {
         })}
       </Grid>
 
-      <VerdictStrip runs={runs} latest={latest} benchmarkId={benchmarkRun?.id ?? null} />
+      <VerdictStrip runs={runs} run={run} latest={latest} benchmarkId={benchmarkRun?.id ?? null} />
 
       <Stack gap={12}>
         <SectionTitle aside={summariseSeverity(findings) + (pinned.length ? ` · ${pinned.length} pinned from Copilot` : '')}>Findings</SectionTitle>
@@ -82,7 +83,7 @@ export function OverviewPage() {
             finding={f}
             id={findingId(i)}
             area={findingArea(f)}
-            onAsk={() => askCopilot(`Explain finding ${findingId(i)} on run #${latest.id}: ${f.title}`)}
+            onAsk={() => askCopilot(`Explain finding ${findingId(i)} on run #${run.id}: ${f.title}`)}
           />
         ))}
         {pinned.map((p) => (
