@@ -471,6 +471,43 @@ def _extract(tp, path_kind, pkg=None):
     }
 
 
+# ------------------------------------------------------------ tracing coverage
+
+# Scheduler events arrive many times a second on every CPU, so a device trace
+# whose sched_switch events stop well before it ends -- or never start -- had
+# its kernel tracing taken away. Flashlight does exactly that when it starts on
+# the same device, and Perfetto says nothing: the trace pulls and parses, and
+# its first minutes can even look normal. A capture like that must not become
+# a run. Two seconds is far above the gap between two scheduler events.
+TRACING_TAIL_S = 2.0
+
+
+def tracing_problem(trace_start_ns, trace_end_ns, sched_events, last_sched_ns):
+    """Why kernel tracing did not cover the trace, or None when it did."""
+    if not sched_events:
+        return ("kernel tracing recorded nothing: the trace has no scheduler events. "
+                "Another tool using the kernel trace buffer, such as Flashlight, was "
+                "probably running on the device.")
+    tail = (trace_end_ns - last_sched_ns) / 1e9
+    if tail > TRACING_TAIL_S:
+        return (f"kernel tracing stopped {tail:.1f}s before the trace ended, so scheduler "
+                "events, app slices and markers after that point are missing. Another "
+                "tool, such as Flashlight starting during the capture, switched it off.")
+    return None
+
+
+def tracing_lost(trace_path):
+    """`tracing_problem` for a trace file. For device captures only: a
+    synthetic trace has no reason to carry scheduler events."""
+    tp = TraceProcessor(trace=trace_path)
+    try:
+        b = _rows(tp, "select start_ts, end_ts from trace_bounds")[0]
+        s = _rows(tp, "select count(*) n, max(ts) last from sched_slice")[0]
+    finally:
+        tp.close()
+    return tracing_problem(b["start_ts"], b["end_ts"], s["n"], s["last"])
+
+
 # ------------------------------------------------------------ trace metadata
 
 def parse_fingerprint(fp):

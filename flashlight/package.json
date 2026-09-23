@@ -1,0 +1,11 @@
+{
+  "name": "swagperf-flashlight",
+  "private": true,
+  "description": "Flashlight audits for swagperf: Flashlight's own test engine and report maths, pinned.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@perf-profiler/e2e": "0.11.3",
+    "@perf-profiler/profiler": "0.10.11",
+    "@perf-profiler/reporter": "0.9.0"
+  }
+}

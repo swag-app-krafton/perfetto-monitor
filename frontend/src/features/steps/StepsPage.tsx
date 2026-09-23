@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import type { ChildSlice, Run } from '@/api/types'
-import { Button, EmptyState, FlushCard, Icon, Label, Meter, Row, SortHeader, Sparkline, Stack, Stat, StatGrid, Text, type TextTone } from '@/design'
+import { Button, EmptyState, FlushCard, Icon, Label, Meter, Row, SortHeader, Sparkline, Stack, Stat, StatGrid, Term, Text, type TextTone } from '@/design'
 import { fmt, signed, stepName } from '@/domain/format'
 import { useScope } from '@/domain/scope'
 import { stepDeltas, type StepDelta } from '@/domain/steps'
@@ -26,6 +26,7 @@ const MIN_MS = 5
 const deltaTone = (d: StepDelta): TextTone =>
   d.deltaPct == null || d.deltaMs == null || d.deltaMs < MIN_MS ? 'secondary' : d.deltaPct > 10 ? 'fail' : d.deltaPct > 4 ? 'warn' : 'secondary'
 const NO_RUNTIME: Record<string, string> = {}
+const NO_DESCRIPTIONS: Record<string, string> = {}
 
 export function StepsPage() {
   const { scope, isLoading } = useScope()
@@ -42,6 +43,7 @@ export function StepsPage() {
 
   const run = scope?.run ?? null
   const runtimeOf = scope?.history.startup_model.step_runtime ?? NO_RUNTIME
+  const descriptionOf = scope?.history.startup_model.step_descriptions ?? NO_DESCRIPTIONS
   const deltas = run && scope ? stepDeltas(run, scope.allRuns, scope.benchmarkRun) : []
   const get = useCallback(
     (d: StepDelta, k: Key) =>
@@ -59,7 +61,7 @@ export function StepsPage() {
   return (
     <FlushCard
       title="Step durations"
-      hint={`Run #${run.id} against ${from}. Select a row to drill down.`}
+      hint={`Run #${run.id} against ${from}. Select a row to drill down; the ? beside a name says what the step covers.`}
       aside={
         <Text variant="meta">
           {deltas.length} top-level steps · {kids} child slices
@@ -83,13 +85,17 @@ export function StepsPage() {
           const tone = deltaTone(d)
           return (
             <div key={d.step} className={s.row} data-hl={d.step} role="rowgroup">
-              <button type="button" className={`${s.cols} ${s.rowBtn}`} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : d.step)}>
-                <Text as="span" variant="body" tone="muted" align="center">
+              {/* The step's name is the row's toggle, stretched over the whole
+                  row; the "?" beside it sits above, so it is not inside a button. */}
+              <div className={`${s.cols} ${s.rowLine} ${isOpen ? s.open : ''}`}>
+                <Text as="span" variant="body" tone="muted" align="center" aria-hidden="true">
                   {isOpen ? '▾' : '▸'}
                 </Text>
-                <Text as="span" variant="body" tone="primary" weight={600}>
-                  {stepName(d.step)}
-                </Text>
+                <Term description={descriptionOf[d.step]} label={stepName(d.step)} weight={600}>
+                  <button type="button" className={s.toggle} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : d.step)}>
+                    {stepName(d.step)}
+                  </button>
+                </Term>
                 <Text variant="meta" tone="secondary">
                   {runtimeOf[d.step] ?? '–'}
                 </Text>
@@ -106,8 +112,18 @@ export function StepsPage() {
                   {d.deltaPct == null ? '–' : signed(d.deltaPct, 1, '%')}
                 </Text>
                 <Sparkline values={d.history.slice(-12)} height={24} color={tone === 'fail' ? 'var(--fail)' : 'var(--c1)'} />
-              </button>
-              {isOpen && <Drill d={d} run={run} prior={scope.allRuns} bench={scope.benchmarkRun} runtime={runtimeOf[d.step]} onAsk={() => askCopilot(`Why did ${stepName(d.step)} change in run #${run.id}?`)} />}
+              </div>
+              {isOpen && (
+                <Drill
+                  d={d}
+                  run={run}
+                  prior={scope.allRuns}
+                  bench={scope.benchmarkRun}
+                  runtime={runtimeOf[d.step]}
+                  description={descriptionOf[d.step]}
+                  onAsk={() => askCopilot(`Why did ${stepName(d.step)} change in run #${run.id}?`)}
+                />
+              )}
             </div>
           )
         })}
@@ -116,7 +132,23 @@ export function StepsPage() {
   )
 }
 
-function Drill({ d, run, prior, bench, runtime, onAsk }: { d: StepDelta; run: Run; prior: Run[]; bench: Run | null; runtime?: string; onAsk: () => void }) {
+function Drill({
+  d,
+  run,
+  prior,
+  bench,
+  runtime,
+  description,
+  onAsk,
+}: {
+  d: StepDelta
+  run: Run
+  prior: Run[]
+  bench: Run | null
+  runtime?: string
+  description?: string
+  onAsk: () => void
+}) {
   // Each child's baseline comes from the same place as its step's.
   const baseKids = (name: string): number | null => {
     if (bench) return bench.steps.find((x) => x.step === d.step)?.children.find((c) => c.name === name)?.dur_ms ?? null
@@ -138,6 +170,11 @@ function Drill({ d, run, prior, bench, runtime, onAsk }: { d: StepDelta; run: Ru
   ]
   return (
     <Stack gap={18} className={s.drill}>
+      {description && (
+        <Text as="p" variant="body" className={s.about}>
+          {description}
+        </Text>
+      )}
       <Row gap={10} wrap>
         <Stack grow>
           <StatGrid variant="boxes" min={130}>

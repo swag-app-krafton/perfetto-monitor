@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router'
 import { useCompare } from '@/api/hooks'
 import type { DiffVerdict, Run } from '@/api/types'
-import { Badge, Banner, Card, DiffTag, EmptyState, Grid, Label, Row, Segmented, SelectField, Spinner, Stack, TableCard, Text, numCell } from '@/design'
+import { Badge, Banner, Card, DiffTag, EmptyState, Grid, Label, Row, Segmented, SelectField, Spinner, Stack, TableCard, Term, Text, numCell } from '@/design'
 import { fmt, pathLabel, shortDate, signed, stepName } from '@/domain/format'
 import { METRICS } from '@/domain/metrics'
 import { useScope, useSelectRun } from '@/domain/scope'
@@ -50,6 +50,7 @@ export function ComparePage() {
   const appRuns = scope.history.runs.filter((r) => r.app_pkg === scope.run?.app_pkg)
   const opts = [...appRuns].reverse().map((r) => ({ value: String(r.id), label: `#${r.id} · ${shortDate(r.ts)} · ${pathLabel(r.path_kind)} · ${r.label ?? ''}` }))
   const d = q.data
+  const descriptionOf = scope.history.startup_model.step_descriptions
   const label = (m: string) => METRICS.find((x) => x.key === m || (m === 'ttff_ms' && x.key === 'ttff_ms'))?.label ?? m
 
   return (
@@ -176,9 +177,9 @@ export function ComparePage() {
                 <Fragment key={st.step}>
                   <tr>
                     <td>
-                      <Text variant="body" tone="primary" weight={700}>
+                      <Term description={descriptionOf[st.step]} weight={700}>
                         {stepName(st.step)}
-                      </Text>
+                      </Term>
                     </td>
                     <td className={numCell}>{st.dur_ms == null ? '–' : `${fmt(st.dur_ms, 1)} ms`}</td>
                     <td className={numCell}>

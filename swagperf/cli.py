@@ -108,6 +108,30 @@ def _print_compare(d):
     print()
 
 
+def _print_audit(a):
+    s = a.get("summary") or {}
+    m = s.get("metrics") or {}
+    print(f"\n  Flashlight audit A-{a['id']}  {a['app_pkg']}  {a['state']}  "
+          f"{s.get('successful', 0)}/{a['iterations']} iteration(s)"
+          + (f", {s['failed']} failed" if s.get("failed") else ""))
+    if s.get("score") is not None:
+        print(f"  score {s['score']}  CPU {m.get('cpu_pct')}%  RAM {m.get('ram_mb')} MB  "
+              f"{m.get('fps')} FPS  (Flashlight's own definitions; not comparable with Perfetto runs)")
+        kt = {k: v for k, v in (s.get("key_threads") or {}).items() if v}
+        if kt:
+            print("  threads  " + "  ".join(f"{v['name']} {v['cpu_pct']}%" for v in kt.values()))
+        print("\n  iteration   CPU %    RAM MB    FPS")
+        for it in s.get("iterations") or []:
+            mark = "" if it["status"] == "SUCCESS" and not it.get("retried") else "  (failed, retried)"
+            print(f"  {it['index']:>9}  {it.get('cpu_pct') or '-':>6}  {it.get('ram_mb') or '-':>8}  "
+                  f"{it.get('fps') or '-':>5}{mark}")
+    if a.get("error"):
+        print(f"  note: {a['error']}")
+    if a.get("results_path"):
+        print(f"  results: {a['results_path']}")
+    print()
+
+
 def _print_stress(t):
     st = (t.get("stats") or {}).get("ttid_ms")
     print(f"\n  stress test #{t['id']}  {t.get('app_pkg')}  "
@@ -202,6 +226,17 @@ def main(argv=None):
     stx.add_parser("list", help="list stress tests")
     sh = stx.add_parser("show", help="show one stress test")
     sh.add_argument("id", type=int)
+
+    au = sub.add_parser("audit", help="Flashlight audits: cold starts measured by Flashlight")
+    aux = au.add_subparsers(dest="aucmd", required=True)
+    aur = aux.add_parser("run", help="measure N cold starts of one app with Flashlight")
+    aur.add_argument("--pkg", required=True)
+    aur.add_argument("-n", "--iterations", type=int, default=5)
+    aur.add_argument("--duration-ms", type=int, default=10000)
+    aur.add_argument("--label")
+    aux.add_parser("list", help="list Flashlight audits")
+    aus = aux.add_parser("show", help="show one Flashlight audit")
+    aus.add_argument("id", type=int)
 
     s = sub.add_parser("seed", help="generate synthetic history for development")
     s.add_argument("-n", type=int, default=15)
@@ -322,9 +357,17 @@ def main(argv=None):
                 meta = run_metadata(n.pkg)
             except Exception:
                 meta = None
-            p = capture(out, pkg=n.pkg, duration_ms=n.duration_ms, cold=n.cold)
+            try:
+                p = capture(out, pkg=n.pkg, duration_ms=n.duration_ms, cold=n.cold)
+            except RuntimeError as e:
+                print(f"  \033[31mERROR\033[0m {e}")
+                return 1
             print(f"  captured -> {p}")
-            if n.analyse:
+            lost = ex.tracing_lost(p) if n.analyse else None
+            if lost:
+                print(f"  \033[31mERROR\033[0m not analysed: {lost}")
+                rc = 1
+            elif n.analyse:
                 args = ["analyse", p, "--app", n.pkg]
                 if dev:
                     args += ["--device", dev]
@@ -392,6 +435,10 @@ def main(argv=None):
         print(f"  trace saved -> {p}")
         if n.no_analyse:
             return 0
+        lost = ex.tracing_lost(p)
+        if lost:
+            print(f"  \033[31mERROR\033[0m not analysed: {lost}")
+            return 1
         return main(["analyse", p, "--label", n.label or "manual-session"]
                     + (["--app", n.app] if n.app else [])
                     + (["--device", (device_info().get("model") or "")]
@@ -464,6 +511,49 @@ def main(argv=None):
             print(f"  no stress test #{n.id}")
             return 2
         _print_stress(t)
+        return 0
+
+    if n.cmd == "audit":
+        if n.aucmd == "run":
+            from . import jobs
+            import time as _t
+            try:
+                jid = jobs.start_audit(n.pkg, iterations=n.iterations,
+                                       duration_ms=n.duration_ms, label=n.label)
+            except ValueError as e:
+                print(f"  \033[31mERROR\033[0m {e}")
+                return 1
+            seen = 0
+            while True:
+                j = jobs.get(jid)
+                for l in (j.get("log") or [])[seen:]:
+                    print(f"  [{l['t']}s] {l['text']}")
+                seen = len(j.get("log") or [])
+                if j["state"] in ("done", "error"):
+                    break
+                _t.sleep(1)
+            if j.get("audit_id"):
+                _print_audit(store.audit_get(j["audit_id"]))
+            if j["state"] == "error":
+                print(f"\n  \033[31mFAILED\033[0m {j.get('error')}")
+                return 1
+            return 0
+        if n.aucmd == "list":
+            rows = store.audit_list()
+            if not rows:
+                print("  no Flashlight audits recorded")
+                return 0
+            for a in rows:
+                m = (a.get("summary") or {}).get("metrics") or {}
+                print(f"  A-{a['id']:<4} {a['ts']}  {a['app_pkg']:<38} {a['state']:<11} "
+                      + (f"score {a['score']:.0f}  CPU {m.get('cpu_pct')}%  RAM {m.get('ram_mb')} MB  "
+                         f"{m.get('fps')} FPS" if a.get("score") is not None else (a.get("error") or "")))
+            return 0
+        a = store.audit_get(n.id)
+        if not a:
+            print(f"  no Flashlight audit A-{n.id}")
+            return 2
+        _print_audit(a)
         return 0
 
     if n.cmd == "apps":

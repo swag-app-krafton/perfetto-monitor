@@ -2,9 +2,11 @@ import { Suspense, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
 import { Spinner, Toast } from '@/design'
 import { useHistory } from '@/api/hooks'
+import { useAuditScope } from '@/domain/audits'
 import { useScope, useSelectRun } from '@/domain/scope'
 import { useHighlightTarget } from '@/lib/highlight'
 import { useIsNarrow, useIsWide } from '@/lib/useMediaQuery'
+import { AuditBox } from './AuditBox'
 import { PageHeader } from './PageHeader'
 import { screenByPath } from './routes'
 import { Sidebar } from './Sidebar'
@@ -24,10 +26,15 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
   const { scope } = useScope()
   const loc = useLocation()
   const screen = screenByPath(loc.pathname)
+  const audits = useAuditScope().scope
   const mainRef = useRef<HTMLElement>(null)
   useHighlightTarget(useCallback(() => mainRef.current, []))
 
   useApplyTheme()
+
+  // Remember the profiler in view, so the bare URL opens where the user left off.
+  const setProfiler = useUi((st) => st.setProfiler)
+  useEffect(() => setProfiler(screen.profiler), [screen.profiler, setProfiler])
 
   // `?run=<id>` in any link puts that run in view everywhere, then leaves the
   // URL: the top bar is where the run in view lives.
@@ -69,7 +76,18 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
         <TopBar scope={scope} narrow={narrow} />
         <main ref={mainRef} className={s.main} id="main">
           <div className={s.page}>
-            <PageHeader group={screen.group} title={screen.label} hint={screen.hint} run={scope?.run ?? null} isLatest={scope?.isLatest ?? true} />
+            {screen.profiler === 'flashlight' ? (
+              <PageHeader
+                group={screen.group}
+                title={screen.label}
+                hint={screen.hint}
+                run={null}
+                isLatest
+                aside={audits?.audit && screen.id !== 'audit-run' ? <AuditBox audit={audits.audit} following={audits.following} /> : undefined}
+              />
+            ) : (
+              <PageHeader group={screen.group} title={screen.label} hint={screen.hint} run={scope?.run ?? null} isLatest={scope?.isLatest ?? true} />
+            )}
             <Suspense fallback={<Spinner />}>
               <Outlet />
             </Suspense>

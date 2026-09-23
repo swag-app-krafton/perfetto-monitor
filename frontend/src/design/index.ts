@@ -8,7 +8,7 @@
  *                the global stylesheet; imported once by the app entry
  *   primitives   layout (Stack, Row, Spacer), Text, Swatch, Kbd, the spacing scale
  *   components   controls, status, containers, overlays, conversation parts
- *   charts       LineChart, StackedBars, BandedTimeline, BarSeries, MiniBars, Sparkline
+ *   charts       LineChart, StackedBars, BandedTimeline, BarSeries, BarList, MiniBars, Sparkline
  *   hooks        behaviour shared by components (sorting, list keyboard nav)
  *
  * Components are generic: they take data and callbacks as props and know
@@ -52,6 +52,8 @@ export * from './components/Status'
 export * from './components/tone'
 export * from './components/Stepper'
 export * from './components/Switch'
+export * from './components/Term'
+export * from './components/TermList'
 export * from './components/Toast'
 
 // charts
@@ -60,6 +62,7 @@ export * from './charts/LineChart'
 export * from './charts/StackedBars'
 export * from './charts/BandedTimeline'
 export * from './charts/BarSeries'
+export * from './charts/BarList'
 export * from './charts/MiniBars'
 export * from './charts/Sparkline'
 

@@ -21,7 +21,8 @@ npm run lint       # oxlint
     (a role from the type scale plus a tone), `Swatch`, `Kbd`, and the spacing
     scale (`gap` only takes values from it)
   - `components/` – controls, status, containers, overlays (`Popover`, `Menu`),
-    the docked panel, conversation parts
+    the docked panel, conversation parts, and names with a plain-language
+    description (`Term` puts it behind a ?, `TermList` on a second line)
   - `charts/` – `LineChart`, `StackedBars`, `BandedTimeline`, `BarSeries`,
     `MiniBars`, `Sparkline`
   - `hooks/` – behaviour components share (`useSort`, `useListNav`)

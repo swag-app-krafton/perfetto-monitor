@@ -1,0 +1,26 @@
+/* The "?" stays on the name's line: in a tight row the neighbours wrap
+   first, never the "?" onto a line of its own. */
+.term {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* A truncated name gives up width before the "?" does. */
+.truncate {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+.truncate > :first-child {
+  min-width: 0;
+}
+
+/* Above a row-wide click target (a table row that opens on click), so the
+   "?" still takes its own hover and click. */
+.tip {
+  position: relative;
+  z-index: 1;
+}

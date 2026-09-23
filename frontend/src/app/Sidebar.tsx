@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router'
 import { Row, Spacer, Stack, Text } from '@/design'
-import { GROUPS, SCREENS } from './routes'
+import { useProfiler } from './profiler'
+import { GROUPS, screensFor } from './routes'
 import s from './Shell.module.css'
 
 export function Sidebar({
@@ -15,6 +16,8 @@ export function Sidebar({
   onToggleRail: () => void
 }) {
   const full = !rail
+  // Only the screens of the profiler in view: its runs are the only ones they show.
+  const screens = screensFor(useProfiler())
   return (
     <nav aria-label="Primary" className={`${s.nav} ${drawer ? s.navDrawer : rail ? s.navRail : ''}`}>
       <Row gap={12} className={s.brand}>
@@ -33,8 +36,8 @@ export function Sidebar({
             {full ? g : '—'}
           </Text>
           <Stack gap={2}>
-            {SCREENS.filter((x) => x.group === g).map((x) => {
-              const index = String(SCREENS.indexOf(x) + 1).padStart(2, '0')
+            {screens.filter((x) => x.group === g).map((x) => {
+              const index = String(screens.indexOf(x) + 1).padStart(2, '0')
               return (
                 <NavLink key={x.id} to={x.path} className={s.item} title={x.label} onClick={onNavigate}>
                   <span className={s.mark}>{full ? index : x.code}</span>
@@ -54,7 +57,7 @@ export function Sidebar({
         )}
         {full && (
           <Text as="div" variant="caption">
-            Perfetto trace processor
+            {screens[0]?.profiler === 'flashlight' ? 'Flashlight, pinned npm build' : 'Perfetto trace processor'}
             <br />
             <a href="/tokens.html" className={s.footLink}>
               LLM token usage ↗

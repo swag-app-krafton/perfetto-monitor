@@ -174,7 +174,13 @@ export interface HistoryPayload {
   benchmarks: Benchmark[]
   metric_direction: Record<string, 'lower' | 'higher'>
   signed_metrics: string[]
-  startup_model: { critical_path: Record<string, string[]>; deferred_steps: string[]; step_runtime: Record<string, string> }
+  startup_model: {
+    critical_path: Record<string, string[]>
+    deferred_steps: string[]
+    step_runtime: Record<string, string>
+    /** What each step covers, in plain words (swagperf/budgets.py STEP_DESCRIPTIONS). */
+    step_descriptions: Record<string, string>
+  }
 }
 
 export interface DevicePackage {
@@ -198,6 +204,13 @@ export type DevicePayload =
       packages: DevicePackage[]
       health?: { battery_pct: number | null; battery_temp_c: number | null; perfetto_version: string | null }
       devices?: string[]
+      /** What can run on the device now: one profiler at a time. */
+      profilers?: {
+        flashlight_runner: RunnerStatus
+        /** Other tools using the kernel trace buffer, by name. */
+        other_profilers: string[]
+        perfetto_recording: boolean
+      }
       [k: string]: unknown
     }
 
@@ -437,4 +450,98 @@ export interface ComparePayload {
   metrics: CompareMetric[]
   steps: CompareStep[]
   summary: Record<DiffVerdict, number>
+}
+
+// ---------------------------------------------------------------- Flashlight
+
+/** Whether Flashlight can run on the machine serving the dashboard. */
+export type RunnerStatus = { ready: true; version: string } | { ready: false; reason: string }
+
+export interface AuditMetrics {
+  cpu_pct: number | null
+  fps: number | null
+  ram_mb: number | null
+  runtime_ms: number | null
+  high_cpu_s: number | null
+}
+
+export interface ThreadCpu {
+  name: string
+  cpu_pct: number | null
+  /** What the thread is, in plain words, when its name says (swagperf/threads.py). */
+  description?: string
+}
+
+/** The threads a hybrid Compose + React Native app is read by. */
+export interface KeyThreads {
+  ui: ThreadCpu | null
+  render: ThreadCpu | null
+  js: ThreadCpu | null
+  native_modules: ThreadCpu | null
+}
+
+export interface RangeStat {
+  minMaxRange: [number, number]
+  deviationRange: [number, number]
+  variationCoefficient: number
+}
+
+export interface AuditIteration extends Partial<AuditMetrics> {
+  index: number
+  status: 'SUCCESS' | 'FAILURE'
+  retried: boolean
+  key_threads: KeyThreads | null
+}
+
+/** One point of the average iteration, 500 ms apart. */
+export interface AuditPoint {
+  t_ms: number
+  cpu_pct: number | null
+  ui_pct: number | null
+  js_pct: number | null
+  ram_mb: number | null
+  fps: number | null
+}
+
+/** Everything Flashlight's reporter says about an audit (flashlight/summary.js). */
+export interface AuditSummary {
+  flashlight_version: string
+  title: string
+  status: string
+  iterations_run: number
+  successful: number
+  failed: number
+  failure: string | null
+  refresh_rate: number | null
+  score: number | null
+  metrics: AuditMetrics | null
+  key_threads: KeyThreads | null
+  threads: ThreadCpu[]
+  stats: { cpu: RangeStat; fps?: RangeStat; ram?: RangeStat; runtime: RangeStat } | null
+  iterations: AuditIteration[]
+  series: AuditPoint[]
+}
+
+export interface Audit {
+  id: number
+  ts: string
+  app_pkg: string
+  app_name: string
+  app_role: string | null
+  device: string | null
+  label: string | null
+  iterations: number
+  duration_ms: number
+  state: 'running' | 'done' | 'error' | 'interrupted'
+  error: string | null
+  finished: string | null
+  results_path: string | null
+  flashlight_version: string | null
+  score: number | null
+  cpu_pct: number | null
+  ram_mb: number | null
+  fps: number | null
+  meta: Record<string, unknown> | null
+  /** In a list, only the headline parts; the detail call has all of it. */
+  summary: Partial<AuditSummary> | null
 }
