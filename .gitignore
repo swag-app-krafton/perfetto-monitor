@@ -7,9 +7,10 @@ __pycache__/
 apps.local.json
 issues_screenshots/
 # Local Claude Code state (issue inbox, handoffs, PM review logs) stays private;
-# the shared agent definitions are committed.
+# the shared agent definitions and project skills are committed.
 .claude/*
 !.claude/agents/
+!.claude/skills/
 # Phase 0 experiment: its dependencies and its captures
 experiments/*/node_modules/
 experiments/*/results/
