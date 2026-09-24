@@ -32,6 +32,14 @@ const paths = {
   stop: <rect x="7" y="7" width="10" height="10" fill="currentColor" stroke="none" />,
   chevronRight: <path d="M9 6l6 6-6 6" />,
   chevronDown: <path d="M6 9l6 6 6-6" />,
+  chevronsLeft: <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5" />,
+  chevronsRight: <path d="M13 17l5-5-5-5M6 17l5-5-5-5" />,
+  contrast: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 4a8 8 0 010 16z" fill="currentColor" stroke="none" />
+    </>
+  ),
   check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
   external: <path d="M8 16L17 7M9 7h8v8" />,
   arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,

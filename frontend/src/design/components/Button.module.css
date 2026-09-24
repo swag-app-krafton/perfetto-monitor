@@ -73,6 +73,14 @@
 .ghost[aria-pressed='true'] {
   color: var(--accent-tx);
 }
+.outlined {
+  border: 1px solid var(--line2);
+  color: var(--tx);
+}
+.outlined:hover:not(:disabled) {
+  border-color: var(--tx3);
+  background: transparent;
+}
 .large {
   height: 48px;
   width: 100%;

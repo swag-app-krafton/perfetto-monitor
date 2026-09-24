@@ -8,7 +8,8 @@
  *                the global stylesheet; imported once by the app entry
  *   primitives   layout (Stack, Row, Spacer), Text, Swatch, Kbd, the spacing scale
  *   components   controls, status, containers, overlays, conversation parts
- *   charts       LineChart, StackedBars, BandedTimeline, BarSeries, BarList, MiniBars, Sparkline
+ *   charts       LineChart, StackedBars, BandedTimeline, BarSeries, BarList, MiniBars, Sparkline,
+ *                DotBoxPlot, SpanTimeline
  *   hooks        behaviour shared by components (sorting, list keyboard nav)
  *
  * Components are generic: they take data and callbacks as props and know
@@ -27,13 +28,16 @@ export * from './components/Badge'
 export * from './components/Button'
 export * from './components/Chat'
 export * from './components/Chip'
+export * from './components/ChoiceList'
 export * from './components/CodeBlock'
 export * from './components/DataTable'
 export * from './components/DescriptionList'
 export * from './components/Dialog'
 export * from './components/tableClasses'
 export * from './components/Disclosure'
+export * from './components/ExpandableTable'
 export * from './components/Field'
+export * from './components/FlowList'
 export * from './components/HelpTip'
 export * from './components/Icon'
 export * from './components/KpiTile'
@@ -49,6 +53,7 @@ export * from './components/Segmented'
 export * from './components/SortHeader'
 export * from './components/Stat'
 export * from './components/Status'
+export * from './components/StatusStrip'
 export * from './components/tone'
 export * from './components/Stepper'
 export * from './components/Switch'
@@ -65,6 +70,8 @@ export * from './charts/BarSeries'
 export * from './charts/BarList'
 export * from './charts/MiniBars'
 export * from './charts/Sparkline'
+export * from './charts/DotBoxPlot'
+export * from './charts/SpanTimeline'
 
 // hooks
 export * from './hooks/useSort'

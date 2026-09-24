@@ -1,5 +1,4 @@
-import type { ReactNode, Ref } from 'react'
-import { ResizeHandle } from './Chat'
+import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type Ref } from 'react'
 import s from './Panel.module.css'
 
 /** A full-height side panel, docked as a flex sibling of the page so the
@@ -12,6 +11,55 @@ export function DockPanel({ label, width, fullscreen, resize, children }: { labe
       {resize && !fullscreen && <ResizeHandle value={width} min={resize.min} max={resize.max} onResize={resize.onResize} label={`Resize ${label} panel`} />}
       {children}
     </aside>
+  )
+}
+
+/** The draggable edge of a panel docked on the right. Reports the width the
+ *  panel should take (distance from the pointer to the viewport's right
+ *  edge); ←/→ resize by 16px from the keyboard. */
+function ResizeHandle({ value, min, max, onResize, label }: { value: number; min: number; max: number; onResize: (width: number) => void; label: string }) {
+  const [dragging, setDragging] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const down = (e: PointerEvent) => {
+    e.preventDefault()
+    ref.current?.setPointerCapture(e.pointerId)
+    setDragging(true)
+  }
+  const move = (e: PointerEvent) => {
+    if (dragging) onResize(window.innerWidth - e.clientX)
+  }
+  const up = (e: PointerEvent) => {
+    ref.current?.releasePointerCapture(e.pointerId)
+    setDragging(false)
+  }
+  const key = (e: KeyboardEvent) => {
+    const step = { ArrowLeft: 16, ArrowRight: -16 }[e.key as 'ArrowLeft' | 'ArrowRight']
+    if (step) {
+      e.preventDefault()
+      onResize(value + step)
+    }
+  }
+  return (
+    <div
+      ref={ref}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      aria-valuenow={Math.round(value)}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      tabIndex={0}
+      title="Drag to resize"
+      className={s.handle}
+      data-dragging={dragging}
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={up}
+      onPointerCancel={up}
+      onKeyDown={key}
+    >
+      <span className={s.grip} />
+    </div>
   )
 }
 

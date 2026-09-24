@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Run } from '@/api/types'
-import { Button, FieldButton, Popover, Row, SortHeader, Spacer, StatusPill, Text, useSort, type Tone } from '@/design'
+import { Button, FieldButton, Popover, Row, RowAction, SortTh, Spacer, StatusPill, Table, Text, numCell, useSort, type Tone } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
 import { valueOf } from '@/domain/metrics'
 import { useSelectRun, verdictOf, type Scope } from '@/domain/scope'
@@ -79,13 +79,11 @@ export function RunPicker({ scope, runId }: { scope: Scope; runId: number | null
           </Button>
         </Row>
         <div className={s.scroll}>
-          <table className={s.table}>
+          <Table minWidth={640} density="dense" stickyHeader label="Runs">
             <thead>
               <tr>
                 {COLS.map((c) => (
-                  <th key={c.key} className={c.num ? s.num : undefined} aria-sort={sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                    <SortHeader label={c.label} active={sort.key === c.key} dir={sort.dir} align={c.num ? 'right' : 'left'} onClick={() => toggle(c.key)} />
-                  </th>
+                  <SortTh key={c.key} label={c.label} sortKey={c.key} sort={sort} onSort={toggle} align={c.num ? 'right' : 'left'} />
                 ))}
               </tr>
             </thead>
@@ -96,14 +94,11 @@ export function RunPicker({ scope, runId }: { scope: Scope; runId: number | null
                 const over = ttid != null && r.ttid_budget_ms != null && ttid > r.ttid_budget_ms
                 const inView = r.id === run?.id
                 return (
-                  <tr key={r.id} aria-current={inView || undefined} onClick={() => pick(r.id)}>
+                  <tr key={r.id} aria-current={inView || undefined}>
                     <td>
-                      <button type="button" className={s.pick} onClick={(e) => {
-                          e.stopPropagation()
-                          pick(r.id)
-                        }} aria-label={`Show run #${r.id}`}>
+                      <RowAction onClick={() => pick(r.id)} aria-label={`Show run #${r.id}`}>
                         #{r.id}
-                      </button>{' '}
+                      </RowAction>{' '}
                       <Text variant="meta">{shortDate(r.ts, true)}</Text>
                     </td>
                     <td>
@@ -112,20 +107,20 @@ export function RunPicker({ scope, runId }: { scope: Scope; runId: number | null
                       </Text>
                     </td>
                     <td>{v ? <StatusPill tone={TONE[v] ?? 'neutral'} /> : <Text variant="meta">–</Text>}</td>
-                    <td className={s.num}>
+                    <td className={numCell}>
                       <Text variant="small" tone={over ? 'fail' : 'primary'} weight={600}>
                         {ttid == null ? '–' : `${fmt(ttid)} ms`}
                       </Text>
                     </td>
-                    <td className={s.num}>{fmt(valueOf(r, 'slow_pct'), 2)}%</td>
-                    <td className={s.num}>{fmt(valueOf(r, 'janky_pct'), 2)}%</td>
-                    <td className={s.num}>{valueOf(r, 'peak_rss_mb') == null ? '–' : `${fmt(valueOf(r, 'peak_rss_mb'))} MB`}</td>
-                    <td className={s.num}>{valueOf(r, 'rss_growth_mb') == null ? '–' : `${fmt(valueOf(r, 'rss_growth_mb'))} MB`}</td>
+                    <td className={numCell}>{fmt(valueOf(r, 'slow_pct'), 2)}%</td>
+                    <td className={numCell}>{fmt(valueOf(r, 'janky_pct'), 2)}%</td>
+                    <td className={numCell}>{valueOf(r, 'peak_rss_mb') == null ? '–' : `${fmt(valueOf(r, 'peak_rss_mb'))} MB`}</td>
+                    <td className={numCell}>{valueOf(r, 'rss_growth_mb') == null ? '–' : `${fmt(valueOf(r, 'rss_growth_mb'))} MB`}</td>
                   </tr>
                 )
               })}
             </tbody>
-          </table>
+          </Table>
         </div>
       </Popover>
     </span>

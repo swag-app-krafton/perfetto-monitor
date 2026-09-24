@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, startStress, useDevice, useJob, useRecentJobs, useStress, useStressList } from '@/api/hooks'
 import type { StressTest } from '@/api/types'
-import { Banner, Button, Card, EmptyState, Progress, Row, Segmented, Spinner, Stack, StatusPill, TableCard, Text, numCell, selectedRow } from '@/design'
+import { Banner, Button, Card, DotBoxPlot, EmptyState, Progress, Row, Segmented, Spinner, Stack, StatusPill, TableCard, Text, numCell, selectedRow } from '@/design'
 import { fmt, shortDate, signed } from '@/domain/format'
 import { useScope } from '@/domain/scope'
 import { compareSamples, quartiles } from '@/domain/stats'
@@ -144,61 +144,22 @@ export function StressPage() {
   )
 }
 
-/** Strip + box plot: one row per test, one dot per session, IQR box, median bar. */
+/** The test in view against the previous completed one: each session's TTID
+ *  on one axis, and whether the shift in the median is real or noise. */
 function Distribution({ cur, base, budget }: { cur: StressTest; base: StressTest | null; budget: number | null }) {
   const a = values(cur)
   const b = values(base ?? undefined)
-  const rows = [...(base && b.length ? [{ label: `Previous #${base.id}`, vals: b, color: 'var(--c4)' }] : []), { label: `Test #${cur.id}`, vals: a, color: 'var(--c1)' }]
-  const all = rows.flatMap((r) => r.vals).concat(budget != null ? [budget] : [])
   if (!a.length) return <EmptyState>No completed sessions in test #{cur.id} yet.</EmptyState>
-  const lo = Math.min(...all)
-  const hi = Math.max(...all)
-  const pad = (hi - lo) * 0.08 || 10
-  const X = (v: number) => `${((v - (lo - pad)) / (hi - lo + 2 * pad)) * 100}%`
+  const samples = [...(base && b.length ? [{ key: 'base', label: `Previous #${base.id}`, vals: b, color: 'var(--c4)' }] : []), { key: 'cur', label: `Test #${cur.id}`, vals: a, color: 'var(--c1)' }]
+  const rows = samples.map((r) => {
+    const q = quartiles(r.vals)
+    return { key: r.key, label: r.label, values: r.vals, color: r.color, summary: q, valueText: `${fmt(q.median)} ms` }
+  })
   const cmp = b.length >= 2 && a.length >= 2 ? compareSamples(a, b) : null
 
   return (
     <Card title="TTID distribution" hint={`${a.length} session${a.length === 1 ? '' : 's'} in test #${cur.id}${base ? ` against the previous completed test, #${base.id}` : ''}. One dot per cold start; the box is the middle half.`}>
-      <Stack gap={14}>
-        {rows.map((r) => {
-          const q = quartiles(r.vals)
-          return (
-            <div key={r.label} className={s.row}>
-              <Text variant="body" tone="primary" weight={600}>
-                {r.label}
-              </Text>
-              <div className={s.track}>
-                <div className={s.box} style={{ left: X(q.q1), width: `calc(${X(q.q3)} - ${X(q.q1)})`, borderColor: r.color }} />
-                <div className={s.median} style={{ left: X(q.median), background: r.color }} />
-                {r.vals.map((v, i) => (
-                  <span key={i} title={`${fmt(v, 1)} ms`} className={s.dot} style={{ left: X(v), top: 10 + ((i * 7) % 28), background: r.color }} />
-                ))}
-                {budget != null && <div className={s.budget} style={{ left: X(budget) }} />}
-              </div>
-              <Text variant="ui" weight={700} align="right">
-                {fmt(q.median)} ms
-              </Text>
-            </div>
-          )
-        })}
-        <div className={s.row}>
-          <span />
-          <div className={s.axis}>
-            <Text variant="caption" className={s.axisStart}>
-              {fmt(lo - pad)} ms
-            </Text>
-            {budget != null && (
-              <Text variant="caption" tone="accent" nowrap className={s.axisBudget} style={{ left: X(budget) }}>
-                budget {budget}
-              </Text>
-            )}
-            <Text variant="caption" className={s.axisEnd}>
-              {fmt(hi + pad)} ms
-            </Text>
-          </div>
-          <span />
-        </div>
-      </Stack>
+      <DotBoxPlot label="Time to initial display per cold start" rows={rows} budget={budget} unit="ms" />
       <Row gap={12} wrap className={s.verdict}>
         {cmp ? (
           <>

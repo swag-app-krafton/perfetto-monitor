@@ -7,9 +7,10 @@ import {
   Button,
   Card,
   EmptyState,
+  ExpandableTable,
+  FlowList,
   FlushCard,
   Grid,
-  HelpTip,
   KpiTile,
   Meter,
   Row,
@@ -20,6 +21,7 @@ import {
   StatGrid,
   TermList,
   Text,
+  type ExpandableColumn,
 } from '@/design'
 import { fmt, stepName } from '@/domain/format'
 import { valueOf } from '@/domain/metrics'
@@ -28,17 +30,17 @@ import s from './Screens.module.css'
 
 type Instrumented = Extract<ScreensPayload, { instrumented: true }>
 
-const HEAD: { label: string; right?: boolean; help?: string }[] = [
-  { label: 'Screen' },
-  { label: 'Runtime', help: 'What drew the screen: Compose, a React Native surface, or a native view such as the camera preview.' },
-  { label: 'Depth', right: true, help: 'How far down the navigation stack the screen sat. 1 is the root; deeper means more screens still open underneath.' },
-  { label: 'Visits', right: true },
-  { label: 'CPU busy', right: true, help: "Share of wall time the app's threads were running on a CPU while this screen was in front. Over 100% means several cores at once." },
-  { label: 'CPU time', right: true, help: 'Total CPU time across all app threads while on this screen, summed over its visits.' },
-  { label: 'Peak RAM', right: true, help: "Highest resident memory reached while on this screen." },
-  { label: 'RAM growth', right: true, help: 'The largest rise in resident memory within one visit. Growth that persists after leaving suggests a leak.' },
-  { label: 'App jank', right: true, help: "Frames Android's FrameTimeline marked as the app missing its deadline -- the app's fault, not the compositor's." },
-  { label: 'Time on screen', right: true, help: 'Wall time the screen was visible, summed over its visits.' },
+const HEAD: ExpandableColumn[] = [
+  { key: 'screen', label: 'Screen', width: 'minmax(140px, 1.2fr)' },
+  { key: 'runtime', label: 'Runtime', width: '110px', help: 'What drew the screen: Compose, a React Native surface, or a native view such as the camera preview.' },
+  { key: 'depth', label: 'Depth', width: '60px', align: 'right', help: 'How far down the navigation stack the screen sat. 1 is the root; deeper means more screens still open underneath.' },
+  { key: 'visits', label: 'Visits', width: '60px', align: 'right' },
+  { key: 'cpu', label: 'CPU busy', width: 'minmax(160px, 1.3fr)', align: 'right', help: "Share of wall time the app's threads were running on a CPU while this screen was in front. Over 100% means several cores at once." },
+  { key: 'cpuTime', label: 'CPU time', width: '100px', align: 'right', help: 'Total CPU time across all app threads while on this screen, summed over its visits.' },
+  { key: 'peak', label: 'Peak RAM', width: '90px', align: 'right', help: 'Highest resident memory reached while on this screen.' },
+  { key: 'growth', label: 'RAM growth', width: '100px', align: 'right', help: 'The largest rise in resident memory within one visit. Growth that persists after leaving suggests a leak.' },
+  { key: 'jank', label: 'App jank', width: '80px', align: 'right', help: "Frames Android's FrameTimeline marked as the app missing its deadline -- the app's fault, not the compositor's." },
+  { key: 'time', label: 'Time on screen', width: '110px', align: 'right', help: 'Wall time the screen was visible, summed over its visits.' },
 ]
 
 const METRIC_OPTS = [
@@ -119,19 +121,19 @@ function Usage({ d }: { d: Instrumented }) {
   return (
     <>
       <FlushCard title="Per-screen cost" hint="Select a screen to chart each of its visits separately.">
-        <div className={s.table} role="table" aria-label="Per-screen cost">
-          <div className={`${s.cols} ${s.hrow}`} role="row">
-            {HEAD.map((h) => (
-              <span key={h.label} role="columnheader" className={`${s.hcell} ${h.right ? s.right : ''}`}>
-                {h.label}
-                {h.help && <HelpTip text={h.help} label={h.label} />}
-              </span>
-            ))}
-          </div>
-          {d.screen_summary.map((r) => (
-            <ScreenRow key={r.route} r={r} maxCpu={maxCpu} open={open === r.route} onToggle={() => setOpen(open === r.route ? null : r.route)} metric={metric} setMetric={setMetric} />
-          ))}
-        </div>
+        <ExpandableTable
+          label="Per-screen cost"
+          minWidth={1120}
+          columns={HEAD}
+          rows={d.screen_summary}
+          rowKey={(r) => r.route}
+          rowAttrs={(r) => ({ 'data-hl': `screen:${r.route}` })}
+          toggleLabel={(r) => r.route}
+          openKey={open}
+          onToggle={(k) => setOpen(open === k ? null : k)}
+          cells={(r) => screenCells(r, maxCpu)}
+          detail={(r) => <VisitChart r={r} metric={metric} setMetric={setMetric} />}
+        />
       </FlushCard>
 
       {d.timeline.rss.length > 0 && (
@@ -150,34 +152,25 @@ function Usage({ d }: { d: Instrumented }) {
       <Grid min={380}>
         <Card title="Navigation stack" hint="The screens in the order they were visited, with how long each transition took to draw.">
           <Stack gap={10}>
-            <div>
-              {d.screens.slice(0, 14).map((v, i) => {
+            <FlowList
+              label="Screens in the order they were visited"
+              nodes={d.screens.slice(0, 14).map((v, i) => {
                 const next = d.screens[i + 1]
                 const tr = next ? navCost.get(`${v.route}->${next.route}`) : undefined
                 const slow = tr?.median_ms != null && tr.median_ms > 350
-                return (
+                return {
+                  key: String(i),
+                  title: v.route,
+                  meta: `${v.kind_label}${v.depth > 1 ? ` · depth ${v.depth}` : ''}`,
                   // Indented by how deep in the stack the screen sat.
-                  <div key={i} style={{ marginLeft: (v.depth - 1) * 18 }}>
-                    <div className={s.node}>
-                      <span className={s.nodeName}>{v.route}</span>
-                      <Text variant="meta">
-                        {v.kind_label}
-                        {v.depth > 1 ? ` · depth ${v.depth}` : ''}
-                      </Text>
-                    </div>
-                    {next && (
-                      <div className={s.link}>
-                        <span className={s.linkBar} />
-                        <Text variant="meta" tone={slow ? 'warn' : 'muted'}>
-                          ↓ {slow ? 'Slow transition' : 'Transition'}
-                          {tr?.median_ms != null ? ` · ${fmt(tr.median_ms)} ms` : ''}
-                        </Text>
-                      </div>
-                    )}
-                  </div>
-                )
+                  depth: v.depth,
+                  link: next && {
+                    label: `↓ ${slow ? 'Slow transition' : 'Transition'}${tr?.median_ms != null ? ` · ${fmt(tr.median_ms)} ms` : ''}`,
+                    tone: slow ? 'warn' : 'muted',
+                  },
+                }
               })}
-            </div>
+            />
             {d.screens.length > 14 && <Text variant="meta">+ {d.screens.length - 14} more visits</Text>}
           </Stack>
         </Card>
@@ -236,83 +229,84 @@ function Usage({ d }: { d: Instrumented }) {
   )
 }
 
-function ScreenRow({ r, maxCpu, open, onToggle, metric, setMetric }: { r: ScreenSummary; maxCpu: number; open: boolean; onToggle: () => void; metric: VisitMetric; setMetric: (m: VisitMetric) => void }) {
+function screenCells(r: ScreenSummary, maxCpu: number) {
   const cpu = r.total_ms ? (r.total_cpu_ms / r.total_ms) * 100 : null
   const growth = r.max_rss_delta_mb
+  return [
+    <Text key="screen" as="span" variant="body" tone="primary" weight={600} className={r.step ? s.substep : undefined}>
+      {r.step ? '↳ ' : ''}
+      {r.route}
+    </Text>,
+    <Text key="runtime" variant="meta" tone="secondary">
+      {r.kind_label}
+    </Text>,
+    r.depth_label ?? '–',
+    r.visits,
+    <Row key="cpu" as="span" gap={10} justify="end" grow>
+      <span className={s.cpuBar}>
+        <Meter value={cpu ?? 0} max={maxCpu} height={6} label={`CPU busy on ${r.route}`} />
+      </span>
+      <Text as="span" variant="body" tone="primary" weight={600} align="right" className={s.cpuValue}>
+        {cpu == null ? '–' : `${fmt(cpu, 1)}%`}
+      </Text>
+    </Row>,
+    `${fmt(r.total_cpu_ms)} ms`,
+    r.peak_rss_mb == null ? '–' : `${fmt(r.peak_rss_mb)} MB`,
+    <Text key="growth" as="span" variant="body" weight={600} align="right" tone={growth == null ? 'secondary' : growth > 10 ? 'fail' : growth < 0 ? 'pass' : 'secondary'}>
+      {growth == null ? '–' : `${growth > 10 ? '▲ ' : growth < 0 ? '▼ ' : ''}${fmt(growth, 1)} MB`}
+    </Text>,
+    <Text
+      key="jank"
+      as="span"
+      variant="body"
+      align="right"
+      tone={(r.jank?.app_jank_pct ?? 0) > 0.5 ? 'fail' : 'secondary'}
+      title={r.jank ? `${r.jank.late} of ${r.jank.frames} frames late: ${r.jank.app} app deadline missed, ${r.jank.dropped} dropped, ${r.jank.buffer_stuffing} buffer stuffing, ${r.jank.system} system` : 'No FrameTimeline data'}
+    >
+      {r.jank?.app_jank_pct == null ? '–' : `${fmt(r.jank.app_jank_pct, 2)}%`}
+    </Text>,
+    <Text key="time" as="span" variant="body" align="right">
+      {fmt(r.total_ms / 1000, 1)} s
+    </Text>,
+  ]
+}
+
+/** An open screen row: the chosen metric for each of the screen's visits. */
+function VisitChart({ r, metric, setMetric }: { r: ScreenSummary; metric: VisitMetric; setMetric: (m: VisitMetric) => void }) {
   const opt = METRIC_OPTS.find((o) => o.value === metric)!
   const st = r.stats[metric]
   return (
-    <div data-hl={`screen:${r.route}`}>
-      <button type="button" className={`${s.cols} ${s.row}`} aria-expanded={open} onClick={onToggle}>
-        <Text as="span" variant="body" tone="primary" weight={600} className={r.step ? s.substep : undefined}>
-          {r.step ? '↳ ' : ''}
-          {r.route}
+    <Stack gap={14}>
+      <Row gap={12} wrap>
+        <Segmented label="Chart" value={metric} onChange={setMetric} options={METRIC_OPTS.map((o) => ({ value: o.value, label: o.label }))} />
+        <Text variant="meta">
+          {r.visits} visit{r.visits === 1 ? '' : 's'} · red = more than two standard deviations from the mean
         </Text>
-        <Text variant="meta" tone="secondary">
-          {r.kind_label}
-        </Text>
-        <span className={s.right}>{r.depth_label ?? '–'}</span>
-        <span className={s.right}>{r.visits}</span>
-        <Row as="span" gap={10} justify="end">
-          <span className={s.cpuBar}>
-            <Meter value={cpu ?? 0} max={maxCpu} height={6} label={`CPU busy on ${r.route}`} />
-          </span>
-          <Text as="span" variant="body" tone="primary" weight={600} align="right" className={s.cpuValue}>
-            {cpu == null ? '–' : `${fmt(cpu, 1)}%`}
-          </Text>
-        </Row>
-        <span className={s.right}>{fmt(r.total_cpu_ms)} ms</span>
-        <span className={s.right}>{r.peak_rss_mb == null ? '–' : `${fmt(r.peak_rss_mb)} MB`}</span>
-        <Text as="span" variant="body" weight={600} align="right" tone={growth == null ? 'secondary' : growth > 10 ? 'fail' : growth < 0 ? 'pass' : 'secondary'}>
-          {growth == null ? '–' : `${growth > 10 ? '▲ ' : growth < 0 ? '▼ ' : ''}${fmt(growth, 1)} MB`}
-        </Text>
-        <Text
-          as="span"
-          variant="body"
-          align="right"
-          tone={(r.jank?.app_jank_pct ?? 0) > 0.5 ? 'fail' : 'secondary'}
-          title={r.jank ? `${r.jank.late} of ${r.jank.frames} frames late: ${r.jank.app} app deadline missed, ${r.jank.dropped} dropped, ${r.jank.buffer_stuffing} buffer stuffing, ${r.jank.system} system` : 'No FrameTimeline data'}
-        >
-          {r.jank?.app_jank_pct == null ? '–' : `${fmt(r.jank.app_jank_pct, 2)}%`}
-        </Text>
-        <Text as="span" variant="body" align="right">
-          {fmt(r.total_ms / 1000, 1)} s
-        </Text>
-      </button>
-      {open && (
-        <Stack gap={14} className={s.detail}>
-          <Row gap={12} wrap>
-            <Segmented label="Chart" value={metric} onChange={setMetric} options={METRIC_OPTS.map((o) => ({ value: o.value, label: o.label }))} />
-            <Text variant="meta">
-              {r.visits} visit{r.visits === 1 ? '' : 's'} · red = more than two standard deviations from the mean
-            </Text>
-          </Row>
-          <BarSeries
-            label={`${opt.label} for each visit to ${r.route}`}
-            unit={opt.unit}
-            mean={st?.mean}
-            caption="visit, in the order they happened"
-            bars={r.visit_list.map((v) => {
-              const val = metric === 'duration_ms' ? v.duration_ms : metric === 'cpu_ms' ? v.cpu_ms : metric === 'cpu_pct_of_wall' ? v.cpu_pct_of_wall : metric === 'peak_rss_mb' ? v.peak_rss_mb : v.rss_delta_mb
-              const dev = st?.mean != null && st.stdev && val != null ? (val - st.mean) / st.stdev : null
-              return {
-                label: `${r.route} · visit ${v.index}`,
-                value: val,
-                flagged: !!v.outlier[metric],
-                detail: [
-                  [opt.label, val == null ? 'no data' : `${fmt(val, 1)}${opt.unit}`],
-                  ...(st?.mean != null ? ([[`mean of ${r.visits}`, `${fmt(st.mean, 1)}${opt.unit}`]] as [string, string][]) : []),
-                  ...(dev != null ? ([['deviation', `${dev >= 0 ? '+' : ''}${fmt(dev, 1)} sd`]] as [string, string][]) : []),
-                  ['CPU busy', v.cpu_pct_of_wall == null ? '–' : `${fmt(v.cpu_pct_of_wall, 1)}%`],
-                  ['peak RAM', v.peak_rss_mb == null ? '–' : `${fmt(v.peak_rss_mb)} MB`],
-                  ['stack', v.stack.length > 1 ? v.stack.join(' › ') : 'root'],
-                ],
-              }
-            })}
-          />
-        </Stack>
-      )}
-    </div>
+      </Row>
+      <BarSeries
+        label={`${opt.label} for each visit to ${r.route}`}
+        unit={opt.unit}
+        mean={st?.mean}
+        caption="visit, in the order they happened"
+        bars={r.visit_list.map((v) => {
+          const val = metric === 'duration_ms' ? v.duration_ms : metric === 'cpu_ms' ? v.cpu_ms : metric === 'cpu_pct_of_wall' ? v.cpu_pct_of_wall : metric === 'peak_rss_mb' ? v.peak_rss_mb : v.rss_delta_mb
+          const dev = st?.mean != null && st.stdev && val != null ? (val - st.mean) / st.stdev : null
+          return {
+            label: `${r.route} · visit ${v.index}`,
+            value: val,
+            flagged: !!v.outlier[metric],
+            detail: [
+              [opt.label, val == null ? 'no data' : `${fmt(val, 1)}${opt.unit}`],
+              ...(st?.mean != null ? ([[`mean of ${r.visits}`, `${fmt(st.mean, 1)}${opt.unit}`]] as [string, string][]) : []),
+              ...(dev != null ? ([['deviation', `${dev >= 0 ? '+' : ''}${fmt(dev, 1)} sd`]] as [string, string][]) : []),
+              ['CPU busy', v.cpu_pct_of_wall == null ? '–' : `${fmt(v.cpu_pct_of_wall, 1)}%`],
+              ['peak RAM', v.peak_rss_mb == null ? '–' : `${fmt(v.peak_rss_mb)} MB`],
+              ['stack', v.stack.length > 1 ? v.stack.join(' › ') : 'root'],
+            ],
+          }
+        })}
+      />
+    </Stack>
   )
 }
 

@@ -1,0 +1,64 @@
+/* The time before the marker is shaded, the marker is a rule with its label
+   above the track, and each span is a bar placed by its start. */
+.track {
+  position: relative;
+  height: 56px;
+  border-bottom: 1px solid var(--line2);
+}
+.marked {
+  margin-top: 14px;
+}
+.before {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--s2);
+}
+.marker {
+  position: absolute;
+  top: -16px;
+  bottom: 0;
+  border-left: 2px solid var(--tx);
+}
+.markerLabel {
+  position: absolute;
+  left: 6px;
+  top: -2px;
+  font: 600 11px var(--font-ui);
+  color: var(--tx);
+  white-space: nowrap;
+}
+.span {
+  position: absolute;
+  bottom: 8px;
+  height: 14px;
+}
+.pass {
+  background: var(--pass);
+}
+.fail {
+  background: var(--fail);
+}
+.neutral {
+  background: var(--tx3);
+}
+.ticks {
+  position: relative;
+  height: 14px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--tx3);
+}
+.tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+/* The ends sit inside the track rather than half past its edge. */
+.first {
+  transform: none;
+}
+.last {
+  transform: translateX(-100%);
+}

@@ -1,8 +1,7 @@
-/* Verdict hero: a surface whose top rule takes the verdict colour (inline). */
+/* Verdict hero: a card whose top rule takes the verdict colour; its two
+   columns carry their own padding. */
 .hero {
-  background: var(--s1);
-  border: 1px solid var(--line);
-  border-top-width: 4px;
+  padding: 0;
 }
 .heroMain {
   flex: 1 1 480px;
@@ -52,27 +51,6 @@
 /* Verdict strip: one cell per run, oldest to newest. */
 .strip {
   margin-top: 20px;
-}
-.cell {
-  height: 44px;
-  display: grid;
-  place-items: center;
-  color: var(--on-st);
-  font: 800 11px var(--font-ui);
-  outline-offset: 2px;
-}
-/* The run in view (picked in the top bar). */
-.cell[aria-current='true'] {
-  outline: 2px solid var(--tx);
-}
-.bMark {
-  height: 12px;
-  text-align: center;
-  font: 700 9px var(--font-display);
-  color: var(--c4);
-}
-.stripFoot {
-  margin-top: 2px;
 }
 .detail {
   margin-top: 18px;

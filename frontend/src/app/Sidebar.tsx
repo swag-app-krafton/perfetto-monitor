@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router'
-import { Row, Spacer, Stack, Text } from '@/design'
+import { IconButton, Row, Spacer, Stack, Text } from '@/design'
 import { useProfiler } from './profiler'
 import { GROUPS, screensFor } from './routes'
 import s from './Shell.module.css'
@@ -51,9 +51,7 @@ export function Sidebar({
       <Spacer />
       <Row gap={10} className={s.navFoot}>
         {!drawer && (
-          <button type="button" className={s.railBtn} onClick={onToggleRail} aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'}>
-            {rail ? '»' : '«'}
-          </button>
+          <IconButton icon={rail ? 'chevronsRight' : 'chevronsLeft'} label={rail ? 'Expand sidebar' : 'Collapse sidebar'} outlined onClick={onToggleRail} />
         )}
         {full && (
           <Text as="div" variant="caption">

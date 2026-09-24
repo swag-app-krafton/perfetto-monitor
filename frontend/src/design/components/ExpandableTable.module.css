@@ -1,0 +1,78 @@
+/* Every row is a grid of the same tracks (--cols, set from the columns), so
+   figures line up down the table. */
+.cols {
+  display: grid;
+  grid-template-columns: var(--cols);
+  gap: 8px;
+  align-items: center;
+}
+.head {
+  padding: 10px 24px 10px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.th {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.right {
+  justify-content: flex-end;
+  text-align: right;
+}
+.group {
+  border-bottom: 1px solid var(--line);
+}
+.row {
+  position: relative;
+  padding: 12px 24px 12px 16px;
+  color: var(--tx);
+  font: 400 13px var(--font-ui);
+  cursor: pointer;
+}
+.row:hover,
+.open {
+  background: var(--s2);
+}
+.cell {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.chevron {
+  display: flex;
+  justify-content: center;
+  color: var(--tx3);
+}
+/* The toggle's click area covers the whole row. */
+.toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.toggle::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.toggle:focus-visible {
+  outline: none;
+}
+.toggle:focus-visible::after {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+/* Controls inside a cell sit above the row's click area. */
+.cell :is(a, button, [tabindex]) {
+  position: relative;
+  z-index: 1;
+}
+/* Detail starts under the first data column. */
+.detail {
+  padding: 20px 24px 24px 60px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}

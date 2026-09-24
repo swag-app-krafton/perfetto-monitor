@@ -90,3 +90,12 @@
 .flushBody {
   padding: 16px 24px;
 }
+/* The Fab floats in the corner in the app; here it sits in its specimen. */
+.fabDemo {
+  position: static;
+}
+/* A control with a Popover or Menu anchored under it. */
+.popHost {
+  position: relative;
+  display: inline-flex;
+}

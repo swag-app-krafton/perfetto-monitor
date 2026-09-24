@@ -4,5 +4,54 @@
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/features/**", "src/app/**", "src/lib/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["@/design/**", "**/design/**"],
+                "message": "Import from '@/design' only; files inside the design system are not its API."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/features/**", "src/app/**"],
+      "excludeFiles": ["src/features/design-system/**"],
+      "rules": {
+        "react/forbid-elements": [
+          "error",
+          {
+            "forbid": [
+              { "element": "button", "message": "use Button, IconButton, RowAction or another @/design control" },
+              { "element": "input", "message": "use SearchInput, Switch or another @/design field" },
+              { "element": "select", "message": "use SelectField from @/design" },
+              { "element": "textarea", "message": "use TextAreaField from @/design" },
+              { "element": "table", "message": "use Table or TableCard from @/design" },
+              { "element": "dialog", "message": "use Dialog from @/design" },
+              { "element": "details", "message": "use Disclosure from @/design" },
+              { "element": "svg", "message": "use Icon or a chart from @/design" },
+              { "element": "progress", "message": "use Progress or Meter from @/design" },
+              { "element": "meter", "message": "use Meter from @/design" }
+            ]
+          }
+        ],
+        "react/forbid-dom-props": [
+          "error",
+          { "forbid": [{ "propName": "style", "message": "pages take no inline styles: use a class, or a @/design component that takes the value as a prop" }] }
+        ],
+        "react/forbid-component-props": [
+          "error",
+          { "forbid": [{ "propName": "style", "message": "pages take no inline styles: use a class, or a component prop" }] }
+        ]
+      }
+    }
+  ]
 }

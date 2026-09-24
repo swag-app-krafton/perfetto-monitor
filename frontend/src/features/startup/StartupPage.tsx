@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Run } from '@/api/types'
-import { Card, EmptyState, Grid, Legend, LineChart, Row, Segmented, SectionTitle, Stack, StackedBars, StatusPill, StatusSquare, Term, Text, type StackRow } from '@/design'
+import { Card, EmptyState, Grid, Legend, LineChart, Row, Segmented, SectionTitle, SpanTimeline, Stack, StackedBars, StatusPill, StatusSquare, Term, Text, type StackRow } from '@/design'
 import { fmt, signed, stepName } from '@/domain/format'
 import { valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
@@ -36,12 +36,12 @@ export function StartupPage() {
         actions={
           ttid != null && (
             <Stack gap={4} align="end">
-              <div className={s.ttid} style={{ color: budget && ttid > budget ? 'var(--fail)' : 'var(--tx)' }}>
+              <Text as="div" variant="display-lg" weight={700} tone={budget && ttid > budget ? 'fail' : 'primary'}>
                 {fmt(ttid)}{' '}
                 <Text as="span" variant="heading-xs" tone="muted">
                   ms
                 </Text>
-              </div>
+              </Text>
               {base && baseTtid != null && (
                 <Text variant="meta" tone={ttid > baseTtid ? 'fail' : 'pass'}>
                   {ttid > baseTtid ? '▲' : '▼'} {signed(ttid - baseTtid, 0, ' ms')} vs #{base.id}
@@ -161,37 +161,18 @@ function Ordering({
       const at = (st.start_ms ?? t0) - t0
       return { name: stepName(st.step), description: descriptions[st.step], at, dur: st.dur_ms, before: at < ff - 1 }
     })
-    const span = Math.max(ff, ...items.map((t) => t.at + t.dur), 1) * 1.1
-    const X = (v: number) => `${(v / span) * 100}%`
     const bad = items.filter((t) => t.before).length
     return (
       <>
         <div>
           <StatusPill tone={bad ? 'fail' : 'pass'}>{bad ? `${bad} violation${bad === 1 ? '' : 's'}` : 'No violations'}</StatusPill>
         </div>
-        <Stack gap={8}>
-          <div className={s.track}>
-            <div className={s.preFrame} style={{ width: X(ff) }} />
-            <div className={s.frameMark} style={{ left: X(ff) }}>
-              <Text variant="caption" tone="primary" weight={600} nowrap className={s.frameLabel}>
-                First frame {fmt(ff)} ms
-              </Text>
-            </div>
-            {items.map((t) => (
-              <div
-                key={t.name}
-                title={t.name}
-                className={s.taskBar}
-                style={{ left: X(t.at), width: X(Math.max(t.dur, span / 200)), background: t.before ? 'var(--fail)' : 'var(--pass)' }}
-              />
-            ))}
-          </div>
-          <Row justify="between">
-            <Text variant="caption">0 ms</Text>
-            <Text variant="caption">{fmt(span / 2)}</Text>
-            <Text variant="caption">{fmt(span)} ms</Text>
-          </Row>
-        </Stack>
+        <SpanTimeline
+          label={`Deferred work against the first frame at ${fmt(ff)} ms`}
+          marker={{ at: ff, label: `First frame ${fmt(ff)} ms` }}
+          spans={items.map((t) => ({ key: t.name, label: t.name, start: t.at, dur: t.dur, tone: t.before ? 'fail' : 'pass' }))}
+          unit="ms"
+        />
         <div>
           {items.length === 0 && (
             <Text variant="body" tone="muted" className={s.noTasks}>

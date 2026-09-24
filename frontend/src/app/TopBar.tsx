@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router'
-import { Icon, Segmented, SelectField } from '@/design'
+import { Button, Icon, IconButton, Segmented, SelectField } from '@/design'
 import { useAuditScope } from '@/domain/audits'
 import { pathLabel } from '@/domain/format'
 import type { Scope } from '@/domain/scope'
@@ -27,9 +27,7 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
   return (
     <header className={s.top}>
       {narrow && (
-        <button type="button" className={s.hamburger} aria-label="Open navigation" onClick={() => setDrawer(true)}>
-          <Icon name="menu" size={16} />
-        </button>
+        <IconButton icon="menu" label="Open navigation" outlined onClick={() => setDrawer(true)} />
       )}
       <div className={s.titleBlock}>
         <div className={s.title}>Swag Pay Performance</div>
@@ -82,10 +80,10 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
         <Link className={s.tokensLink} to="/design-system">
           Tokens
         </Link>
-        <button type="button" className={s.themeBtn} onClick={toggleTheme} aria-label="Toggle colour theme">
-          <span className={s.themeGlyph} aria-hidden="true" />
+        <Button size="sm" onClick={toggleTheme} aria-label="Toggle colour theme">
+          <Icon name="contrast" size={14} />
           {theme === 'dark' ? 'Dark' : 'Light'}
-        </button>
+        </Button>
       </div>
     </header>
   )

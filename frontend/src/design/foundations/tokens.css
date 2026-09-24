@@ -85,6 +85,21 @@
   /* Text on a chart-series fill (a stacked bar segment): black in both themes. */
   --on-series: #000;
   --accent-hover: #ff6158;
+  /* Behind a modal or an open drawer, in both themes. */
+  --scrim: rgba(0, 0, 0, 0.6);
+  /* A small floating card (a chart's hover readout), in both themes. */
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.35);
+  /* A switch's knob, on the track's colour in both themes. */
+  --knob: #fff;
+  /* A key cap's fill: a darker shade of whatever it sits on. */
+  --kbd-bg: rgba(0, 0, 0, 0.16);
+  /* The console (log, code) is dark in both themes, so its rules and tints
+     are the same in both. */
+  --con-line: #262626;
+  --con-line2: #333333;
+  --con-line3: #666666;
+  --con-warn-bg: rgba(245, 184, 61, 0.08);
+  --con-err-bg: rgba(255, 87, 115, 0.1);
   --page-pad: 32px;
   --max-w: 1400px;
 

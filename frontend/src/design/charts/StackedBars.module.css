@@ -47,6 +47,10 @@
   font-size: 11px;
   color: var(--tx3);
 }
+/* The unit sits under the totals, clear of the last tick. */
+.axis > :last-child {
+  text-align: right;
+}
 .ticks {
   position: relative;
   height: 14px;
@@ -58,4 +62,40 @@
 }
 .budgetTick {
   color: var(--accent-tx);
+}
+.dim {
+  opacity: 0.6;
+}
+
+/* Size lg: a hero bar. Text on a series fill takes the on-series colour
+   (black in both themes). */
+.lg .rows {
+  gap: 12px;
+}
+.lg .grid {
+  grid-template-columns: 120px 1fr 80px;
+  gap: 12px;
+}
+.lg .label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tx);
+}
+.lg .total {
+  font-size: 13px;
+  font-weight: 700;
+}
+.lg .track {
+  height: 28px;
+}
+.lg .segment {
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--on-series);
+}
+.segmentText {
+  font: 600 11px var(--font-ui);
 }

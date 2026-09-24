@@ -31,7 +31,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--scrim);
   z-index: calc(var(--z-sidebar) - 1);
 }
 .brand {
@@ -105,20 +105,6 @@
   padding: 16px 12px;
   border-top: 1px solid var(--line);
 }
-.railBtn {
-  width: 36px;
-  height: 36px;
-  flex: none;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--tx2);
-  cursor: pointer;
-  font-size: 14px;
-}
-.railBtn:hover {
-  border-color: var(--tx3);
-}
 .footLink {
   color: var(--tx3);
 }
@@ -139,17 +125,6 @@
   padding: 14px var(--page-pad);
   border-bottom: 1px solid var(--line);
   background: var(--bg);
-}
-.hamburger {
-  width: 40px;
-  height: 40px;
-  border: 1px solid var(--line2);
-  border-radius: 4px;
-  background: transparent;
-  color: var(--tx);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
 }
 .titleBlock {
   flex: 1 1 300px;
@@ -177,29 +152,6 @@
   padding: 0 12px;
   font: 600 13px var(--font-ui);
   color: var(--tx);
-}
-.themeBtn {
-  height: 36px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--s1);
-  color: var(--tx);
-  font: 500 13px var(--font-ui);
-  cursor: pointer;
-}
-.themeBtn:hover {
-  border-color: var(--tx3);
-}
-.themeGlyph {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1.5px solid currentColor;
-  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
 }
 .main {
   flex: 1;

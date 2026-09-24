@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router'
 import { useAudits } from '@/api/hooks'
 import type { Audit } from '@/api/types'
-import { Button, EmptyState, SortHeader, Spinner, StatusPill, TableCard, TableEmptyRow, Text, numCell, selectedRow, useSort, type Tone } from '@/design'
+import { Button, EmptyState, SortTh, Spinner, StatusPill, TableCard, TableEmptyRow, Text, numCell, selectedRow, useSort, type Tone } from '@/design'
 import { auditLabel, useAuditScope } from '@/domain/audits'
 import { fmt, shortDate } from '@/domain/format'
 import { useUi } from '@/app/store'
@@ -73,9 +73,7 @@ export function AuditsPage() {
       <thead>
         <tr>
           {COLS.map((c) => (
-            <th key={c.key} className={c.num ? numCell : undefined} aria-sort={sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-              <SortHeader label={c.label} active={sort.key === c.key} dir={sort.dir} align={c.num ? 'right' : 'left'} onClick={() => toggle(c.key)} />
-            </th>
+            <SortTh key={c.key} label={c.label} sortKey={c.key} sort={sort} onSort={toggle} align={c.num ? 'right' : 'left'} />
           ))}
           <th />
         </tr>

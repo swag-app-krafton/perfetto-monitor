@@ -63,8 +63,70 @@
   text-align: center;
   color: var(--tx3);
 }
-.table tbody tr.selected td {
+.table tbody tr.selected td,
+.table tbody tr[aria-current='true'] td {
   background: var(--s2);
+}
+
+/* Dense: a table in a tight space, such as a picker in a popover. */
+.dense {
+  font-size: 12.5px;
+}
+.dense th {
+  padding: 8px;
+}
+.dense td {
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+.dense th:first-child,
+.dense td:first-child {
+  padding-left: 8px;
+}
+.dense th:last-child,
+.dense td:last-child {
+  padding-right: 8px;
+}
+/* The header stays in view while the rows scroll under it. */
+.sticky th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--s2);
+  border-bottom-color: var(--line2);
+}
+
+/* A row that picks something: its RowAction's click area covers the row,
+   and the row's other controls sit above it. */
+.table tbody tr:has(.rowAction) {
+  position: relative;
+  cursor: pointer;
+}
+.table tbody tr:has(.rowAction) :is(a, button:not(.rowAction)) {
+  position: relative;
+  z-index: 1;
+}
+.rowAction {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tx);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.rowAction::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.rowAction:focus-visible {
+  outline: none;
+}
+.rowAction:focus-visible::after {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 .num {
   text-align: right !important;

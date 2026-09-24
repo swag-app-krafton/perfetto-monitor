@@ -14,11 +14,11 @@
   padding: 0 14px;
 }
 .warn {
-  background: rgba(245, 184, 61, 0.08);
+  background: var(--con-warn-bg);
   color: var(--con-warn);
 }
 .error {
-  background: rgba(255, 87, 115, 0.1);
+  background: var(--con-err-bg);
   color: var(--con-err);
 }
 .time {

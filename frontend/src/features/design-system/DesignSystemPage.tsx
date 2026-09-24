@@ -2,8 +2,10 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useUi } from '@/app/store'
 import { useApplyTheme } from '@/app/useApplyTheme'
+import { quartiles } from '@/domain/stats'
 import {
   Avatar,
+  BandedTimeline,
   Badge,
   Banner,
   BarList,
@@ -13,6 +15,7 @@ import {
   Card,
   Chip,
   ChipButton,
+  ChoiceList,
   CodeBlock,
   CompactTable,
   DescriptionList,
@@ -20,10 +23,14 @@ import {
   DiffTag,
   Disclosure,
   DockPanel,
+  DotBoxPlot,
   EmptyState,
-  FieldButton,
-  FlushCard,
+  ExpandableTable,
   Eyebrow,
+  Fab,
+  FieldButton,
+  FlowList,
+  FlushCard,
   Grid,
   HelpTip,
   Icon,
@@ -34,6 +41,7 @@ import {
   LineChart,
   ListButton,
   LogConsole,
+  Menu,
   Meter,
   MiniBars,
   OptionList,
@@ -41,23 +49,34 @@ import {
   PanelBody,
   PanelFooter,
   PanelHeader,
+  Popover,
   Progress,
   Row,
+  RowAction,
   SPACE,
   SearchInput,
+  SectionTitle,
   Segmented,
   SelectField,
   SeverityPill,
+  SortHeader,
+  SortTh,
   Spacer,
+  SpanTimeline,
+  Sparkline,
   Spinner,
   Stack,
+  StackedBars,
   Stat,
   StatGrid,
   StatusPill,
+  StatusSquare,
+  StatusStrip,
   StepList,
   Stepper,
   Swatch,
   Switch,
+  Table,
   TableCard,
   TableEmptyRow,
   Term,
@@ -66,8 +85,10 @@ import {
   TextAreaField,
   Toast,
   ToggleChip,
+  Toolbar,
   numCell,
   selectedRow,
+  useSort,
   type TextVariant,
 } from '@/design'
 import s from './DesignSystem.module.css'
@@ -122,6 +143,17 @@ const EXAMPLE_STEPS: [string, string | null, number, number][] = [
   ['bind_application', 'The new process loading the app\'s code, then running its Application.onCreate. Heavy SDK set-up there makes it slow.', 4.1, 211.4],
   ['activity_resume', null, 291.2, 51.3],
 ]
+
+const EXAMPLE_SESSIONS = [368, 371, 372, 374, 375, 377, 379, 381, 386, 402]
+const EXAMPLE_PREVIOUS = [352, 356, 358, 360, 361, 363, 365, 368, 371, 377]
+const STEP_COLORS: Record<string, string> = { bind_application: 'var(--c1)', activity_start: 'var(--c2)', first_frame: 'var(--c3)' }
+const EXAMPLE_PICKS = [
+  { id: 81, ttid: 375, peak: 412 },
+  { id: 80, ttid: 381, peak: 404 },
+  { id: 79, ttid: 369, peak: 425 },
+]
+type StepKey = 'name' | 'start' | 'dur'
+const stepValue = (st: (typeof EXAMPLE_STEPS)[number], k: StepKey) => (k === 'name' ? st[0] : k === 'start' ? st[2] : st[3])
 
 function Section({ id, title, intro, children }: { id: string; title: string; intro?: string; children: ReactNode }) {
   return (
@@ -186,6 +218,13 @@ export function DesignSystemPage() {
   const [kinds, setKinds] = useState({ screen: true, action: false })
   const [dialog, setDialog] = useState(false)
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null)
+  const [pkg, setPkg] = useState<string>('com.swagpay.app')
+  const [menu, setMenu] = useState(false)
+  const [pop, setPop] = useState(false)
+  const [picked, setPicked] = useState(81)
+  const [openStep, setOpenStep] = useState<string | null>('bind_application')
+  const picks = useSort(EXAMPLE_PICKS, (r, k: 'id' | 'ttid' | 'peak') => r[k], { key: 'id', dir: 'desc' })
+  const steps = useSort(EXAMPLE_STEPS, stepValue, { key: 'dur', dir: 'desc' })
 
   return (
     <div className={s.page}>
@@ -295,6 +334,21 @@ export function DesignSystemPage() {
                 <IconButton icon="thumbUp" label="Helpful" size="sm" pressed />
                 <IconButton icon="thumbDown" label="Not helpful" size="sm" />
               </Row>
+              <Row gap={8}>
+                <IconButton icon="menu" label="Open navigation" outlined />
+                <IconButton icon="chevronsLeft" label="Collapse sidebar" outlined />
+                <Button size="sm">
+                  <Icon name="contrast" size={14} />
+                  Dark
+                </Button>
+              </Row>
+              <Row>
+                <Fab className={s.fabDemo}>
+                  <Icon name="sparkles" size={18} />
+                  Ask
+                  <Kbd>⌘K</Kbd>
+                </Fab>
+              </Row>
             </Specimen>
             <Specimen name="Fields">
               <Row gap={8} wrap>
@@ -344,6 +398,45 @@ export function DesignSystemPage() {
                 />
               </div>
             </Specimen>
+            <Specimen name="Menu and Popover">
+              <Text variant="body">Popover is the floating surface under a control; Menu is a keyboard-navigable list inside one. Both close on Escape or a click outside.</Text>
+              <Row gap={8} wrap>
+                <span className={s.popHost}>
+                  <Button variant="outline" onClick={() => setMenu(!menu)}>
+                    Add context
+                  </Button>
+                  <Menu
+                    open={menu}
+                    onClose={() => setMenu(false)}
+                    label="Example menu"
+                    onPick={() => setMenu(false)}
+                    options={[
+                      { key: 'r', kind: 'Run', label: 'Run #80', meta: 'Sep 22 · PASS' },
+                      { key: 's', kind: 'Step', label: 'Step: bind_application' },
+                    ]}
+                  />
+                </span>
+                <span className={s.popHost}>
+                  <FieldButton label="Run" value="#81 · Latest" open={pop} onClick={() => setPop(!pop)} />
+                  <Popover open={pop} onClose={() => setPop(false)} width={280}>
+                    <Text variant="body">Any content: the Run picker puts a dense Table here.</Text>
+                  </Popover>
+                </span>
+              </Row>
+            </Specimen>
+            <Specimen name="ChoiceList">
+              <Text variant="body">One of a long or wordy list, as radios: one tab stop, the arrow keys move the choice.</Text>
+              <ChoiceList
+                label="Example package"
+                value={pkg}
+                onChange={setPkg}
+                options={[
+                  { value: 'com.swagpay.app', title: 'Swag Pay · ours', description: 'com.swagpay.app' },
+                  { value: 'com.example.wallet', title: 'Example Wallet', description: 'com.example.wallet' },
+                  { value: 'com.example.camera', title: 'Example Camera', description: 'com.example.camera' },
+                ]}
+              />
+            </Specimen>
           </Grid>
         </Section>
 
@@ -360,6 +453,12 @@ export function DesignSystemPage() {
                 <DiffTag diff="worse" />
                 <DiffTag diff="better" />
                 <DiffTag diff="same" />
+              </Row>
+              <Row gap={8} wrap>
+                <StatusSquare tone="pass" />
+                <StatusSquare tone="warn" />
+                <StatusSquare tone="fail" />
+                <StatusSquare tone="neutral" />
               </Row>
               <Row gap={8} wrap>
                 <SeverityPill level="high" />
@@ -399,6 +498,22 @@ export function DesignSystemPage() {
                 Run #172 is not in the history.
               </Banner>
               <EmptyState title="No runs yet">Capture a trace from a connected device.</EmptyState>
+            </Specimen>
+            <Specimen name="StatusStrip">
+              <Text variant="body">One cell per item in order; the one in view is outlined, and a mark sits under a cell.</Text>
+              <StatusStrip
+                label="Example verdict per run"
+                cells={EXAMPLE_RUNS.map((r, i) => ({
+                  key: r,
+                  tone: i === 5 ? 'fail' : i === 8 ? 'warn' : i === 2 ? 'neutral' : 'pass',
+                  label: `Run ${r}`,
+                  current: i === 9,
+                  mark: i === 7 ? 'B' : undefined,
+                }))}
+                start="#72 · Sep 14"
+                middle="B = pinned benchmark"
+                end="#81 · Sep 23"
+              />
             </Specimen>
             <Specimen name="Progress">
               <Progress pct={62} />
@@ -478,6 +593,24 @@ export function DesignSystemPage() {
                 />
               </Stack>
             </Card>
+            <Specimen name="Layout pieces">
+              <SectionTitle aside={<Text variant="meta">2 findings</Text>}>SectionTitle</SectionTitle>
+              <Text variant="body">A paragraph of content, with its actions in a Toolbar under a rule.</Text>
+              <Toolbar label="Example actions">
+                <Button variant="quiet">Copy</Button>
+                <Button variant="quiet">Export .md</Button>
+              </Toolbar>
+            </Specimen>
+            <Specimen name="FlowList">
+              <FlowList
+                label="Example navigation stack"
+                nodes={[
+                  { key: '1', title: 'Home', meta: 'React Native', depth: 1, link: { label: '↓ Transition · 180 ms' } },
+                  { key: '2', title: 'Scan', meta: 'Native view · depth 2', depth: 2, link: { label: '↓ Slow transition · 420 ms', tone: 'warn' } },
+                  { key: '3', title: 'Pay', meta: 'Compose · depth 3', depth: 3 },
+                ]}
+              />
+            </Specimen>
             <Specimen name="Code and disclosure">
               <Disclosure summary="Queried run data · 3 steps · 12 ms">Loaded run #81 → Compared 5 steps → Found 2 findings</Disclosure>
               <CodeBlock lang="Perfetto SQL" code={'SELECT name, dur / 1e6 AS dur_ms\nFROM slice\nWHERE name GLOB \'step:*\''} />
@@ -540,8 +673,65 @@ export function DesignSystemPage() {
             </Card>
             <FlushCard title="FlushCard" hint="The same title bar around any flush body.">
               <div className={s.flushBody}>
-                <Text variant="body">A div grid of expandable rows goes here, edge to edge.</Text>
+                <Text variant="body">Any flush body goes here, edge to edge: a Table, an ExpandableTable.</Text>
               </div>
+            </FlushCard>
+            <Card title="Table, dense, with SortTh and RowAction" hint="SortTh is a SortHeader in a <th> with aria-sort. RowAction's click area covers its row: click anywhere on a row to pick it.">
+              <Stack gap={14}>
+                <Row gap={20} wrap>
+                  <SortHeader label="Sorted column" active dir="desc" onClick={() => undefined} />
+                  <SortHeader label="Other column" active={false} dir="desc" onClick={() => undefined} />
+                </Row>
+                <Table minWidth={320} density="dense" stickyHeader label="Example runs">
+                  <thead>
+                    <tr>
+                      <SortTh label="Run" sortKey="id" sort={picks.sort} onSort={picks.toggle} />
+                      <SortTh label="TTID" sortKey="ttid" sort={picks.sort} onSort={picks.toggle} align="right" />
+                      <SortTh label="Peak RAM" sortKey="peak" sort={picks.sort} onSort={picks.toggle} align="right" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {picks.sorted.map((r) => (
+                      <tr key={r.id} aria-current={r.id === picked || undefined}>
+                        <td>
+                          <RowAction onClick={() => setPicked(r.id)} aria-label={`Show run #${r.id}`}>
+                            #{r.id}
+                          </RowAction>
+                        </td>
+                        <td className={numCell}>{r.ttid} ms</td>
+                        <td className={numCell}>{r.peak} MB</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              </Stack>
+            </Card>
+            <FlushCard title="ExpandableTable" hint="Rows open to show detail. The whole row is the toggle; the ? in a cell keeps its own click.">
+              <ExpandableTable
+                label="Example startup steps"
+                minWidth={400}
+                columns={[
+                  { key: 'name', sortKey: 'name', label: 'Step', width: 'minmax(120px, 1fr)' },
+                  { key: 'start', sortKey: 'start', label: 'Start', width: '80px', align: 'right' },
+                  { key: 'dur', sortKey: 'dur', label: 'Duration', width: '110px', align: 'right', help: 'Wall time from the step starting to it ending.' },
+                ]}
+                rows={steps.sorted}
+                rowKey={(st) => st[0]}
+                toggleLabel={(st) => st[0]}
+                openKey={openStep}
+                onToggle={(k) => setOpenStep(openStep === k ? null : k)}
+                sort={{ ...steps.sort, onSort: steps.toggle }}
+                cells={([name, about, start, dur]) => [
+                  <Term key="name" description={about} weight={600}>
+                    {name}
+                  </Term>,
+                  `+${start.toFixed(1)} ms`,
+                  <Text key="dur" as="span" variant="body" tone="primary" weight={600}>
+                    {dur.toFixed(1)} ms
+                  </Text>,
+                ]}
+                detail={([name, about]) => <Text variant="body">{about ?? `No description is recorded for ${name}.`}</Text>}
+              />
             </FlushCard>
           </Grid>
         </Section>
@@ -568,6 +758,82 @@ export function DesignSystemPage() {
                   { label: 'sync-worker', value: 0.3 },
                 ]}
               />
+            </Card>
+            <Card title="StackedBars" hint="Each row split into parts on one scale, with a budget marker. Size lg is the hero form, values inside the parts; a dim row is the reference.">
+              <Stack gap={24}>
+                <StackedBars
+                  unit="ms"
+                  budget={420}
+                  colors={STEP_COLORS}
+                  rows={[81, 80, 79].map((id, i) => ({
+                    id: String(id),
+                    label: `#${id}`,
+                    bold: i === 0,
+                    segments: [
+                      { key: 'bind_application', value: 190 + i * 6, title: 'bind_application' },
+                      { key: 'activity_start', value: 96 - i * 4, title: 'activity_start' },
+                      { key: 'first_frame', value: 64, title: 'first_frame' },
+                      { key: 'other', value: 18, title: 'other' },
+                    ],
+                    total: 375 + i * 2,
+                    totalText: `${375 + i * 2} ms`,
+                  }))}
+                />
+                <StackedBars
+                  size="lg"
+                  unit="MB"
+                  budget={500}
+                  colors={{ 'Hermes heap': 'var(--c2)', 'Rest of process': 'var(--c1)' }}
+                  rows={[
+                    { id: 'cur', label: 'Run #81', segments: [{ key: 'Hermes heap', value: 118, title: 'Hermes heap · 118 MB', text: '118' }, { key: 'Rest of process', value: 294, title: 'Rest of process · 294 MB', text: '294' }], total: 412, totalText: '412 MB' },
+                    { id: 'prev', label: 'Previous #80', dim: true, segments: [{ key: 'Hermes heap', value: 112, title: 'Hermes heap · 112 MB', text: '112' }, { key: 'Rest of process', value: 292, title: 'Rest of process · 292 MB', text: '292' }], total: 404, totalText: '404 MB' },
+                  ]}
+                />
+              </Stack>
+            </Card>
+            <Card title="DotBoxPlot" hint="One dot per sample, the middle half as a box, the median as a bar; two samples on one axis.">
+              <DotBoxPlot
+                label="Example TTID per cold start"
+                unit="ms"
+                budget={400}
+                rows={[
+                  { key: 'prev', label: 'Previous #3', values: EXAMPLE_PREVIOUS, color: 'var(--c4)', summary: quartiles(EXAMPLE_PREVIOUS), valueText: `${quartiles(EXAMPLE_PREVIOUS).median} ms` },
+                  { key: 'cur', label: 'Test #4', values: EXAMPLE_SESSIONS, color: 'var(--c1)', summary: quartiles(EXAMPLE_SESSIONS), valueText: `${quartiles(EXAMPLE_SESSIONS).median} ms` },
+                ]}
+              />
+            </Card>
+            <Card title="SpanTimeline" hint="Spans of work placed by their start, against a marker whose preceding time is shaded.">
+              <SpanTimeline
+                label="Example deferred work against the first frame"
+                unit="ms"
+                marker={{ at: 375, label: 'First frame 375 ms' }}
+                spans={[
+                  { key: 'analytics', label: 'analytics_init', start: 290, dur: 40, tone: 'fail' },
+                  { key: 'prefetch', label: 'prefetch_offers', start: 402, dur: 120, tone: 'pass' },
+                  { key: 'sync', label: 'sync_contacts', start: 560, dur: 60, tone: 'pass' },
+                ]}
+              />
+            </Card>
+            <Card title="BandedTimeline" hint="Panels on one time axis with bands (screen visits) behind them and one crosshair across all.">
+              <BandedTimeline
+                label="Example RAM and CPU over a session"
+                height={110}
+                bands={[
+                  { start: 0, end: 12000, label: 'Home' },
+                  { start: 12000, end: 26000, label: 'Scan' },
+                  { start: 26000, end: 40000, label: 'Pay' },
+                ]}
+                panels={[
+                  { label: 'RAM (MB)', color: 'var(--c1)', unit: ' MB', points: [0, 5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000].map((t, i) => [t, 380 + i * 4 + (i > 3 ? 12 : 0)] as [number, number]) },
+                  { label: 'CPU busy (%)', color: 'var(--c2)', unit: '%', points: [0, 5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000].map((t, i) => [t, [22, 18, 30, 64, 41, 25, 52, 33, 20][i]!] as [number, number]) },
+                ]}
+              />
+            </Card>
+            <Card title="Sparkline" hint="A trend in a table cell: no axis, the last point marked.">
+              <Row gap={16}>
+                <Sparkline values={EXAMPLE_TTID} label="Example TTID trend" />
+                <Sparkline values={[4, 6, 5, 9, 12, 11, 15]} color="var(--fail)" label="Example rising trend" />
+              </Row>
             </Card>
             <Card title="MiniBars" hint="The Copilot's inline chart, from a zero baseline.">
               <MiniBars title="Example peak RAM per run" unit="MB" budget={420} labels={EXAMPLE_RUNS} values={[398, 402, 405, 399, 410, 431, 407, 404, 412, 425]} />

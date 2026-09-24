@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Audit } from '@/api/types'
-import { Button, FieldButton, Popover, Row, SortHeader, Spacer, StatusPill, Text, useSort, type Tone } from '@/design'
+import { Button, FieldButton, Popover, Row, RowAction, SortTh, Spacer, StatusPill, Table, Text, numCell, useSort, type Tone } from '@/design'
 import { auditLabel, type AuditScope } from '@/domain/audits'
 import { fmt, shortDate } from '@/domain/format'
 import { useIsNarrow } from '@/lib/useMediaQuery'
@@ -66,44 +66,34 @@ export function AuditPicker({ scope }: { scope: AuditScope }) {
           </Button>
         </Row>
         <div className={s.scroll}>
-          <table className={s.table}>
+          <Table minWidth={520} density="dense" stickyHeader label="Audits">
             <thead>
               <tr>
                 {COLS.map((c) => (
-                  <th key={c.key} className={c.num ? s.num : undefined} aria-sort={sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                    <SortHeader label={c.label} active={sort.key === c.key} dir={sort.dir} align={c.num ? 'right' : 'left'} onClick={() => toggle(c.key)} />
-                  </th>
+                  <SortTh key={c.key} label={c.label} sortKey={c.key} sort={sort} onSort={toggle} align={c.num ? 'right' : 'left'} />
                 ))}
               </tr>
             </thead>
             <tbody>
               {sorted.map((a) => (
-                <tr key={a.id} aria-current={a.id === audit?.id || undefined} onClick={() => pick(a.id)}>
+                <tr key={a.id} aria-current={a.id === audit?.id || undefined}>
                   <td>
-                    <button
-                      type="button"
-                      className={s.pick}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        pick(a.id)
-                      }}
-                      aria-label={`Show audit ${auditLabel(a)}`}
-                    >
+                    <RowAction onClick={() => pick(a.id)} aria-label={`Show audit ${auditLabel(a)}`}>
                       {auditLabel(a)}
-                    </button>{' '}
+                    </RowAction>{' '}
                     <Text variant="meta">{shortDate(a.ts, true)}</Text>
                   </td>
                   <td>
                     <StatusPill tone={STATE_TONE[a.state]}>{a.state.toUpperCase()}</StatusPill>
                   </td>
-                  <td className={s.num}>{a.score == null ? '–' : fmt(a.score)}</td>
-                  <td className={s.num}>{a.cpu_pct == null ? '–' : `${fmt(a.cpu_pct, 1)}%`}</td>
-                  <td className={s.num}>{a.ram_mb == null ? '–' : `${fmt(a.ram_mb)} MB`}</td>
-                  <td className={s.num}>{a.fps == null ? '–' : fmt(a.fps, 1)}</td>
+                  <td className={numCell}>{a.score == null ? '–' : fmt(a.score)}</td>
+                  <td className={numCell}>{a.cpu_pct == null ? '–' : `${fmt(a.cpu_pct, 1)}%`}</td>
+                  <td className={numCell}>{a.ram_mb == null ? '–' : `${fmt(a.ram_mb)} MB`}</td>
+                  <td className={numCell}>{a.fps == null ? '–' : fmt(a.fps, 1)}</td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       </Popover>
     </span>
