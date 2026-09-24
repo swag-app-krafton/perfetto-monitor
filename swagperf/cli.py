@@ -20,7 +20,11 @@ from . import extract as ex, store, analyst, synth
 
 def _analyse_run(rid, metrics, *, use_llm, db=None):
     regs = store.regressions(rid, db=db)
-    baselines = {s["step"]: store.baseline(s["step"], exclude_run=rid, db=db)
+    # Scoped like regressions(): the same app, platform and kind of device.
+    baselines = {s["step"]: store.baseline(
+                     s["step"], exclude_run=rid, app_pkg=metrics.get("app_pkg"),
+                     platform=metrics.get("platform") or "android",
+                     simulator=bool(metrics.get("simulator")), db=db)
                  for s in metrics["steps"]}
     baselines = {k: v for k, v in baselines.items() if v}
     if use_llm:
@@ -39,13 +43,20 @@ def _analyse_run(rid, metrics, *, use_llm, db=None):
 def _print(res, regs, metrics):
     V = {"pass": "\033[32mPASS\033[0m", "warn": "\033[33mWARN\033[0m",
          "fail": "\033[31mFAIL\033[0m"}
-    print(f"\n  {V.get(res.get('verdict'), res.get('verdict','?').upper())}  {res.get('headline','')}\n")
+    # A simulator run is never judged against budgets: nothing moved is "steady", not a pass.
+    word = "\033[90mSTEADY\033[0m" if metrics.get("simulator") and res.get("verdict") == "pass" \
+        else V.get(res.get('verdict'), res.get('verdict', '?').upper())
+    print(f"\n  {word}  {res.get('headline','')}\n")
     st = metrics["startup"]
     label = metrics.get("startup_metric", "time to first camera frame")
-    budget_txt = f" / {st['budget_ms']}ms budget" if st.get("budget_ms") else " (no budget set for this app)"
+    budget_txt = (f" / {st['budget_ms']}ms budget" if st.get("budget_ms")
+                  else " (simulator run: no budget applies)" if metrics.get("simulator")
+                  else " (no budget set for this app)")
     print(f"  {label}  {st['time_to_first_camera_frame_ms']}ms{budget_txt}")
     if metrics.get("derived"):
-        print(f"  app  {metrics.get('app_pkg') or 'unknown'}  (derived steps -- not instrumented)")
+        why = ("its step: markers are untimed" if "untimed" in (metrics.get("note") or "")
+               else "not instrumented")
+        print(f"  app  {metrics.get('app_pkg') or 'unknown'}  (derived steps -- {why})")
     f = metrics["frames"]
     print(f"  frames  {f['total']} total · {f['slow_pct']}% slow · {f['janky_pct']}% janky · drift {'not measured' if f['thermal_drift_pct'] is None else str(f['thermal_drift_pct']) + '%'}")
     if metrics.get("memory", {}).get("rss"):
@@ -171,7 +182,8 @@ def main(argv=None):
                         "derived app to auto-classify cold/warm")
     a.add_argument("--label"); a.add_argument("--git-sha")
     a.add_argument("--app-version"); a.add_argument("--device")
-    a.add_argument("--app", help="package under test (default: auto-detect from the trace)")
+    a.add_argument("--app", help="package or bundle id under test (default: auto-detect from "
+                   "the trace; required for an Instruments .trace)")
     a.add_argument("--derive", action="store_true",
                    help="force step derivation even for an instrumented app")
     a.add_argument("--no-llm", action="store_true", help="skip the model, use rules only")
@@ -182,8 +194,10 @@ def main(argv=None):
     # `capture --repeat` analyses each trace and asks for one review at the end.
     a.add_argument("--no-review", action="store_true", help=argparse.SUPPRESS)
 
-    c = sub.add_parser("capture", help="capture a trace from a connected device")
+    c = sub.add_parser("capture", help="capture a trace from a connected device or a booted iOS Simulator")
     c.add_argument("-o", "--out", default=None)
+    c.add_argument("--platform", choices=["android", "ios"], default="android")
+    c.add_argument("--device", help="adb serial, or a simulator's name or UDID")
     c.add_argument("--pkg", default="com.swag.pay")
     c.add_argument("--duration-ms", type=int, default=10000)
     c.add_argument("--cold", action="store_true",
@@ -219,6 +233,8 @@ def main(argv=None):
     stx = stp.add_subparsers(dest="scmd", required=True)
     sr = stx.add_parser("run", help="capture N sessions of one app")
     sr.add_argument("--pkg", required=True)
+    sr.add_argument("--platform", choices=["android", "ios"], default="android")
+    sr.add_argument("--device", help="adb serial, or a simulator's name or UDID")
     sr.add_argument("-n", "--sessions", type=int, default=5)
     sr.add_argument("--warm", action="store_true", help="warm starts instead of cold")
     sr.add_argument("--duration-ms", type=int, default=8000)
@@ -268,8 +284,10 @@ def main(argv=None):
     apx = appsp.add_subparsers(dest="acmd", required=True)
     apl = apx.add_parser("list", help="show the catalogue")
     apl.add_argument("--role", choices=["own", "competitor", "reference"])
+    apl.add_argument("--platform", choices=["android", "ios"])
     apa = apx.add_parser("add", help="add or update an app")
     apa.add_argument("pkg")
+    apa.add_argument("--platform", choices=["android", "ios"], default="android")
     apa.add_argument("--name"); apa.add_argument("--vendor")
     apa.add_argument("--role", default="competitor",
                      choices=["own", "competitor", "reference"])
@@ -280,7 +298,9 @@ def main(argv=None):
     apa.add_argument("--notes")
     apr = apx.add_parser("remove", help="remove an app")
     apr.add_argument("pkg")
-    apx.add_parser("discover", help="match the catalogue against a connected device")
+    apr.add_argument("--platform", choices=["android", "ios"], default="android")
+    apd = apx.add_parser("discover", help="match the catalogue against a connected device")
+    apd.add_argument("--platform", choices=["android", "ios"], default="android")
 
     cm = sub.add_parser("compare", help="diff two runs")
     cm.add_argument("run", type=int, help="the run to inspect")
@@ -298,12 +318,45 @@ def main(argv=None):
     bclr.add_argument("--app", help="package the scope belongs to")
     bclr.add_argument("--path-kind")
     bclr.add_argument("--device")
+    bclr.add_argument("--platform", choices=["android", "ios"], default="android")
     bmx.add_parser("list", help="show pinned benchmarks")
+
+    mp = sub.add_parser("maps", help="source maps for resolving JS error stacks, one per build")
+    mpx = mp.add_subparsers(dest="mcmd2", required=True)
+    mpa = mpx.add_parser("add", help="register a build's composed Hermes source map")
+    mpa.add_argument("map")
+    mpa.add_argument("--app", required=True, help="package or bundle id")
+    mpa.add_argument("--platform", choices=["android", "ios"], default="android")
+    mpa.add_argument("--bundle", help="the build's JS bundle (main.jsbundle / index.android.bundle): "
+                     "keys the map by the bundle's own hash")
+    mpa.add_argument("--build", help="the build number, when the bundle isn't to hand")
+    mpx.add_parser("list", help="registered source maps")
+
+    io = sub.add_parser("ios", help="iOS tools: simulators, and reading Instruments traces")
+    iox = io.add_subparsers(dest="icmd", required=True)
+    iox.add_parser("devices", help="list iOS simulators")
+    iot = iox.add_parser("toc", help="what an Instruments .trace recorded")
+    iot.add_argument("trace")
+    ioc = iox.add_parser("convert", help="convert an Instruments .trace to a Perfetto trace")
+    ioc.add_argument("trace")
+    ioc.add_argument("--app", required=True, help="the app's bundle id")
+    ioc.add_argument("-o", "--out", default=None)
 
     n = ap.parse_args(argv)
 
     if n.cmd == "analyse":
         from . import catalogue
+        if n.trace.rstrip("/").endswith(".trace"):
+            # An Instruments recording: convert it first; everything after
+            # reads the Perfetto trace like any other.
+            if not n.app:
+                print("  \033[31mERROR\033[0m an Instruments .trace needs --app <bundle id>")
+                return 2
+            from .capture_ios import convert_recording
+            out = n.trace.rstrip("/")[:-len(".trace")] + ".pftrace"
+            convert_recording(n.trace, out, pkg=n.app)
+            print(f"  converted -> {out}", file=sys.stderr)
+            n.trace = out
         # path_kind is now None unless the caller explicitly asked for one, so
         # extract_any's own defaulting applies: "returning_user" for an
         # instrumented app, auto cold/warm classification for a derived one.
@@ -341,29 +394,43 @@ def main(argv=None):
         return 0
 
     if n.cmd == "capture":
-        from .capture import capture, device_info
-        from . import catalogue
-        info = device_info()
+        from . import backends, catalogue
+        cap = backends.get(n.platform)
+        ios = n.platform == "ios"
+        try:
+            backends.validate_id(n.platform, n.pkg)
+        except ValueError as e:
+            print(f"  \033[31mERROR\033[0m {e}")
+            return 2
+        info = cap.device_info(n.device)
+        if not info:
+            print(f"  \033[31mERROR\033[0m {backends.NO_DEVICE[n.platform]}")
+            return 1
         dev = info.get("model") or info.get("device")
-        app = catalogue.get(n.pkg)
+        app = catalogue.get(n.pkg, n.platform)
         if not app:
             print(f"  note: {n.pkg} is not in the catalogue; add it with "
-                  f"`swagperf apps add {n.pkg}` to label it in reports.")
+                  f"`swagperf apps add {n.pkg}{' --platform ios' if ios else ''}` to label it in reports.")
+        # An iOS capture is always a cold launch under xctrace.
+        cold = n.cold or ios
         rc = 0
-        from .capture import run_metadata
         for i in range(max(n.repeat, 1)):
-            out = n.out or f"traces/{n.pkg}_{'cold' if n.cold else 'warm'}_{i:02d}.pftrace"
+            out = n.out or (f"traces/{'ios/' if ios else ''}{n.pkg}_"
+                            f"{'cold' if cold else 'warm'}_{i:02d}.pftrace")
             try:
-                meta = run_metadata(n.pkg)
+                meta = cap.run_metadata(n.pkg, n.device)
             except Exception:
                 meta = None
             try:
-                p = capture(out, pkg=n.pkg, duration_ms=n.duration_ms, cold=n.cold)
+                r = cap.capture(out, pkg=n.pkg, duration_ms=n.duration_ms, cold=cold,
+                                serial=n.device)
             except RuntimeError as e:
                 print(f"  \033[31mERROR\033[0m {e}")
                 return 1
+            p = r if isinstance(r, str) else out
             print(f"  captured -> {p}")
-            lost = ex.tracing_lost(p) if n.analyse else None
+            lost = cap.verify(p, instrumented=catalogue.is_instrumented(n.pkg, n.platform)) \
+                if n.analyse else None
             if lost:
                 print(f"  \033[31mERROR\033[0m not analysed: {lost}")
                 rc = 1
@@ -371,7 +438,7 @@ def main(argv=None):
                 args = ["analyse", p, "--app", n.pkg]
                 if dev:
                     args += ["--device", dev]
-                lbl = n.label or f"{'cold' if n.cold else 'warm'}-{i:02d}"
+                lbl = n.label or f"{'cold' if cold else 'warm'}-{i:02d}"
                 args += ["--label", lbl, "--no-review"]
                 rc = main(args) or rc
                 rid = store.run_id_for_trace(p)
@@ -458,8 +525,8 @@ def main(argv=None):
               f"{'slow %':>8}{'RAM delta':>11}")
         for s2 in d["screen_summary"]:
             print(f"  {s2['route']:<20}{s2['visits']:>7}{s2['total_ms']:>10.1f}"
-                  f"{s2['total_cpu_ms']:>9.1f}"
-                  f"{(s2['slow_frame_pct'] or 0):>8.2f}"
+                  + (f"{s2['total_cpu_ms']:>9.1f}" if s2['total_cpu_ms'] is not None else f"{'-':>9}")
+                  + f"{(s2['slow_frame_pct'] or 0):>8.2f}"
                   f"{(s2['max_rss_delta_mb'] if s2['max_rss_delta_mb'] is not None else 0):>10.1f}M")
         if d["navigations"]:
             print("\n  transitions")
@@ -480,7 +547,8 @@ def main(argv=None):
             from . import jobs
             import time as _t
             jid = jobs.start_stress(n.pkg, sessions=n.sessions, cold=not n.warm,
-                                    duration_ms=n.duration_ms, label=n.label)
+                                    duration_ms=n.duration_ms, label=n.label,
+                                    device=n.device, platform=n.platform)
             seen = 0
             while True:
                 j = jobs.get(jid)
@@ -560,7 +628,8 @@ def main(argv=None):
         from . import catalogue
         if n.acmd == "list":
             rows = [a for a in catalogue.load()
-                    if not n.role or a.get("role") == n.role]
+                    if (not n.role or a.get("role") == n.role)
+                    and (not n.platform or a["platform"] == n.platform)]
             for a in rows:
                 flags = []
                 if a.get("instrumented"):
@@ -569,7 +638,7 @@ def main(argv=None):
                     flags.append("unverified pkg")
                 if a.get("budgets"):
                     flags.append("has budgets")
-                print(f"  {a.get('role',''):<11} {a['pkg']:<42} {a.get('name',''):<20}"
+                print(f"  {a['platform']:<8} {a.get('role',''):<11} {a['pkg']:<42} {a.get('name',''):<20}"
                       + (f"  [{', '.join(flags)}]" if flags else ""))
             print(f"\n  {len(rows)} app(s). Unverified package names should be confirmed "
                   "with: swagperf apps discover")
@@ -578,27 +647,30 @@ def main(argv=None):
             e = catalogue.add(n.pkg, name=n.name, role=n.role, category=n.category,
                               vendor=n.vendor, region=n.region,
                               instrumented=n.instrumented, notes=n.notes,
-                              budgets={"ttid_ms": n.ttid_budget} if n.ttid_budget else None)
-            print(f"  added {e['pkg']} ({e['name']}) as {e['role']}")
+                              budgets={"ttid_ms": n.ttid_budget} if n.ttid_budget else None,
+                              platform=n.platform)
+            print(f"  added {e['pkg']} ({e['name']}) as {e['role']} ({n.platform})")
             return 0
         if n.acmd == "remove":
-            catalogue.remove(n.pkg)
-            print(f"  removed {n.pkg}")
+            catalogue.remove(n.pkg, n.platform)
+            print(f"  removed {n.pkg} ({n.platform})")
             return 0
         if n.acmd == "discover":
-            from .capture import installed_packages, device_info
-            info = device_info()
+            from . import backends
+            cap = backends.get(n.platform)
+            info = cap.device_info()
             if not info:
-                print("  no adb device connected. Connect one and enable USB debugging.")
+                print(f"  {backends.NO_DEVICE[n.platform]}")
                 return 2
             print(f"  device: {info.get('model')} ({info.get('device')}) "
-                  f"Android {info.get('release')} / API {info.get('sdk')}\n")
-            inst = set(installed_packages())
-            known = {a["pkg"]: a for a in catalogue.load()}
+                  + (f"iOS {info.get('release')}\n" if n.platform == "ios"
+                     else f"Android {info.get('release')} / API {info.get('sdk')}\n"))
+            inst = set(cap.installed_packages())
+            known = {a["pkg"]: a for a in catalogue.load() if a["platform"] == n.platform}
             present = sorted(inst & set(known))
             missing = sorted(set(known) - inst)
             if present:
-                catalogue.mark_verified(present)
+                catalogue.mark_verified(present, n.platform)
                 print("  in the catalogue and installed:")
                 for p in present:
                     print(f"    \u2713 {p:<42} {known[p].get('name','')}")
@@ -619,14 +691,18 @@ def main(argv=None):
 
     if n.cmd == "benchmark":
         if n.bcmd == "set":
-            b = store.set_benchmark(n.run, note=n.note)
+            try:
+                b = store.set_benchmark(n.run, note=n.note)
+            except ValueError as e:
+                print(f"  \033[31mERROR\033[0m {e}")
+                return 2
             print(f"  pinned run {b['run_id']} ({b['label'] or 'no label'}) as benchmark "
                   f"for {b['path_kind']} / {b['device'] or 'any device'}")
             print("  regressions for that scope are now measured against this run")
             return 0
         if n.bcmd == "clear":
             k = store.clear_benchmark(run_id=n.run, path_kind=n.path_kind,
-                                      device=n.device, app_pkg=n.app)
+                                      device=n.device, app_pkg=n.app, platform=n.platform)
             print(f"  cleared {k} benchmark(s); regressions fall back to the trailing baseline")
             return 0
         rows = store.benchmarks()
@@ -637,6 +713,41 @@ def main(argv=None):
             print(f"  {b['scope']:<28} run {b['run_id']:<4} {b['label'] or '':<18} "
                   f"set {b['set_at']}" + (f"  \u2014 {b['note']}" if b["note"] else ""))
         return 0
+
+    if n.cmd == "maps":
+        from . import sourcemaps
+        if n.mcmd2 == "add":
+            try:
+                dest = sourcemaps.add(n.platform, n.app, n.map, bundle=n.bundle, build=n.build)
+            except ValueError as e:
+                print(f"  \033[31mERROR\033[0m {e}")
+                return 2
+            print(f"  registered -> {dest}")
+            return 0
+        rows = sourcemaps.listed()
+        for platform, pkg, key, path in rows:
+            print(f"  {platform:<8} {pkg:<36} {key}")
+        print(f"\n  {len(rows)} map(s) in {sourcemaps.ROOT}")
+        return 0
+
+    if n.cmd == "ios":
+        from . import capture_ios, xctrace
+        if n.icmd == "devices":
+            sims = capture_ios.simulators()
+            for d in sims:
+                print(f"  {d['state']:<10} {d['name']:<32} iOS {d['os_version']:<6} {d['udid']}")
+            print(f"\n  {len(sims)} simulator(s). Boot one with: xcrun simctl boot \"<name>\"")
+            return 0
+        if n.icmd == "toc":
+            print(json.dumps({k: v for k, v in xctrace.parse_toc(xctrace.export_toc(n.trace)).items()
+                              if k != "tables"}, indent=2))
+            return 0
+        if n.icmd == "convert":
+            out = n.out or n.trace.rstrip("/")[:-len(".trace")] + ".pftrace"
+            rep = capture_ios.convert_recording(n.trace, out, pkg=n.app)
+            print(f"  converted -> {out}")
+            print(json.dumps(rep["convert"], indent=2))
+            return 0
 
     if n.cmd == "compare":
         base = n.base

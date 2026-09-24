@@ -1,0 +1,31 @@
+{
+ "version": 3,
+ "sources": [
+  "/app/src/main.js"
+ ],
+ "names": [
+  "start"
+ ],
+ "mappings": "AAAAA;AACA;AACA,MAAQA;AACR;AACA;AACA",
+ "x_facebook_offsets": [
+  0,
+  2,
+  4
+ ],
+ "x_facebook_segments": {
+  "1": {
+   "version": 3,
+   "sources": [
+    "/app/src/seg1.js"
+   ],
+   "names": [
+    "segFn"
+   ],
+   "mappings": "AAAAA;AACA;AACAA",
+   "x_facebook_offsets": [
+    0,
+    1
+   ]
+  }
+ }
+}

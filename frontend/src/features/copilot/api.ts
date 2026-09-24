@@ -6,7 +6,7 @@ import type { ContextItem, CopilotEvent, CopilotPin, Feedback, ThreadDetail, Thr
 export interface AskRequest {
   text: string
   context: ContextItem[]
-  scope: { app?: string; path?: string }
+  scope: { app?: string; path?: string; platform?: 'android' | 'ios' }
   deep: boolean
   thread_id: number | null
 }

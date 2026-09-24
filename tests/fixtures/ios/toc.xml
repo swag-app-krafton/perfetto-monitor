@@ -1,0 +1,62 @@
+<?xml version="1.0"?>
+
+<trace-toc>
+    <run number="1">
+        <info>
+            <target>
+                <device platform="iOS Simulator" model="Simulated iPhone 17" memory-size="25769803776" name="iPhone 17" os-version="27.0 (24A434)" uuid="FD5C7565-5D46-48C7-8BB4-2ED2C7C21F01"/>
+                <host-device platform="macOS" model="MacBook Pro" name="Praffulla’s MacBook Pro" os-version="27.0 (26A428)" uuid="5D91A71D-1076-5F3F-86C5-120D808F5223"/>
+                <process type="launched" return-exit-status="0" name="Swag Pay" pid="99692" termination-reason="exit(0)"/>
+            </target>
+            <summary>
+                <start-date>2026-09-24T12:33:55.390+05:30</start-date>
+                <end-date>2026-09-24T12:34:07.948+05:30</end-date>
+                <duration>12.557620</duration>
+                <end-reason>Time limit reached</end-reason>
+                <instruments-version>27.0 (27A266a)</instruments-version>
+                <template-name>Blank</template-name>
+                <recording-mode>Deferred</recording-mode>
+                <time-limit>12 seconds</time-limit>
+                <intruments-recording-settings>
+                    <instrument name="os_signpost">
+                        <options>
+                            <option key="Dynamic Subsystems" value=""/>
+                        </options>
+                    </instrument>
+                    <instrument name="Hangs">
+                        <options>
+                            <option key="Reporting Threshold" value="Include Brief Unresponsiveness (&gt;100ms)"/>
+                        </options>
+                    </instrument>
+                </intruments-recording-settings>
+            </summary>
+        </info>
+        <processes>
+            <process name="Swag Pay" pid="99692" path="/Users/prafullatripathi-0157/Library/Developer/CoreSimulator/Devices/FD5C7565-5D46-48C7-8BB4-2ED2C7C21F01/data/Containers/Bundle/Application/7A2F6AB7-B4F9-4CDF-967E-7882100240BB/Swag Pay.app"/>
+            <process name="kernel" pid="0" path="/System/Library/Kernels/kernel.release.t6050"/>
+        </processes>
+        <data>
+            <table schema="dyld-activity-interval" target-pid="SINGLE"/>
+            <table target-pid="SINGLE" schema="potential-hangs" hangs-threshold="100"/>
+            <table schema="os-log" target-pid="SINGLE" documentation="Holds a message from the OS's Unified Logging and Tracing component."/>
+            <table codes="&quot;0x31,0xca&quot;" target="SINGLE" schema="kdebug" documentation="Tracing the kernel and some system frameworks."/>
+            <table codes="&quot;33,0x11&quot;" target="SINGLE" schema="kdebug" documentation="Tracing the kernel and some system frameworks."/>
+            <table enable-priority-inversion-detection="0" target-pid="SINGLE" message-type="Fault" schema="os-log" category="&quot;Hang Risk&quot; &quot;Severe Hang Risk&quot; CFNetwork Contacts CoreML" subsystem="&quot;com.apple.runtime-issues&quot;" documentation="Holds a message from the OS's Unified Logging and Tracing component."/>
+            <table codes="&quot;0x1f,0x07&quot; &quot;0x1f,0x08&quot;" schema="kdebug" callstack="user" target="SINGLE" documentation="Tracing the kernel and some system frameworks."/>
+            <table schema="os-signpost" target-pid="SINGLE" documentation="Holds a signpost event from the OS's Unified Logging and Tracing component."/>
+            <table codes="&quot;0x1f,0x7&quot;" target="SINGLE" schema="kdebug" documentation="Tracing the kernel and some system frameworks."/>
+            <table schema="runloop-events" target-pid="SINGLE"/>
+            <table schema="process-info" documentation="Associates processes with their process names."/>
+            <table codes="&quot;0x2b,0x87&quot;" target="SINGLE" schema="kdebug" documentation="Tracing the kernel and some system frameworks."/>
+            <table codes="&quot;0x2b,0xd8&quot;" target="SINGLE" schema="kdebug" documentation="Tracing the kernel and some system frameworks."/>
+            <table schema="thread-info" documentation="Associates threads with their owning process."/>
+            <table schema="os-signpost-arg" target-pid="SINGLE" documentation="Holds a signpost metadata argument from the OS's Unified Logging and Tracing component."/>
+            <table schema="hang-risks" detect-priority-inversions="0" target-pid="SINGLE"/>
+            <table swift-table="&quot;OSSignpostIntervals(layoutScope: InstrumentsPlugIn.OSSignpostLayoutScope.name, categories: Set([]), mustTargetAllProcesses: false)&quot;" schema="OSSignpostIntervals"/>
+            <table codes="&quot;33,0x11&quot;" target="SINGLE" schema="kdebug-strings" documentation="Associates numeric arguments with strings in kdebug trace points."/>
+            <table codes="&quot;0x1f,0x07&quot; &quot;0x1f,0x08&quot;" target="SINGLE" schema="kdebug-strings" documentation="Associates numeric arguments with strings in kdebug trace points."/>
+            <table schema="os-log-arg" target-pid="SINGLE" documentation="Holds a metadata argument from the OS's Unified Logging and Tracing component."/>
+        </data>
+        <tracks/>
+    </run>
+</trace-toc>

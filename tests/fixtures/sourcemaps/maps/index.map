@@ -1,0 +1,141 @@
+{
+ "version": 3,
+ "sections": [
+  {
+   "offset": {
+    "line": 0,
+    "column": 0
+   },
+   "map": {
+    "version": 3,
+    "sources": [
+     "/app/src/a.js"
+    ],
+    "names": [
+     "alpha",
+     "beta",
+     "gamma"
+    ],
+    "mappings": "AAAA,MAASA,SACPC;AACF,IACIC,0B;EACJD",
+    "x_facebook_sources": [
+     [
+      {
+       "names": [
+        "<global>",
+        "alpha",
+        "beta"
+       ],
+       "mappings": "AAA,SC;ACE;MFC"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "offset": {
+    "line": 3,
+    "column": 0
+   },
+   "map": {
+    "version": 3,
+    "sources": [
+     "/app/src/b.js",
+     "/app/node_modules/lib/index.js"
+    ],
+    "names": [
+     "render",
+     "helper"
+    ],
+    "mappings": "AAAAA,QCUIC,MDVQ;GCWZ",
+    "x_facebook_sources": [
+     [
+      {
+       "names": [
+        "Screen#render"
+       ],
+       "mappings": "AAA"
+      }
+     ],
+     [
+      {
+       "names": [
+        "helper"
+       ],
+       "mappings": "AAA"
+      }
+     ]
+    ],
+    "x_google_ignoreList": [
+     1
+    ]
+   }
+  },
+  {
+   "offset": {
+    "line": 3,
+    "column": 20
+   },
+   "map": {
+    "version": 3,
+    "sources": [
+     "c.js",
+     "./lib/../d.js"
+    ],
+    "names": [
+     "onPress"
+    ],
+    "mappings": "AAKCA,KCEE,MDDH",
+    "x_facebook_sources": [
+     [
+      {
+       "names": [
+        "Button.onPress",
+        "<anonymous>"
+       ],
+       "mappings": "AAK,CC"
+      }
+     ],
+     null
+    ],
+    "sourceRoot": "/app/src/"
+   }
+  },
+  {
+   "offset": {
+    "line": 5,
+    "column": 0
+   },
+   "map": {
+    "version": 3,
+    "sections": [
+     {
+      "offset": {
+       "line": 0,
+       "column": 4
+      },
+      "map": {
+       "version": 3,
+       "sources": [
+        "/app/src/e.ts"
+       ],
+       "names": [
+        "deep"
+       ],
+       "mappings": "AAoBEA,SACF;CACKA",
+       "x_facebook_sources": [
+        [
+         {
+          "names": [
+           "deep"
+          ],
+          "mappings": "AAoB"
+         }
+        ]
+       ]
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -44,6 +44,18 @@ ART_SLICES = ["OpenDexFilesFromOat", "VerifyClass", "JIT compiling%",
 FIRST_FRAME_SLICE = "Choreographer#doFrame"
 FRAME_SLICES = ["Choreographer#doFrame", "DrawFrame"]
 
+# iOS launch phases, as convert_ios.py writes them (`swagperf.launch:<phase>`):
+# dyld's pre-main, then main() to Apple's first-frame signpost, then to the
+# app becoming responsive. `to_first_frame` stands in for the first two when
+# dyld's split is missing. Startup time ends with the first frame.
+IOS_PHASES = [
+    ("step:pre_main", "pre_main"),
+    ("step:main_to_first_frame", "main_to_first_frame"),
+    ("step:to_first_frame", "to_first_frame"),
+    ("step:first_frame_to_responsive", "first_frame_to_responsive"),
+]
+IOS_TTID_ENDS = {"step:main_to_first_frame", "step:to_first_frame"}
+
 
 def _like(names):
     """SQL OR-list matching a phase's slice names, prefix-aware."""
@@ -230,3 +242,67 @@ def derive_steps(tp, *, pkg=None):
             "target_slices": target_slices,
             "window": {"start_ms": round(win_start / 1e6, 2),
                        "end_ms": round(win_end / 1e6, 2)}}
+
+
+def derive_ios_steps(tp, *, pkg=None):
+    """The same shape as derive_steps, from an iOS trace's launch phases.
+
+    Each phase is one `swagperf.launch:` slice on the Launch track; its
+    children are the dyld intervals nested inside it (static initializers by
+    library, image mapping, fixups), summed by name. Startup time (TTID) is
+    process start to the first frame on screen.
+    """
+    from .convert_ios import LAUNCH_PREFIX
+    from .extract import _app_upids
+    upids = _app_upids(tp, pkg) if pkg else []
+    target_slices = 0
+    if upids:
+        ids = ",".join(str(int(u)) for u in upids)
+        rows = list(tp.query(f"""
+            select count(*) c from slice s
+            left join thread_track tt on s.track_id = tt.id
+            left join thread th on tt.utid = th.utid
+            left join process_track pt on s.track_id = pt.id
+            where coalesce(th.upid, pt.upid) in ({ids})
+              and s.name not like 'swagperf.source:%'
+              and s.name != 'swagperf.recording_end'"""))
+        target_slices = (rows[0].c or 0) if rows else 0
+
+    phases = {r.nm: r for r in tp.query(f"""
+        select s.id as sid, s.name as nm, s.ts as ts, s.dur as dur, s.track_id as tid
+        from slice s where s.name like '{LAUNCH_PREFIX}%' and s.depth = 0""")}
+    steps = []
+    for step, phase in IOS_PHASES:
+        r = phases.get(LAUNCH_PREFIX + phase)
+        if r is None or (r.dur or 0) <= 0:
+            continue
+        kids = {}
+        for k in tp.query(f"""
+                select s.name as nm, sum(s.dur) as d, count(*) as n from slice s
+                where s.parent_id = {int(r.sid)} group by 1"""):
+            kids[k.nm] = (k.d or 0, k.n)
+        children = sorted(
+            ({"name": k, "dur_ms": round(d / 1e6, 2), "count": n,
+              "pct_of_step": round(d / r.dur * 100, 1)}
+             for k, (d, n) in kids.items() if d > 0),
+            key=lambda c: -c["dur_ms"])
+        steps.append({"step": step, "dur_ms": round(r.dur / 1e6, 2),
+                      "start_ms": round(r.ts / 1e6, 2),
+                      "track": "derived", "budget_ms": None,
+                      "over_budget": False, "pct_of_budget": None,
+                      "children": children, "derived": True})
+    steps.sort(key=lambda s: s["start_ms"])
+
+    ttid_ms = None
+    win = {"start_ms": 0.0, "end_ms": 0.0}
+    if steps:
+        start = steps[0]["start_ms"]
+        ends = [s["start_ms"] + s["dur_ms"] for s in steps if s["step"] in IOS_TTID_ENDS]
+        if ends:
+            ttid_ms = round(max(ends) - start, 2)
+        win = {"start_ms": start, "end_ms": round(max(s["start_ms"] + s["dur_ms"] for s in steps), 2)}
+    return {"steps": steps,
+            "app": {"pkg": pkg, "startup_type": "cold" if any(
+                s["step"] in ("step:pre_main", "step:to_first_frame") for s in steps) else None,
+                    "source": "ios_launch"},
+            "ttid_ms": ttid_ms, "target_slices": target_slices, "window": win}

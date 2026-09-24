@@ -6,7 +6,8 @@ import { Banner, Button, Card, DotBoxPlot, EmptyState, Progress, Row, Segmented,
 import { fmt, shortDate, signed } from '@/domain/format'
 import { useScope } from '@/domain/scope'
 import { compareSamples, quartiles } from '@/domain/stats'
-import { useUi } from '@/app/store'
+import { useProfiler } from '@/app/profiler'
+import { platformOf, useUi } from '@/app/store'
 import s from './Stress.module.css'
 
 const values = (t: StressTest | undefined) => (t?.sessions ?? []).map((x) => x.ttid_ms).filter((v): v is number => v != null && v > 0)
@@ -15,7 +16,8 @@ export function StressPage() {
   const { scope } = useScope()
   const app = useUi((st) => st.app)
   const qc = useQueryClient()
-  const dev = useDevice()
+  const platform = platformOf(useProfiler())
+  const dev = useDevice(platform)
   const list = useStressList()
   const recent = useRecentJobs()
   const [n, setN] = useState(10)
@@ -23,11 +25,14 @@ export function StressPage() {
   const [err, setErr] = useState<string | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
 
-  const resumed = recent.data?.find((j) => j.kind === 'stress' && (j.state === 'running' || j.state === 'queued'))
+  const resumed = recent.data?.find((j) => j.kind === 'stress' && (j.platform ?? 'android') === platform && (j.state === 'running' || j.state === 'queued'))
   const job = useJob(jobId ?? resumed?.id ?? null).data as (ReturnType<typeof useJob>['data'] & { stress_id?: number; progress?: { current: number; total: number } }) | undefined
   const running = job?.state === 'queued' || job?.state === 'running'
 
-  const tests = useMemo(() => (list.data ?? []).filter((t) => t.app_pkg === app).sort((a, b) => b.id - a.id), [list.data, app])
+  const tests = useMemo(
+    () => (list.data ?? []).filter((t) => t.app_pkg === app && (t.platform ?? 'android') === platform).sort((a, b) => b.id - a.id),
+    [list.data, app, platform],
+  )
   const curId = pick ?? (running ? job?.stress_id : undefined) ?? tests[0]?.id ?? null
   // Poll the test while its sessions are still landing, so dots appear live.
   const cur = useStress(curId, running).data
@@ -38,7 +43,7 @@ export function StressPage() {
   const run = async () => {
     setErr(null)
     try {
-      const r = await startStress({ pkg: app, sessions: n, cold: true, duration_ms: 8000 })
+      const r = await startStress({ pkg: app, sessions: n, cold: true, duration_ms: 8000, platform })
       setJobId(r.job_id)
       setPick(null)
       qc.invalidateQueries({ queryKey: keys.jobs })
@@ -66,7 +71,9 @@ export function StressPage() {
                 Run {n} cold starts
               </Button>
             </Row>
-            {!dev.data?.connected && <Text variant="meta">Connect a device to run a stress test.</Text>}
+            {!dev.data?.connected && (
+              <Text variant="meta">{platform === 'ios' ? 'Boot an iOS Simulator to run a stress test.' : 'Connect a device to run a stress test.'}</Text>
+            )}
           </Stack>
           {running && job?.progress && (
             <Stack gap={8}>

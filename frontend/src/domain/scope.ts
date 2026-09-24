@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo } from 'react'
 import { useHistory } from '@/api/hooks'
-import type { Benchmark, HistoryPayload, Run, Verdict } from '@/api/types'
-import { useUi, type RangeKey } from '@/app/store'
+import type { Benchmark, HistoryPayload, Platform, Run, Verdict } from '@/api/types'
+import { useProfiler } from '@/app/profiler'
+import { platformOf, useUi, type RangeKey } from '@/app/store'
 import { versionKey, versionsIn, type AppVersion } from './versions'
 
 export interface AppOption {
@@ -9,6 +10,13 @@ export interface AppOption {
   name: string
   own: boolean
   runs: number
+}
+
+/** The history as one lane sees it: its platform's runs and benchmarks only.
+ *  An iOS run is never listed, charted or compared beside Android ones. */
+export function laneHistory(h: HistoryPayload, platform: Platform): HistoryPayload {
+  const mine = (p: Platform | undefined) => (p ?? 'android') === platform
+  return { ...h, runs: h.runs.filter((r) => mine(r.platform)), benchmarks: h.benchmarks.filter((b) => mine(b.platform)) }
 }
 
 /** Apps that have runs, own app first, then by run count. */
@@ -39,7 +47,9 @@ function inRange(runs: Run[], range: RangeKey): Run[] {
  *  same device when one was recorded. Benchmarks never cross apps or paths. */
 export function benchmarkFor(run: Run | null, h: HistoryPayload): Benchmark | null {
   if (!run) return null
-  const cands = h.benchmarks.filter((b) => (b.app_pkg ?? null) === (run.app_pkg ?? null) && b.path_kind === run.path_kind)
+  const cands = h.benchmarks.filter(
+    (b) => (b.app_pkg ?? null) === (run.app_pkg ?? null) && b.path_kind === run.path_kind && (b.platform ?? 'android') === (run.platform ?? 'android'),
+  )
   return cands.find((b) => b.device === run.device) ?? cands.find((b) => !b.device) ?? null
 }
 
@@ -75,11 +85,14 @@ export interface Scope {
 export function useScope(): { scope: Scope | null; isLoading: boolean; error: Error | null } {
   const q = useHistory()
   const { app, path, range, version, runId, setFilters } = useUi()
+  // Everything below reads the lane in view: the first control in the top bar.
+  const platform = platformOf(useProfiler())
+  const lane = useMemo(() => (q.data ? laneHistory(q.data, platform) : undefined), [q.data, platform])
 
   // Default the filters from the newest run, and repair them if the stored
   // choice no longer exists in the data (a pruned app, a renamed path).
   useEffect(() => {
-    const h = q.data
+    const h = lane
     if (!h || !h.runs.length) return
     const newest = h.runs[h.runs.length - 1]!
     const apps = appsIn(h)
@@ -89,10 +102,10 @@ export function useScope(): { scope: Scope | null; isLoading: boolean; error: Er
     const newestForApp = appRuns[appRuns.length - 1]
     const nextPath = paths.includes(path) ? path : (newestForApp?.path_kind ?? paths[0] ?? '')
     if (nextApp !== app || nextPath !== path) setFilters({ app: nextApp, path: nextPath })
-  }, [q.data, app, path, setFilters])
+  }, [lane, app, path, setFilters])
 
   const scope = useMemo<Scope | null>(() => {
-    const h = q.data
+    const h = lane
     if (!h) return null
     const appRuns = h.runs.filter((r) => (r.app_pkg ?? 'unknown') === app)
     const allRuns = appRuns.filter((r) => r.path_kind === path)
@@ -120,7 +133,7 @@ export function useScope(): { scope: Scope | null; isLoading: boolean; error: Er
       benchmarkRun: benchmark ? (index.get(benchmark.run_id) ?? null) : null,
       byId: (id) => index.get(id),
     }
-  }, [q.data, app, path, range, version, runId])
+  }, [lane, app, path, range, version, runId])
 
   return { scope, isLoading: q.isLoading, error: q.error }
 }

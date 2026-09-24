@@ -337,3 +337,57 @@ optional assert, `maestro hierarchy` between flow segments, and
   Git LFS?
 - Which device classes make up the matrix?
 - How is a view hierarchy captured at each checkpoint?
+
+---
+
+## iOS lane beyond the simulator
+
+**Tracker:** F-013
+**Status:** simulator lane shipped; the rest not started
+**Raised:** 2026-09-24, while building the iOS lane ([ADR 0002](decisions/0002-ios-via-xctrace-normalised-to-perfetto.md))
+
+### What
+
+The iOS lane records Swag Pay on an iOS Simulator today. These are the parts it doesn't
+have yet.
+
+1. **A physical iPhone.**
+   - devicectl for discovery, launch, terminate and lock state, plus the display's refresh
+     rate (`devicectl device info displays`).
+   - `xctrace record --device <udid>` with Hitches and Frame Lifetimes for frames, and
+     Thermal State for heat.
+   - Activity Monitor for RAM usage, in place of sampling from the Mac.
+   - Battery needs a helper, because devicectl doesn't report it.
+2. **Frame deadlines per frame.** On a 120 Hz ProMotion screen a frame is due every
+   8.3 ms, not 16.67 ms. Hitches carry each frame's own expected interval; use it (T-004).
+3. **iOS budgets.** Set them from physical-device runs, not carried over from Android.
+   Until then, iOS runs have none.
+4. **A true cold start.** iOS keeps an app's files cached between launches.
+   - Offer a reboot-first mode (`devicectl device reboot`; on the simulator, shutdown and
+     boot).
+   - Mark a stress test's first session as its warm-up. The spike's first launch after an
+     install took 1.83 s, the next two 0.51 s.
+5. **Manual sessions and live markers.**
+   - An unbounded `xctrace record`, stopped with SIGINT, with the process handle held in
+     `jobs.py`.
+   - Live markers from `log stream --predicate 'subsystem == "com.swag.pay.trace"'`.
+6. **Per-screen CPU.** An iOS trace has no scheduler data. Time Profiler samples could
+   give a sampled estimate; System Trace an exact one, at a far larger trace size.
+7. **Competitor apps.** Spike first. App Store builds lack `get-task-allow`, so test what
+   an all-processes recording can attribute to them (launch signposts, footprint).
+8. **Hermes heap on iOS.** The JS side must emit `mem.hermes_heap` on both platforms; the
+   converter already turns `counter` signposts into process counters.
+
+### Why
+
+The simulator runs the app on the Mac's CPU. It is good for checking the pipeline and for
+comparing one simulator run with another. It says nothing about how the app performs on a
+phone, and frames can't be measured on it at all.
+
+### Watch out for
+
+- Keep physical and simulator runs apart everywhere. The `simulator` column already does
+  this; don't key anything on the device name alone.
+- The bundle id is still the prototype's placeholder, `com.cambench.compose.ios`. Change
+  it in `apps.json` and `iosApp.xcodeproj` together, and before recording runs that should
+  be kept.

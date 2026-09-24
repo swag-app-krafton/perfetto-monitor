@@ -10,6 +10,9 @@ import s from './Compare.module.css'
 
 const toDiff = (v: DiffVerdict | null) => (v === 'worse' ? 'worse' : v === 'better' ? 'better' : 'same')
 
+/** Stability rows in a compare (store.METRIC_DIRECTION): not headline gates. */
+const STABILITY_LABELS: Record<string, string> = { hang_count: 'Hangs', longest_hang_ms: 'Longest hang', js_errors: 'JS errors' }
+
 export function ComparePage() {
   const { scope, isLoading } = useScope()
   const [params, setParams] = useSearchParams()
@@ -51,7 +54,7 @@ export function ComparePage() {
   const opts = [...appRuns].reverse().map((r) => ({ value: String(r.id), label: `#${r.id} · ${shortDate(r.ts)} · ${pathLabel(r.path_kind)} · ${r.label ?? ''}` }))
   const d = q.data
   const descriptionOf = scope.history.startup_model.step_descriptions
-  const label = (m: string) => METRICS.find((x) => x.key === m || (m === 'ttff_ms' && x.key === 'ttff_ms'))?.label ?? m
+  const label = (m: string) => METRICS.find((x) => x.key === m || (m === 'ttff_ms' && x.key === 'ttff_ms'))?.label ?? STABILITY_LABELS[m] ?? m
 
   return (
     <Stack as="section" gap={20}>

@@ -1,11 +1,16 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { Platform } from '@/api/types'
 
 export type Theme = 'dark' | 'light'
 export type RangeKey = '30' | '10' | '7d'
-/** Which profiler's runs are in view. The two never run together on a device,
- *  and their numbers are never compared, so everything below it follows it. */
-export type Profiler = 'perfetto' | 'flashlight'
+/** Which lane's runs are in view: Perfetto on Android, Instruments on iOS, or
+ *  Flashlight (Android). Lanes never run together on a device and their
+ *  numbers are never compared, so everything below the first control follows it. */
+export type Profiler = 'perfetto' | 'ios' | 'flashlight'
+
+/** The platform a lane's runs were recorded on. */
+export const platformOf = (p: Profiler): Platform => (p === 'ios' ? 'ios' : 'android')
 
 interface UiState {
   theme: Theme

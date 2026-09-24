@@ -131,10 +131,13 @@ create table if not exists flashlight_audits (
 BENCH_ANY = "*"
 
 
-def _scope(path_kind, device, app_pkg=None):
+def _scope(path_kind, device, app_pkg=None, platform="android"):
     """Benchmark scope key. app_pkg is part of it because a reference run for one
-    application says nothing about another."""
-    return f"{app_pkg or BENCH_ANY}|{path_kind or BENCH_ANY}|{device or BENCH_ANY}"
+    application says nothing about another, and so is the platform: an iOS
+    bundle id can equal the Android package name. Android keys keep their
+    original form so existing pins still resolve."""
+    key = f"{app_pkg or BENCH_ANY}|{path_kind or BENCH_ANY}|{device or BENCH_ANY}"
+    return key if (platform or "android") == "android" else f"{platform}:{key}"
 
 
 # Columns added after the first release. sqlite has no "add column if not
@@ -146,7 +149,26 @@ MIGRATIONS = [
     # Where a run was measured: {"capture": device/app/state read over adb at
     # capture time, "from_trace": what the trace itself records}.
     ("runs", "meta_json", "text"),
+    # Which platform a run measured, and whether on a simulator. Simulator runs
+    # are compared only with each other and never judged against budgets.
+    ("runs", "platform", "text default 'android'"),
+    ("runs", "simulator", "int default 0"),
+    ("stress_tests", "platform", "text default 'android'"),
+    # Stability (stability.py): hangs after the first frame, JS errors, and
+    # whether the app died on its own. Columns for sorting; the detail is JSON.
+    ("runs", "hang_count", "int"),
+    ("runs", "longest_hang_ms", "real"),
+    ("runs", "js_errors", "int"),
+    ("runs", "crashed", "int default 0"),
+    ("runs", "stability_json", "text"),
 ]
+
+
+def _stability_cols(metrics):
+    st = metrics.get("stability") or {}
+    h, e, cr = st.get("hangs") or {}, st.get("errors") or {}, st.get("crash") or {}
+    return (h.get("count"), h.get("longest_ms"), e.get("js"), int(bool(cr.get("crashed"))),
+            json.dumps(st) if st else None)
 
 
 def connect(db=None):
@@ -180,6 +202,10 @@ def record(metrics, *, label=None, git_sha=None, app_version=None,
         json.dumps(metrics["breaches"]), json.dumps(metrics["ordering_violations"]),
         json.dumps(f), json.dumps(mem)))
     rid = cur.lastrowid
+    c.execute("update runs set platform=?, simulator=? where id=?",
+              (metrics.get("platform") or "android", int(bool(metrics.get("simulator"))), rid))
+    c.execute("""update runs set hang_count=?, longest_hang_ms=?, js_errors=?, crashed=?,
+                 stability_json=? where id=?""", (*_stability_cols(metrics), rid))
     if meta:
         c.execute("update runs set meta_json=? where id=?", (json.dumps({"capture": meta}), rid))
     for s in metrics["steps"]:
@@ -195,8 +221,13 @@ def record(metrics, *, label=None, git_sha=None, app_version=None,
 from .budgets import MIN_BASELINE_RUNS
 
 
-def baseline(step, *, exclude_run=None, window=20, device=None, app_pkg=None, db=None):
-    """Trailing baseline for a step: median + stdev over the last `window` runs."""
+def baseline(step, *, exclude_run=None, window=20, device=None, app_pkg=None,
+             platform=None, simulator=None, db=None):
+    """Trailing baseline for a step: median + stdev over the last `window` runs.
+
+    `platform` and `simulator` keep baselines apart: an iOS run judged against
+    Android history, or a phone against the Mac's simulator, would read noise
+    or a hardware difference as a regression."""
     c = connect(db)
     q = """select sm.dur_ms from step_metrics sm join runs r on sm.run_id=r.id
            where sm.step=?"""
@@ -207,6 +238,10 @@ def baseline(step, *, exclude_run=None, window=20, device=None, app_pkg=None, db
         q += " and r.device = ?"; args.append(device)
     if app_pkg:
         q += " and r.app_pkg = ?"; args.append(app_pkg)
+    if platform:
+        q += " and coalesce(r.platform, 'android') = ?"; args.append(platform)
+    if simulator is not None:
+        q += " and coalesce(r.simulator, 0) = ?"; args.append(int(bool(simulator)))
     q += " order by sm.run_id desc limit ?"; args.append(window)
     vals = [r["dur_ms"] for r in c.execute(q, args)]
     c.close()
@@ -247,17 +282,19 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True
       returned rows say which mode produced them via `reference`.
     """
     c = connect(db)
-    meta = c.execute("select path_kind, device, app_pkg from runs where id=?",
+    meta = c.execute("select path_kind, device, app_pkg, platform, simulator from runs where id=?",
                      (run_id,)).fetchone()
     rows = list(c.execute(
         "select step,dur_ms,budget_ms from step_metrics where run_id=?", (run_id,)))
     c.close()
     app_pkg = meta["app_pkg"] if meta else None
+    platform = (meta["platform"] if meta else None) or "android"
+    simulator = bool(meta["simulator"]) if meta else False
 
     bench = None
     if use_benchmark and meta:
         bench = get_benchmark(path_kind=meta["path_kind"], device=meta["device"],
-                              app_pkg=app_pkg, db=db)
+                              app_pkg=app_pkg, platform=platform, db=db)
         if bench and bench["run_id"] == run_id:
             # This run IS the reference for its scope. Pinning it declares it the
             # definition of acceptable, so it cannot regress. Returning [] here
@@ -291,7 +328,8 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True
 
     out = []
     for r in rows:
-        b = baseline(r["step"], exclude_run=run_id, app_pkg=app_pkg, db=db)
+        b = baseline(r["step"], exclude_run=run_id, app_pkg=app_pkg,
+                     platform=platform, simulator=simulator, db=db)
         if not b:
             continue
         delta = r["dur_ms"] - b["median_ms"]
@@ -309,12 +347,17 @@ def regressions(run_id, *, z=2.5, min_delta_pct=8.0, db=None, use_benchmark=True
 def set_benchmark(run_id, *, note=None, db=None):
     """Pin a run as the reference for its own (path_kind, device) scope."""
     c = connect(db)
-    r = c.execute("select id, path_kind, device, label, app_pkg from runs where id=?",
-                  (run_id,)).fetchone()
+    r = c.execute("select id, path_kind, device, label, app_pkg, platform, simulator "
+                  "from runs where id=?", (run_id,)).fetchone()
     if not r:
         c.close()
         raise ValueError(f"no run with id {run_id}")
-    sc = _scope(r["path_kind"], r["device"], r["app_pkg"])
+    if r["simulator"]:
+        c.close()
+        raise ValueError(f"run {run_id} was measured on a simulator. A benchmark defines "
+                         "acceptable performance, and a simulator's numbers come from the "
+                         "Mac's CPU, so it cannot be one.")
+    sc = _scope(r["path_kind"], r["device"], r["app_pkg"], r["platform"] or "android")
     c.execute("""insert into benchmarks (scope, run_id, note, set_at)
                  values (?,?,?,?)
                  on conflict(scope) do update set
@@ -326,30 +369,32 @@ def set_benchmark(run_id, *, note=None, db=None):
             "app_pkg": r["app_pkg"]}
 
 
-def clear_benchmark(*, path_kind=None, device=None, app_pkg=None, run_id=None, db=None):
+def clear_benchmark(*, path_kind=None, device=None, app_pkg=None, run_id=None,
+                    platform="android", db=None):
     """Unpin by scope, or by the run that is pinned."""
     c = connect(db)
     if run_id is not None:
         n = c.execute("delete from benchmarks where run_id=?", (run_id,)).rowcount
     else:
         n = c.execute("delete from benchmarks where scope=?",
-                      (_scope(path_kind, device, app_pkg),)).rowcount
+                      (_scope(path_kind, device, app_pkg, platform),)).rowcount
     c.commit(); c.close()
     return n
 
 
-def get_benchmark(*, path_kind=None, device=None, app_pkg=None, db=None):
+def get_benchmark(*, path_kind=None, device=None, app_pkg=None, platform="android", db=None):
     """The pinned run for this scope, narrowest match first.
 
     Falls back from (app, path, device) to (app, path, any device), but never
-    across applications: a benchmark is only ever a reference for its own app.
+    across applications or platforms: a benchmark is only ever a reference for
+    its own app on its own platform.
     """
     c = connect(db)
     row = None
-    for sc in (_scope(path_kind, device, app_pkg),
-               _scope(path_kind, None, app_pkg)):
+    for sc in (_scope(path_kind, device, app_pkg, platform),
+               _scope(path_kind, None, app_pkg, platform)):
         row = c.execute("""select b.*, r.label, r.ts, r.git_sha, r.app_version,
-                                  r.device, r.path_kind, r.app_pkg
+                                  r.device, r.path_kind, r.app_pkg, r.platform
                            from benchmarks b join runs r on b.run_id = r.id
                            where b.scope=?""", (sc,)).fetchone()
         if row:
@@ -361,7 +406,8 @@ def get_benchmark(*, path_kind=None, device=None, app_pkg=None, db=None):
 def benchmarks(db=None):
     c = connect(db)
     rows = [dict(r) for r in c.execute(
-        """select b.*, r.label, r.ts, r.device, r.path_kind, r.app_version, r.app_pkg
+        """select b.*, r.label, r.ts, r.device, r.path_kind, r.app_version, r.app_pkg,
+                  coalesce(r.platform, 'android') as platform
            from benchmarks b join runs r on b.run_id = r.id order by b.scope""")]
     c.close()
     return rows
@@ -371,6 +417,7 @@ def benchmarks(db=None):
 METRIC_DIRECTION = {
     "ttff_ms": "lower", "slow_pct": "lower", "janky_pct": "lower",
     "thermal_drift_pct": "lower", "peak_rss_mb": "lower", "rss_growth_mb": "lower",
+    "hang_count": "lower", "longest_hang_ms": "lower", "js_errors": "lower",
 }
 
 # Metrics that can legitimately be negative. A percentage change across zero is
@@ -456,10 +503,16 @@ def compare(run_id, base_id, *, db=None, min_delta_pct=5.0):
     worse = [m for m in metrics if m["verdict"] == "worse"]
     better = [m for m in metrics if m["verdict"] == "better"]
     return {
-        "run": {k: a.get(k) for k in ("id", "ts", "label", "git_sha", "app_version", "device", "path_kind")},
-        "base": {k: b.get(k) for k in ("id", "ts", "label", "git_sha", "app_version", "device", "path_kind")},
-        "comparable": a.get("path_kind") == b.get("path_kind"),
+        "run": {k: a.get(k) for k in ("id", "ts", "label", "git_sha", "app_version", "device", "path_kind", "platform", "simulator")},
+        "base": {k: b.get(k) for k in ("id", "ts", "label", "git_sha", "app_version", "device", "path_kind", "platform", "simulator")},
+        # Two runs are comparable on the same start path, platform and kind of
+        # device: an iOS launch against an Android one, or a simulator against
+        # a phone, differs for reasons no code change explains.
+        "comparable": (a.get("path_kind") == b.get("path_kind")
+                       and (a.get("platform") or "android") == (b.get("platform") or "android")
+                       and bool(a.get("simulator")) == bool(b.get("simulator"))),
         "same_device": a.get("device") == b.get("device"),
+        "same_platform": (a.get("platform") or "android") == (b.get("platform") or "android"),
         "metrics": metrics, "steps": steps,
         "summary": {"worse": len(worse), "better": len(better),
                     "same": len(metrics) - len(worse) - len(better)},
@@ -511,13 +564,17 @@ def reextract(db=None, extractor=None):
         f, mem = m["frames"], m.get("memory", {})
         c.execute("""update runs set ttff_ms=?, slow_pct=?, janky_pct=?,
                      thermal_drift_pct=?, peak_rss_mb=?, rss_growth_mb=?,
-                     breaches_json=?, violations_json=?, frames_json=?, memory_json=?
+                     breaches_json=?, violations_json=?, frames_json=?, memory_json=?,
+                     platform=?, simulator=?
                      where id=?""",
                   (m["startup"]["time_to_first_camera_frame_ms"], f["slow_pct"],
                    f["janky_pct"], f["thermal_drift_pct"],
                    mem.get("rss", {}).get("peak_mb"), mem.get("rss", {}).get("growth_mb"),
                    json.dumps(m["breaches"]), json.dumps(m["ordering_violations"]),
-                   json.dumps(f), json.dumps(mem), r["id"]))
+                   json.dumps(f), json.dumps(mem),
+                   m.get("platform") or "android", int(bool(m.get("simulator"))), r["id"]))
+        c.execute("""update runs set hang_count=?, longest_hang_ms=?, js_errors=?, crashed=?,
+                     stability_json=? where id=?""", (*_stability_cols(m), r["id"]))
         fresh[r["id"]] = m
         done += 1
     c.commit(); c.close()
@@ -527,13 +584,13 @@ def reextract(db=None, extractor=None):
 # ---------------------------------------------------------------- stress tests
 
 def stress_create(*, app_pkg, device=None, label=None, sessions=5, cold=True,
-                  duration_ms=8000, db=None):
+                  duration_ms=8000, platform="android", db=None):
     c = connect(db)
     cur = c.execute("""insert into stress_tests
-        (ts, app_pkg, device, label, sessions_requested, cold, duration_ms, state)
-        values (?,?,?,?,?,?,?,'running')""",
+        (ts, app_pkg, device, label, sessions_requested, cold, duration_ms, state, platform)
+        values (?,?,?,?,?,?,?,'running',?)""",
         (datetime.now(timezone.utc).isoformat(timespec="seconds"), app_pkg, device,
-         label, int(sessions), int(bool(cold)), int(duration_ms)))
+         label, int(sessions), int(bool(cold)), int(duration_ms), platform))
     sid = cur.lastrowid
     for i in range(int(sessions)):
         c.execute("insert into stress_sessions (stress_id, seq, state) values (?,?,'pending')",

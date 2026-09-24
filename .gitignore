@@ -15,3 +15,5 @@ issues_screenshots/
 experiments/*/node_modules/
 experiments/*/results/
 flashlight/node_modules/
+# Source maps registered with `swagperf maps add`: build artifacts, one per app build
+/sourcemaps/

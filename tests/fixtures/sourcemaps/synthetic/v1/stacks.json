@@ -1,0 +1,46 @@
+[
+ {
+  "id": "nested_function",
+  "text": "RangeError: divide by zero\n    at average (address at index.android.bundle:1:4532)\n    at nested_function (address at index.android.bundle:1:4032)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "class_method",
+  "text": "RangeError: divide by zero\n    at divide (address at index.android.bundle:1:4471)\n    at perItem (address at index.android.bundle:1:6133)\n    at class_method (address at index.android.bundle:1:4090)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "getter",
+  "text": "TypeError: Cannot read property 'name' of undefined\n    at get (address at index.android.bundle:1:6152)\n    at getter (address at index.android.bundle:1:4142)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "arrow_native",
+  "text": "SyntaxError: JSON Parse error: Unexpected character: o\n    at parse (native)\n    at fromJSON (address at index.android.bundle:1:6191)\n    at arrow_native (address at index.android.bundle:1:4185)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "object_method",
+  "text": "TypeError: Cannot read property 'value' of undefined\n    at onPress (address at index.android.bundle:1:5418)\n    at object_method (address at index.android.bundle:1:4226)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "rn_internal",
+  "text": "Error: listener failed\n    at anonymous (address at index.android.bundle:1:6393)\n    at apply (native)\n    at emit (address at index.android.bundle:1:6753)\n    at fireSettingsChanged (address at index.android.bundle:1:5600)\n    at rn_internal (address at index.android.bundle:1:4260)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "third_party",
+  "text": "TypeError: fake-lib: value is required\n    at validate (address at index.android.bundle:1:5829)\n    at checkPayee (address at index.android.bundle:1:5749)\n    at third_party (address at index.android.bundle:1:4295)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "third_party_callback",
+  "text": "Error: negative amount\n    at anonymous (address at index.android.bundle:1:6934)\n    at eachItem (address at index.android.bundle:1:5868)\n    at scanAmounts (address at index.android.bundle:1:5791)\n    at third_party_callback (address at index.android.bundle:1:4337)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "closure",
+  "text": "Error: counter overflow\n    at increment (address at index.android.bundle:1:6995)\n    at closure (address at index.android.bundle:1:4383)\n    at anonymous (address at index.android.bundle:1:1183)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "uncaught",
+  "text": "Error: fatal during boot\n    at boot (address at index.android.bundle:1:3991)\n    at anonymous (address at index.android.bundle:1:1250)\n    at loadModuleImplementation (address at index.android.bundle:1:3747)\n    at guardedLoadModule (address at index.android.bundle:1:3377)\n    at metroRequire (address at index.android.bundle:1:2828)\n    at global (address at index.android.bundle:1:1008)"
+ },
+ {
+  "id": "async_function",
+  "text": "Error: profile id missing\n    at ?anon_0_ (address at index.android.bundle:1:7119)\n    at next (native)\n    at asyncGeneratorStep (address at index.android.bundle:1:5444)\n    at _next (address at index.android.bundle:1:7525)\n    at tryCallOne (address at InternalBytecode.js:1:1296)\n    at anonymous (address at InternalBytecode.js:1:4984)"
+ }
+]

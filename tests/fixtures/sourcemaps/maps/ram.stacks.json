@@ -1,0 +1,6 @@
+[
+ {
+  "id": "modules",
+  "text": "Error: from a RAM bundle\n    at start (0.js:1:1)\n    at b (1.js:1:1)\n    at c (2.js:2:7)\n    at d (seg-1.js:2:1)\n    at e (seg-1_1.js:2:1)\n    at f (main.js:3:9)"
+ }
+]

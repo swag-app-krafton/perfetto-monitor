@@ -101,9 +101,13 @@ class Ctx:
 
     def __init__(self, history, scope, chips, text):
         runs = history["runs"]
-        app, path = scope.get("app"), scope.get("path")
+        app, path, platform = scope.get("app"), scope.get("path"), scope.get("platform")
         self.history = history
-        self.scoped = [r for r in runs if (not app or r.get("app_pkg") == app) and (not path or r.get("path_kind") == path)]
+        # The lane in view (Android or iOS) is part of the scope: the same id
+        # can be an app on both, and their runs are never read together.
+        self.scoped = [r for r in runs if (not app or r.get("app_pkg") == app)
+                       and (not path or r.get("path_kind") == path)
+                       and (not platform or (r.get("platform") or "android") == platform)]
         self.by_id = {r["id"]: r for r in runs}
         mentioned = [int(m) for m in re.findall(r"#(\d{1,5})", text)]
         chip_runs = [c.get("id") for c in chips if c.get("kind") == "run"]
@@ -113,7 +117,8 @@ class Ctx:
         # when the benchmark names one.
         cands = [b for b in history.get("benchmarks", [])
                  if self.run and b.get("app_pkg") == self.run.get("app_pkg")
-                 and b.get("path_kind") == self.run.get("path_kind")]
+                 and b.get("path_kind") == self.run.get("path_kind")
+                 and (b.get("platform") or "android") == (self.run.get("platform") or "android")]
         bench = (next((b for b in cands if b.get("device") and b.get("device") == self.run.get("device")), None)
                  or next((b for b in cands if not b.get("device")), None))
         self.bench = self.by_id.get(bench["run_id"]) if bench else None
@@ -334,8 +339,13 @@ def over_time(ctx, emit_step, key="peak_rss_mb", n=10):
 
 
 def first_over_budget(ctx, emit_step):
-    runs = [r for r in ctx.scoped if _val(r, "ttff_ms") is not None]
+    runs = [r for r in ctx.scoped if _val(r, "ttff_ms") is not None and r.get("ttid_budget_ms")]
     emit_step(f"Scanned {len(runs)} runs for TTID against the budget")
+    if not runs:
+        # Simulator runs and uninstrumented apps have no budget: "never over"
+        # would be a verdict on nothing.
+        return [{"type": "para", "text": "No run in scope has a TTID budget to be over "
+                 "(simulator runs, and apps without one in the catalogue, are never judged)."}]
     for r in runs:
         b = r.get("ttid_budget_ms")
         if b and r["ttff_ms"] > b:
@@ -449,6 +459,11 @@ def screens_answer(ctx, emit_step, extract_screens, trace_path_of, leak=False):
         cols = ["Screen", "Visits", "Worst RAM growth", "Peak RAM"]
         cells = [[x["route"], str(x["visits"]), f"{x.get('max_rss_delta_mb') or 0:.1f} MB", f"{x.get('peak_rss_mb') or 0:.0f} MB"] for x in rows[:6]]
     else:
+        if all(x.get("total_cpu_ms") is None for x in rows):
+            # No scheduler data in this trace (an iOS run, or a capture without
+            # sched): CPU is unmeasured, and ranking screens by it would be 0 vs 0.
+            return [{"type": "para", "text": f"Run #{r['id']}'s trace has no scheduler data, so per-screen CPU is not measured."}]
+        rows = [x for x in rows if x.get("total_cpu_ms") is not None]
         rate = lambda x: (x["total_cpu_ms"] / x["total_ms"] * 100) if x["total_ms"] else 0
         rows = sorted(rows, key=lambda x: -x["total_cpu_ms"])
         top = rows[0]
@@ -465,7 +480,8 @@ def frames_answer(ctx, emit_step):
     f = r.get("frames") or {}
     emit_step(f"Read frame pacing for run #{r['id']}")
     if not f.get("total"):
-        return [{"type": "para", "text": f"Run #{r['id']} recorded no frames for the app, so frame pacing is not measured."}]
+        why = f": {f['note']}" if f.get("note") else ""
+        return [{"type": "para", "text": f"Run #{r['id']} recorded no frames for the app, so frame pacing is not measured{why}."}]
     return [{"type": "verdict", "tone": "warn" if (f.get("janky_pct") or 0) > 0.5 else "pass", "label": "FRAMES",
              "text": f"{f['total']:,} frames: {f.get('slow_pct')}% slow, {f.get('janky_pct')}% janky, worst {f.get('max_ms')} ms."},
             {"type": "para", "text": "Per-screen app jank on the Screens tab separates frames the app was late with from compositor and display misses."},

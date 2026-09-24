@@ -2,8 +2,9 @@
 
 What goes: every run and its steps and analyses, stress tests, benchmarks,
 Flashlight audits, the Copilot's conversations and pins, and the files this
-tool wrote into the project's own traces/ folder (traces, the screen cache and
-Flashlight's results in traces/flashlight/). What stays:
+tool wrote into the project's own traces/ folder (traces, the screen cache,
+Flashlight's results in traces/flashlight/ and iOS captures in traces/ios/,
+Instruments `.trace` bundles included). What stays:
 the app catalogue (apps.json, apps.local.json), which is configuration rather
 than data, and any trace that lives outside traces/ -- a file you analysed
 from elsewhere is yours, not the tool's.
@@ -25,6 +26,13 @@ def _flashlight_files(traces_dir):
     return [os.path.join(d, f) for f in os.listdir(d)] if os.path.isdir(d) else []
 
 
+def _ios_files(traces_dir):
+    """Every file under traces/ios/: converted traces, capture reports and the
+    Instruments `.trace` bundles, which are directories."""
+    d = os.path.join(traces_dir, "ios")
+    return [os.path.join(root, f) for root, _, fs in os.walk(d) for f in fs] if os.path.isdir(d) else []
+
+
 def plan(db=None, traces_dir=TRACES):
     """What a reset would delete, without deleting anything."""
     c = store.connect(db)
@@ -32,9 +40,11 @@ def plan(db=None, traces_dir=TRACES):
     c.close()
     files = sorted(f for f in os.listdir(traces_dir) if f.endswith(".pftrace")) if os.path.isdir(traces_dir) else []
     audit_files = _flashlight_files(traces_dir)
+    ios_files = _ios_files(traces_dir)
     size = sum(os.path.getsize(os.path.join(traces_dir, f)) for f in files) + \
-        sum(os.path.getsize(f) for f in audit_files)
-    return {"rows": rows, "trace_files": len(files) + len(audit_files), "trace_bytes": size,
+        sum(os.path.getsize(f) for f in audit_files + ios_files)
+    return {"rows": rows, "trace_files": len(files) + len(audit_files) + len(ios_files),
+            "trace_bytes": size,
             "cache": os.path.isdir(os.path.join(traces_dir, ".screens-cache"))}
 
 
@@ -54,6 +64,7 @@ def reset(db=None, traces_dir=TRACES, keep_traces=False):
                 os.remove(os.path.join(traces_dir, f))
         shutil.rmtree(os.path.join(traces_dir, ".screens-cache"), ignore_errors=True)
         shutil.rmtree(os.path.join(traces_dir, "flashlight"), ignore_errors=True)
+        shutil.rmtree(os.path.join(traces_dir, "ios"), ignore_errors=True)
     else:
         done["trace_files"], done["trace_bytes"] = 0, 0
     return done

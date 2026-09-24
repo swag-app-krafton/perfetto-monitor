@@ -16,6 +16,7 @@ const PAGES: Record<string, ComponentType> = {
   memory: page(() => import('@/features/memory/MemoryPage'), 'MemoryPage'),
   steps: page(() => import('@/features/steps/StepsPage'), 'StepsPage'),
   screens: page(() => import('@/features/screens/ScreensPage'), 'ScreensPage'),
+  stability: page(() => import('@/features/stability/StabilityPage'), 'StabilityPage'),
   compare: page(() => import('@/features/compare/ComparePage'), 'ComparePage'),
   history: page(() => import('@/features/history/HistoryPage'), 'HistoryPage'),
   capture: page(() => import('@/features/capture/CapturePage'), 'CapturePage'),
@@ -43,7 +44,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <HomeRedirect /> },
       ...SCREENS.map((sc) => {
-        const Page = PAGES[sc.id]
+        const Page = PAGES[sc.page ?? sc.id]
         return { path: sc.path.slice(1), element: Page ? <Page /> : <Placeholder id={sc.id} /> }
       }),
       { path: '*', element: <Navigate to="/overview" replace /> },

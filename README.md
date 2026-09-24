@@ -42,6 +42,44 @@ Then, in the dashboard:
 No device? `./.venv/bin/python -m swagperf.cli seed -n 16 --regress-last` fills the
 history with synthetic runs so every screen has something to show.
 
+## iOS (Instruments)
+
+The iOS lane measures Swag Pay's iOS build the same way. Instruments records the app
+through `xcrun xctrace`, and each recording is converted into a Perfetto trace, so the
+same extractor, history, regression gates and Copilot read it
+([ADR 0002](docs/decisions/0002-ios-via-xctrace-normalised-to-perfetto.md)). In the
+dashboard, pick **Instruments · iOS** in the first control of the top bar: every control
+and screen to its right then shows iOS runs only.
+
+```bash
+xcrun simctl boot "iPhone 17"                     # or open Simulator.app
+xcrun simctl install booted "<DerivedData>/Build/Products/Release-iphonesimulator/Swag Pay.app"
+perfetto_init doctor                              # checks Xcode, the simulator and the build
+perfetto_init capture --platform ios --pkg com.cambench.compose.ios --analyse
+perfetto_init stress run --platform ios --pkg com.cambench.compose.ios -n 5
+perfetto_init analyse recording.trace --app com.cambench.compose.ios   # an Instruments .trace made by hand
+```
+
+What an iOS run measures:
+
+| | Simulator (today) | iPhone (planned) |
+|---|---|---|
+| Startup | Process start to Apple's first-frame signpost, split at `main()` | Same |
+| Steps | Pre-main (with static initializers by library), main → first frame, first frame → responsive, and the app's timed `step:` spans | Same, plus the camera steps |
+| RAM usage and RAM growth | Physical footprint, sampled from the Mac every 100 ms from the first frame | Activity Monitor |
+| Screens | Visits, stack, actions and RAM per screen from the app's signposts | Same |
+| Frames, thermal drift | **Not measured**: the simulator supports none of Instruments' frame instruments | Hitches, Thermal State |
+| Per-screen CPU | **Not measured**: no scheduler data | Planned |
+
+**Simulator runs are indicative only.** They run on the Mac's CPU with a warm cache.
+They are compared only with other simulator runs, carry no budgets, never fail, can't be
+pinned as a benchmark, and never open a performance issue. Their first launch after an
+install is much slower than the next ones, so compare stress-test medians, not single
+runs.
+
+Only Release builds can be captured: a Debug build loads its JavaScript from Metro, so
+it is a different app from the one users run.
+
 ## Design
 
 Measurement is deterministic; judgement is not. The split is deliberate:
@@ -273,6 +311,37 @@ down (look at the timeline first). Also a visit drawn in red, more than two stan
 deviations from that screen's mean; high app jank on one screen; a slow transition;
 a cheap screen with high RAM at depth 2+ (the memory belongs to the screens beneath).
 
+
+### Stability
+
+Hangs, JS errors and crashes for the run in view, on both platforms.
+
+- **Hangs** are the main thread not responding, by Apple's definitions: a microhang
+  is a 100–250 ms stall, a hang 250 ms or more.
+  - On iOS they come from Instruments' Hangs instrument.
+  - On Android they come from top-level slices on the app's main thread, so
+    untraced main-thread work is missed.
+  - Stalls before the first frame are counted separately: startup has its own
+    metric.
+  - The hang rate (seconds of hang per hour) is shown only for sessions of a minute
+    or more.
+- **JS errors** are reported by the app itself. It installs a global error handler
+  and promise-rejection tracking at startup, and each React Native surface has an
+  error boundary (`react-native/src/errorReporting.ts`).
+  - Each error is a marker, `error:js:<source>:<Name>#fatal|nonfatal@<id>`, plus a
+    record with the redacted message and the raw stack, carried in the same trace
+    as log lines.
+  - The table says how each error surfaced (uncaught, unhandled rejection, caught by
+    a boundary) and on which screen.
+  - Release builds run Hermes bytecode, so stacks resolve only against the build's
+    source map. Register it with
+    `swagperf maps add <map> --app <id> --platform <p> --bundle <main.jsbundle>`.
+    A run picks its map up whenever it is read.
+- **Crashed** means the app died on its own during the run: a fatal signal on iOS,
+  a fatal exception or signal in Android's crash log.
+
+**Watch for:** a new error class, since triage opens one issue per class per app
+and path; hangs on the same screen run after run; any crash.
 ### Capture
 
 Profile an app on the connected device.
@@ -1080,9 +1149,12 @@ fails for a step without one.
 
 ## Known gaps
 
-- **iOS is not wired up.** The extractor is schema-driven and should mostly work on an
-  iOS trace, but `capture.py` is adb-only and nothing has been tested against a real
-  iOS trace. The CMP × RN seam — the highest risk in the architecture — lives on iOS.
+- **iOS runs on the simulator only.** Its numbers are the Mac's, and frames and
+  per-screen CPU are not measured there. A physical iPhone, iOS budgets, manual
+  sessions and competitor apps are next: see
+  [BACKLOG: iOS lane beyond the simulator](docs/BACKLOG.md#ios-lane-beyond-the-simulator).
+  The CMP × RN seam, the highest risk in the architecture, needs frames from a real
+  iPhone.
 - **Frame attribution is per screen, not per surface.** Janky frames are attributed
   to the screen on display, but not yet to the CMP or RN surface within it, so the
   tool cannot currently prove the interop seam is the cause. The model correctly

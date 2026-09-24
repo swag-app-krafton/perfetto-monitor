@@ -27,8 +27,17 @@ data_sources: {{ config {{ name: "linux.process_stats"
   process_stats_config {{ scan_all_processes_on_start: true proc_stats_poll_ms: 1000 }} }} }}
 data_sources: {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
 data_sources: {{ config {{ name: "android.packages_list" }} }}
+{log}
 duration_ms: {dur}
 """
+
+# The app's error records (SwagErrors, tag SwagPerfError) and crash reports
+# (AndroidRuntime's FATAL EXCEPTION, native crash dumps in the crash buffer).
+# Filtered to those tags, so the log adds kilobytes, not the whole logcat.
+LOG_SOURCE = """data_sources: { config { name: "android.log" android_log_config {
+  log_ids: LID_DEFAULT log_ids: LID_CRASH
+  filter_tags: "SwagPerfError" filter_tags: "AndroidRuntime" filter_tags: "DEBUG" filter_tags: "libc"
+} } }"""
 
 
 def devices():
@@ -284,6 +293,14 @@ def other_profilers(serial=None):
     return [OTHER_PROFILERS[w] for w in out.split() if w in OTHER_PROFILERS]
 
 
+def verify(trace_path, *, instrumented=False):
+    """Why this capture should not become a run, or None: kernel tracing that
+    did not cover the trace (see extract.tracing_lost). The same check as
+    capture_ios.verify, so jobs.py asks either backend the same question."""
+    from .extract import tracing_lost
+    return tracing_lost(trace_path)
+
+
 def require_no_other_profiler(serial=None):
     found = other_profilers(serial)
     if found:
@@ -330,7 +347,7 @@ def capture(out_path, *, pkg="com.swag.pay", duration_ms=10000, serial=None,
     require_no_other_profiler(serial)
     base = ["adb", "-s", serial]
     remote = "/data/misc/perfetto-traces/swagperf.pftrace"
-    cfg = CONFIG.format(pkg=pkg, dur=duration_ms)
+    cfg = CONFIG.format(pkg=pkg, dur=duration_ms, log=LOG_SOURCE)
     subprocess.run(base + ["shell", "rm", "-f", remote], capture_output=True)
 
     if cold:
@@ -415,6 +432,7 @@ data_sources: {{ config {{ name: "linux.sys_stats"
     stat_counters: STAT_FORK_COUNT meminfo_period_ms: 500 }} }} }}
 data_sources: {{ config {{ name: "android.surfaceflinger.frametimeline" }} }}
 data_sources: {{ config {{ name: "android.packages_list" }} }}
+{log}
 """
 
 
@@ -455,7 +473,7 @@ def manual_start(*, pkg="com.swag.pay", serial=None, cold=False):
     if cold:
         force_stop(pkg, serial)
 
-    cfg = MANUAL_CONFIG.format(pkg=pkg)
+    cfg = MANUAL_CONFIG.format(pkg=pkg, log=LOG_SOURCE)
     p = subprocess.run(
         base + ["shell", f"perfetto --txt -c - -o {MANUAL_REMOTE} --detach={MANUAL_KEY}"],
         input=cfg, text=True, capture_output=True, timeout=40)

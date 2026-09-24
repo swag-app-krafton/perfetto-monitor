@@ -1,0 +1,2334 @@
+{
+ "stacks": [
+  {
+   "id": "v1",
+   "stacks": "synthetic/v1/stacks.json",
+   "map": "synthetic/v1/index.android.bundle.map",
+   "inputColumnStart": 0
+  },
+  {
+   "id": "v1-withdebug",
+   "stacks": "synthetic/v1/stacks.withdebug.json",
+   "map": "synthetic/v1/index.android.bundle.packager.map",
+   "inputColumnStart": 1
+  },
+  {
+   "id": "v2",
+   "stacks": "synthetic/v2/stacks.json",
+   "map": "synthetic/v2/main.jsbundle.map",
+   "inputColumnStart": 0
+  },
+  {
+   "id": "swagpay-ios",
+   "stacks": "swagpay/ios.stacks.json",
+   "map": "swagpay/ios.map",
+   "inputColumnStart": 0
+  },
+  {
+   "id": "swagpay-android",
+   "stacks": "swagpay/android.stacks.json",
+   "map": "swagpay/android.map",
+   "inputColumnStart": 0
+  },
+  {
+   "id": "swagpay-ios-withdebug",
+   "stacks": "swagpay/ios.withdebug.stacks.json",
+   "map": "swagpay/ios.packager.map",
+   "inputColumnStart": 1
+  },
+  {
+   "id": "ram",
+   "stacks": "maps/ram.stacks.json",
+   "map": "maps/ram.map",
+   "inputColumnStart": 1
+  }
+ ],
+ "positions": [
+  {
+   "id": "index",
+   "map": "maps/index.map",
+   "points": [
+    [
+     1,
+     0
+    ],
+    [
+     1,
+     1
+    ],
+    [
+     1,
+     2
+    ],
+    [
+     1,
+     3
+    ],
+    [
+     1,
+     4
+    ],
+    [
+     1,
+     5
+    ],
+    [
+     1,
+     6
+    ],
+    [
+     1,
+     7
+    ],
+    [
+     1,
+     8
+    ],
+    [
+     1,
+     9
+    ],
+    [
+     1,
+     10
+    ],
+    [
+     1,
+     11
+    ],
+    [
+     1,
+     12
+    ],
+    [
+     1,
+     13
+    ],
+    [
+     1,
+     14
+    ],
+    [
+     1,
+     15
+    ],
+    [
+     1,
+     16
+    ],
+    [
+     1,
+     17
+    ],
+    [
+     1,
+     18
+    ],
+    [
+     1,
+     19
+    ],
+    [
+     1,
+     20
+    ],
+    [
+     1,
+     21
+    ],
+    [
+     1,
+     22
+    ],
+    [
+     1,
+     23
+    ],
+    [
+     1,
+     24
+    ],
+    [
+     1,
+     25
+    ],
+    [
+     1,
+     26
+    ],
+    [
+     1,
+     27
+    ],
+    [
+     1,
+     28
+    ],
+    [
+     1,
+     29
+    ],
+    [
+     1,
+     30
+    ],
+    [
+     1,
+     31
+    ],
+    [
+     1,
+     32
+    ],
+    [
+     1,
+     33
+    ],
+    [
+     1,
+     34
+    ],
+    [
+     1,
+     35
+    ],
+    [
+     1,
+     36
+    ],
+    [
+     1,
+     37
+    ],
+    [
+     1,
+     38
+    ],
+    [
+     1,
+     39
+    ],
+    [
+     1,
+     40
+    ],
+    [
+     1,
+     41
+    ],
+    [
+     2,
+     0
+    ],
+    [
+     2,
+     1
+    ],
+    [
+     2,
+     2
+    ],
+    [
+     2,
+     3
+    ],
+    [
+     2,
+     4
+    ],
+    [
+     2,
+     5
+    ],
+    [
+     2,
+     6
+    ],
+    [
+     2,
+     7
+    ],
+    [
+     2,
+     8
+    ],
+    [
+     2,
+     9
+    ],
+    [
+     2,
+     10
+    ],
+    [
+     2,
+     11
+    ],
+    [
+     2,
+     12
+    ],
+    [
+     2,
+     13
+    ],
+    [
+     2,
+     14
+    ],
+    [
+     2,
+     15
+    ],
+    [
+     2,
+     16
+    ],
+    [
+     2,
+     17
+    ],
+    [
+     2,
+     18
+    ],
+    [
+     2,
+     19
+    ],
+    [
+     2,
+     20
+    ],
+    [
+     2,
+     21
+    ],
+    [
+     2,
+     22
+    ],
+    [
+     2,
+     23
+    ],
+    [
+     2,
+     24
+    ],
+    [
+     2,
+     25
+    ],
+    [
+     2,
+     26
+    ],
+    [
+     2,
+     27
+    ],
+    [
+     2,
+     28
+    ],
+    [
+     2,
+     29
+    ],
+    [
+     2,
+     30
+    ],
+    [
+     2,
+     31
+    ],
+    [
+     2,
+     32
+    ],
+    [
+     2,
+     33
+    ],
+    [
+     2,
+     34
+    ],
+    [
+     2,
+     35
+    ],
+    [
+     2,
+     36
+    ],
+    [
+     2,
+     37
+    ],
+    [
+     2,
+     38
+    ],
+    [
+     2,
+     39
+    ],
+    [
+     2,
+     40
+    ],
+    [
+     2,
+     41
+    ],
+    [
+     3,
+     0
+    ],
+    [
+     3,
+     1
+    ],
+    [
+     3,
+     2
+    ],
+    [
+     3,
+     3
+    ],
+    [
+     3,
+     4
+    ],
+    [
+     3,
+     5
+    ],
+    [
+     3,
+     6
+    ],
+    [
+     3,
+     7
+    ],
+    [
+     3,
+     8
+    ],
+    [
+     3,
+     9
+    ],
+    [
+     3,
+     10
+    ],
+    [
+     3,
+     11
+    ],
+    [
+     3,
+     12
+    ],
+    [
+     3,
+     13
+    ],
+    [
+     3,
+     14
+    ],
+    [
+     3,
+     15
+    ],
+    [
+     3,
+     16
+    ],
+    [
+     3,
+     17
+    ],
+    [
+     3,
+     18
+    ],
+    [
+     3,
+     19
+    ],
+    [
+     3,
+     20
+    ],
+    [
+     3,
+     21
+    ],
+    [
+     3,
+     22
+    ],
+    [
+     3,
+     23
+    ],
+    [
+     3,
+     24
+    ],
+    [
+     3,
+     25
+    ],
+    [
+     3,
+     26
+    ],
+    [
+     3,
+     27
+    ],
+    [
+     3,
+     28
+    ],
+    [
+     3,
+     29
+    ],
+    [
+     3,
+     30
+    ],
+    [
+     3,
+     31
+    ],
+    [
+     3,
+     32
+    ],
+    [
+     3,
+     33
+    ],
+    [
+     3,
+     34
+    ],
+    [
+     3,
+     35
+    ],
+    [
+     3,
+     36
+    ],
+    [
+     3,
+     37
+    ],
+    [
+     3,
+     38
+    ],
+    [
+     3,
+     39
+    ],
+    [
+     3,
+     40
+    ],
+    [
+     3,
+     41
+    ],
+    [
+     4,
+     0
+    ],
+    [
+     4,
+     1
+    ],
+    [
+     4,
+     2
+    ],
+    [
+     4,
+     3
+    ],
+    [
+     4,
+     4
+    ],
+    [
+     4,
+     5
+    ],
+    [
+     4,
+     6
+    ],
+    [
+     4,
+     7
+    ],
+    [
+     4,
+     8
+    ],
+    [
+     4,
+     9
+    ],
+    [
+     4,
+     10
+    ],
+    [
+     4,
+     11
+    ],
+    [
+     4,
+     12
+    ],
+    [
+     4,
+     13
+    ],
+    [
+     4,
+     14
+    ],
+    [
+     4,
+     15
+    ],
+    [
+     4,
+     16
+    ],
+    [
+     4,
+     17
+    ],
+    [
+     4,
+     18
+    ],
+    [
+     4,
+     19
+    ],
+    [
+     4,
+     20
+    ],
+    [
+     4,
+     21
+    ],
+    [
+     4,
+     22
+    ],
+    [
+     4,
+     23
+    ],
+    [
+     4,
+     24
+    ],
+    [
+     4,
+     25
+    ],
+    [
+     4,
+     26
+    ],
+    [
+     4,
+     27
+    ],
+    [
+     4,
+     28
+    ],
+    [
+     4,
+     29
+    ],
+    [
+     4,
+     30
+    ],
+    [
+     4,
+     31
+    ],
+    [
+     4,
+     32
+    ],
+    [
+     4,
+     33
+    ],
+    [
+     4,
+     34
+    ],
+    [
+     4,
+     35
+    ],
+    [
+     4,
+     36
+    ],
+    [
+     4,
+     37
+    ],
+    [
+     4,
+     38
+    ],
+    [
+     4,
+     39
+    ],
+    [
+     4,
+     40
+    ],
+    [
+     4,
+     41
+    ],
+    [
+     5,
+     0
+    ],
+    [
+     5,
+     1
+    ],
+    [
+     5,
+     2
+    ],
+    [
+     5,
+     3
+    ],
+    [
+     5,
+     4
+    ],
+    [
+     5,
+     5
+    ],
+    [
+     5,
+     6
+    ],
+    [
+     5,
+     7
+    ],
+    [
+     5,
+     8
+    ],
+    [
+     5,
+     9
+    ],
+    [
+     5,
+     10
+    ],
+    [
+     5,
+     11
+    ],
+    [
+     5,
+     12
+    ],
+    [
+     5,
+     13
+    ],
+    [
+     5,
+     14
+    ],
+    [
+     5,
+     15
+    ],
+    [
+     5,
+     16
+    ],
+    [
+     5,
+     17
+    ],
+    [
+     5,
+     18
+    ],
+    [
+     5,
+     19
+    ],
+    [
+     5,
+     20
+    ],
+    [
+     5,
+     21
+    ],
+    [
+     5,
+     22
+    ],
+    [
+     5,
+     23
+    ],
+    [
+     5,
+     24
+    ],
+    [
+     5,
+     25
+    ],
+    [
+     5,
+     26
+    ],
+    [
+     5,
+     27
+    ],
+    [
+     5,
+     28
+    ],
+    [
+     5,
+     29
+    ],
+    [
+     5,
+     30
+    ],
+    [
+     5,
+     31
+    ],
+    [
+     5,
+     32
+    ],
+    [
+     5,
+     33
+    ],
+    [
+     5,
+     34
+    ],
+    [
+     5,
+     35
+    ],
+    [
+     5,
+     36
+    ],
+    [
+     5,
+     37
+    ],
+    [
+     5,
+     38
+    ],
+    [
+     5,
+     39
+    ],
+    [
+     5,
+     40
+    ],
+    [
+     5,
+     41
+    ],
+    [
+     6,
+     0
+    ],
+    [
+     6,
+     1
+    ],
+    [
+     6,
+     2
+    ],
+    [
+     6,
+     3
+    ],
+    [
+     6,
+     4
+    ],
+    [
+     6,
+     5
+    ],
+    [
+     6,
+     6
+    ],
+    [
+     6,
+     7
+    ],
+    [
+     6,
+     8
+    ],
+    [
+     6,
+     9
+    ],
+    [
+     6,
+     10
+    ],
+    [
+     6,
+     11
+    ],
+    [
+     6,
+     12
+    ],
+    [
+     6,
+     13
+    ],
+    [
+     6,
+     14
+    ],
+    [
+     6,
+     15
+    ],
+    [
+     6,
+     16
+    ],
+    [
+     6,
+     17
+    ],
+    [
+     6,
+     18
+    ],
+    [
+     6,
+     19
+    ],
+    [
+     6,
+     20
+    ],
+    [
+     6,
+     21
+    ],
+    [
+     6,
+     22
+    ],
+    [
+     6,
+     23
+    ],
+    [
+     6,
+     24
+    ],
+    [
+     6,
+     25
+    ],
+    [
+     6,
+     26
+    ],
+    [
+     6,
+     27
+    ],
+    [
+     6,
+     28
+    ],
+    [
+     6,
+     29
+    ],
+    [
+     6,
+     30
+    ],
+    [
+     6,
+     31
+    ],
+    [
+     6,
+     32
+    ],
+    [
+     6,
+     33
+    ],
+    [
+     6,
+     34
+    ],
+    [
+     6,
+     35
+    ],
+    [
+     6,
+     36
+    ],
+    [
+     6,
+     37
+    ],
+    [
+     6,
+     38
+    ],
+    [
+     6,
+     39
+    ],
+    [
+     6,
+     40
+    ],
+    [
+     6,
+     41
+    ],
+    [
+     7,
+     0
+    ],
+    [
+     7,
+     1
+    ],
+    [
+     7,
+     2
+    ],
+    [
+     7,
+     3
+    ],
+    [
+     7,
+     4
+    ],
+    [
+     7,
+     5
+    ],
+    [
+     7,
+     6
+    ],
+    [
+     7,
+     7
+    ],
+    [
+     7,
+     8
+    ],
+    [
+     7,
+     9
+    ],
+    [
+     7,
+     10
+    ],
+    [
+     7,
+     11
+    ],
+    [
+     7,
+     12
+    ],
+    [
+     7,
+     13
+    ],
+    [
+     7,
+     14
+    ],
+    [
+     7,
+     15
+    ],
+    [
+     7,
+     16
+    ],
+    [
+     7,
+     17
+    ],
+    [
+     7,
+     18
+    ],
+    [
+     7,
+     19
+    ],
+    [
+     7,
+     20
+    ],
+    [
+     7,
+     21
+    ],
+    [
+     7,
+     22
+    ],
+    [
+     7,
+     23
+    ],
+    [
+     7,
+     24
+    ],
+    [
+     7,
+     25
+    ],
+    [
+     7,
+     26
+    ],
+    [
+     7,
+     27
+    ],
+    [
+     7,
+     28
+    ],
+    [
+     7,
+     29
+    ],
+    [
+     7,
+     30
+    ],
+    [
+     7,
+     31
+    ],
+    [
+     7,
+     32
+    ],
+    [
+     7,
+     33
+    ],
+    [
+     7,
+     34
+    ],
+    [
+     7,
+     35
+    ],
+    [
+     7,
+     36
+    ],
+    [
+     7,
+     37
+    ],
+    [
+     7,
+     38
+    ],
+    [
+     7,
+     39
+    ],
+    [
+     7,
+     40
+    ],
+    [
+     7,
+     41
+    ],
+    [
+     8,
+     0
+    ],
+    [
+     8,
+     1
+    ],
+    [
+     8,
+     2
+    ],
+    [
+     8,
+     3
+    ],
+    [
+     8,
+     4
+    ],
+    [
+     8,
+     5
+    ],
+    [
+     8,
+     6
+    ],
+    [
+     8,
+     7
+    ],
+    [
+     8,
+     8
+    ],
+    [
+     8,
+     9
+    ],
+    [
+     8,
+     10
+    ],
+    [
+     8,
+     11
+    ],
+    [
+     8,
+     12
+    ],
+    [
+     8,
+     13
+    ],
+    [
+     8,
+     14
+    ],
+    [
+     8,
+     15
+    ],
+    [
+     8,
+     16
+    ],
+    [
+     8,
+     17
+    ],
+    [
+     8,
+     18
+    ],
+    [
+     8,
+     19
+    ],
+    [
+     8,
+     20
+    ],
+    [
+     8,
+     21
+    ],
+    [
+     8,
+     22
+    ],
+    [
+     8,
+     23
+    ],
+    [
+     8,
+     24
+    ],
+    [
+     8,
+     25
+    ],
+    [
+     8,
+     26
+    ],
+    [
+     8,
+     27
+    ],
+    [
+     8,
+     28
+    ],
+    [
+     8,
+     29
+    ],
+    [
+     8,
+     30
+    ],
+    [
+     8,
+     31
+    ],
+    [
+     8,
+     32
+    ],
+    [
+     8,
+     33
+    ],
+    [
+     8,
+     34
+    ],
+    [
+     8,
+     35
+    ],
+    [
+     8,
+     36
+    ],
+    [
+     8,
+     37
+    ],
+    [
+     8,
+     38
+    ],
+    [
+     8,
+     39
+    ],
+    [
+     8,
+     40
+    ],
+    [
+     8,
+     41
+    ]
+   ]
+  }
+ ],
+ "crashes": [
+  {
+   "id": "v1",
+   "map": "synthetic/v1/index.android.bundle.map",
+   "callstack": [
+    {
+     "SegmentID": 0,
+     "FunctionID": 45,
+     "ByteCodeOffset": 51,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 34,
+     "ByteCodeOffset": 31,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 44,
+     "ByteCodeOffset": 37,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 69,
+     "ByteCodeOffset": 48,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 35,
+     "ByteCodeOffset": 51,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 70,
+     "ByteCodeOffset": 11,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 36,
+     "ByteCodeOffset": 46,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "NativeCode": true,
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 71,
+     "ByteCodeOffset": 23,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 37,
+     "ByteCodeOffset": 36,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 54,
+     "ByteCodeOffset": 8,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 38,
+     "ByteCodeOffset": 34,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 76,
+     "ByteCodeOffset": 19,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "NativeCode": true,
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 79,
+     "ByteCodeOffset": 103,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 57,
+     "ByteCodeOffset": 54,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 39,
+     "ByteCodeOffset": 27,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 62,
+     "ByteCodeOffset": 30,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 60,
+     "ByteCodeOffset": 30,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 40,
+     "ByteCodeOffset": 29,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 82,
+     "ByteCodeOffset": 32,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 63,
+     "ByteCodeOffset": 29,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 61,
+     "ByteCodeOffset": 35,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 41,
+     "ByteCodeOffset": 35,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 83,
+     "ByteCodeOffset": 51,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 42,
+     "ByteCodeOffset": 39,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 168,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 33,
+     "ByteCodeOffset": 19,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1,
+     "ByteCodeOffset": 235,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 28,
+     "ByteCodeOffset": 245,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 24,
+     "ByteCodeOffset": 81,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 21,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 1008,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 85,
+     "ByteCodeOffset": 97,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "NativeCode": true,
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 55,
+     "ByteCodeOffset": 19,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 88,
+     "ByteCodeOffset": 41,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    }
+   ]
+  },
+  {
+   "id": "swagpay-ios",
+   "map": "swagpay/ios.map",
+   "callstack": [
+    {
+     "SegmentID": 0,
+     "FunctionID": 753,
+     "ByteCodeOffset": 125,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 14,
+     "ByteCodeOffset": 141,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 614,
+     "ByteCodeOffset": 252,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 610,
+     "ByteCodeOffset": 84,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 607,
+     "ByteCodeOffset": 44,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 751,
+     "ByteCodeOffset": 41,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 153,
+     "ByteCodeOffset": 86,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 614,
+     "ByteCodeOffset": 252,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 610,
+     "ByteCodeOffset": 84,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 607,
+     "ByteCodeOffset": 44,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 142,
+     "ByteCodeOffset": 45,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 614,
+     "ByteCodeOffset": 252,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 610,
+     "ByteCodeOffset": 84,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 607,
+     "ByteCodeOffset": 44,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1294,
+     "ByteCodeOffset": 60,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 107,
+     "ByteCodeOffset": 22,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 614,
+     "ByteCodeOffset": 252,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 610,
+     "ByteCodeOffset": 43,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 607,
+     "ByteCodeOffset": 44,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 19612,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 2404,
+     "ByteCodeOffset": 9,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 4423,
+     "ByteCodeOffset": 8,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "NativeCode": true,
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 2470,
+     "ByteCodeOffset": 49,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 2471,
+     "ByteCodeOffset": 50,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 2451,
+     "ByteCodeOffset": 6,
+     "SourceURL": "main.jsbundle",
+     "StackFrameRegOffs": "0"
+    }
+   ]
+  },
+  {
+   "id": "swagpay-android",
+   "map": "swagpay/android.map",
+   "callstack": [
+    {
+     "SegmentID": 0,
+     "FunctionID": 756,
+     "ByteCodeOffset": 125,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 14,
+     "ByteCodeOffset": 141,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 617,
+     "ByteCodeOffset": 252,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 613,
+     "ByteCodeOffset": 84,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 610,
+     "ByteCodeOffset": 44,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 754,
+     "ByteCodeOffset": 41,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 152,
+     "ByteCodeOffset": 86,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 617,
+     "ByteCodeOffset": 252,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 613,
+     "ByteCodeOffset": 84,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 610,
+     "ByteCodeOffset": 44,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 141,
+     "ByteCodeOffset": 45,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 617,
+     "ByteCodeOffset": 252,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 613,
+     "ByteCodeOffset": 84,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 610,
+     "ByteCodeOffset": 44,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 1294,
+     "ByteCodeOffset": 60,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 107,
+     "ByteCodeOffset": 22,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 617,
+     "ByteCodeOffset": 252,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 613,
+     "ByteCodeOffset": 43,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 610,
+     "ByteCodeOffset": 44,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 0,
+     "ByteCodeOffset": 19704,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 2418,
+     "ByteCodeOffset": 9,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 4439,
+     "ByteCodeOffset": 8,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "NativeCode": true,
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 2484,
+     "ByteCodeOffset": 49,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 2485,
+     "ByteCodeOffset": 50,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    },
+    {
+     "SegmentID": 0,
+     "FunctionID": 2465,
+     "ByteCodeOffset": 6,
+     "SourceURL": "index.android.bundle",
+     "StackFrameRegOffs": "0"
+    }
+   ]
+  }
+ ]
+}

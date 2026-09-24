@@ -28,10 +28,73 @@ def _rows(tp, q):
     return [dict(r.__dict__) if hasattr(r, "__dict__") else dict(r) for r in tp.query(q)]
 
 
+SOURCE_PREFIX = "swagperf.source:"
+
+
+def trace_source(tp):
+    """Where a trace was recorded. An iOS trace carries it in one instant the
+    converter writes (`swagperf.source:platform=ios;simulator=1;...`); anything
+    without one is an Android capture."""
+    r = _rows(tp, f"select name from slice where name like '{SOURCE_PREFIX}%' limit 1")
+    src = {"platform": "android", "simulator": False}
+    if r:
+        for part in r[0]["name"][len(SOURCE_PREFIX):].split(";"):
+            k, _, v = part.partition("=")
+            if k:
+                src[k] = v
+        src["simulator"] = src.get("simulator") in ("1", "true", "True", True)
+    return src
+
+
+def trace_source_of(trace_path):
+    """trace_source for a trace file."""
+    tp = TraceProcessor(trace=trace_path)
+    try:
+        return trace_source(tp)
+    finally:
+        tp.close()
+
+
+SIMULATOR_NOTE = ("iOS Simulator run: numbers come from the Mac's CPU with a warm cache, "
+                  "so they compare only with other simulator runs and are never judged "
+                  "against budgets")
+
+
+def _with_stability(m, tp, pkg, platform):
+    """Add hangs, JS errors and crash state (stability.py)."""
+    from .stability import extract_stability
+    m["stability"] = extract_stability(tp, pkg, platform)
+    return m
+
+
+def _apply_source(m, src):
+    """Stamp the platform on a result, and take budgets out of a simulator run.
+
+    A simulator runs the app on the Mac's CPU: a launch that would miss its
+    budget on a phone passes easily there. Showing that as a pass is wrong
+    data shown as right, so a simulator run keeps its measurements but has no
+    budgets and no breaches. Ordering violations stay: they are about order,
+    not speed."""
+    m["platform"] = src.get("platform", "android")
+    m["simulator"] = bool(src.get("simulator"))
+    m["budgets_asserted"] = not m["simulator"]
+    if m["simulator"]:
+        m["breaches"] = []
+        m["startup"]["budget_ms"] = None
+        for st in m["steps"]:
+            st["budget_ms"] = None
+            st["over_budget"] = False
+            st["pct_of_budget"] = None
+        m["note"] = "; ".join(x for x in (m.get("note"), SIMULATOR_NOTE) if x)
+    return m
+
+
 def extract(trace_path, *, path_kind="returning_user", app_pkg=None):
     tp = TraceProcessor(trace=trace_path)
     try:
-        return _extract(tp, path_kind, pkg=app_pkg)
+        src = trace_source(tp)
+        m = _apply_source(_extract(tp, path_kind, pkg=app_pkg, platform=src["platform"]), src)
+        return _with_stability(m, tp, app_pkg, src["platform"])
     finally:
         tp.close()
 
@@ -65,7 +128,9 @@ def capture_problems(metrics, *, requested_pkg=None):
         problems.append("no startup phases could be derived from this trace")
     if metrics["startup"].get("time_to_first_camera_frame_ms") in (None, 0, 0.0):
         problems.append("startup time could not be measured")
-    if (metrics.get("frames") or {}).get("total", 0) == 0:
+    frames = metrics.get("frames") or {}
+    # On the iOS Simulator no frames is the platform, not a failed capture.
+    if frames.get("total", 0) == 0 and not metrics.get("simulator"):
         problems.append(
             "no frame slices were recorded, so frame pacing and thermal drift "
             "are unavailable for this run")
@@ -85,17 +150,20 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
     are flagged `derived: True` and carry no per-step budgets.
     """
     from . import catalogue
-    from .derive import derive_steps, detect_app
+    from .derive import derive_steps, derive_ios_steps, detect_app
 
     tp = TraceProcessor(trace=trace_path)
     try:
-        detected = detect_app(tp)
+        src = trace_source(tp)
+        platform = src["platform"]
+        ios = platform == "ios"
+        detected = {} if ios else detect_app(tp)
         pkg = app_pkg or detected.get("pkg")
-        instrumented = (catalogue.is_instrumented(pkg) if pkg else False) and not force_derive
+        instrumented = (catalogue.is_instrumented(pkg, platform) if pkg else False) and not force_derive
 
         fallback_note = None
         if instrumented:
-            m = _extract(tp, path_kind or "returning_user", pkg=pkg)
+            m = _extract(tp, path_kind or "returning_user", pkg=pkg, platform=platform)
             # "Instrumented" means the app emits *timed* step: spans. A build
             # that only emits instant step: markers (zero-length milestones)
             # gives nothing to measure: every step is 0ms and startup reads as
@@ -108,21 +176,30 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
                 m["derived"] = False
                 m["startup_metric"] = "time to first camera frame"
                 m["detected_app"] = detected
-                return m
-            fallback_note = ("step: markers present but untimed (instants only), "
-                             "so startup was derived from Android launch slices")
+                return _with_stability(_apply_source(m, src), tp, pkg, platform)
+            fallback_note = (m.get("note") or
+                             "step: markers present but untimed (instants only)") + \
+                (", so startup was derived from iOS launch phases" if ios
+                 else ", so startup was derived from Android launch slices")
 
-        d = derive_steps(tp, pkg=pkg)
+        d = derive_ios_steps(tp, pkg=pkg) if ios else derive_steps(tp, pkg=pkg)
         target_slices = d.get("target_slices", 0)
-        upids = _app_upids(tp, pkg)
-        frames = _frames(tp, upids) if (upids or not pkg) else _unmeasured_frames()
+        upids = _app_upids(tp, pkg, platform)
+        if ios and src["simulator"]:
+            # The simulator supports none of Instruments' frame instruments
+            # (Hitches, Frame Lifetimes, Core Animation FPS all refuse it).
+            frames = _unmeasured_frames("not measured on the iOS Simulator")
+        else:
+            frames = _frames(tp, upids) if (upids or not pkg) else _unmeasured_frames()
         mem = _memory(tp, upids) if (upids or not pkg) else {}
         # Cold vs warm is classified from what was actually derived rather than
         # from the stdlib's label, which can misfire: a process_start phase only
-        # exists when the process was genuinely created for this launch.
+        # exists when the process was genuinely created for this launch (on
+        # iOS, a pre-main phase).
         names = {s["step"] for s in d["steps"]}
-        kind = path_kind or ("cold" if "step:process_start" in names else "warm")
-        bud = catalogue.budgets_for(pkg)
+        started = {"step:process_start", "step:pre_main", "step:to_first_frame"}
+        kind = path_kind or ("cold" if names & started else "warm")
+        bud = catalogue.budgets_for(pkg, platform)
         ttid = d["ttid_ms"] or 0.0
         ttid_budget = bud.get("ttid_ms")
 
@@ -142,7 +219,7 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
         # Frame budgets are platform-wide (60fps is 60fps for anyone). Memory and
         # thermal budgets are this project's own product decisions, so they are
         # asserted only against our own app, never a competitor's.
-        own = (catalogue.get(pkg) or {}).get("role") == "own"
+        own = (catalogue.get(pkg, platform) or {}).get("role") == "own"
         asserted = ["slow_frame_pct", "janky_frame_pct"]
         if own:
             asserted += ["peak_rss_mb", "rss_growth_mb", "thermal_drift_pct"]
@@ -154,7 +231,7 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
                 breaches.append({"metric": k, "value": checks[k], "budget": b,
                                  "over_by_pct": round((checks[k] - b) / b * 100, 1)})
 
-        return {
+        return _with_stability(_apply_source({
             "path_kind": kind,
             "app_pkg": pkg,
             "derived": True,
@@ -173,12 +250,12 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
             "target_slices": target_slices,
             "own_app": own,
             "note": fallback_note,
-        }
+        }, src), tp, pkg, platform)
     finally:
         tp.close()
 
 
-def _app_upids(tp, pkg):
+def _app_upids(tp, pkg, platform="android"):
     """Process ids (upid) belonging to the app under test, or [] if unknown.
 
     Device traces carry every process on the phone. Anything not scoped to the
@@ -197,7 +274,7 @@ def _app_upids(tp, pkg):
     # instrumented. For any other package, a marker-emitting process belongs
     # to some other app, so there is nothing to fall back to.
     from . import catalogue
-    if not catalogue.is_instrumented(pkg):
+    if not catalogue.is_instrumented(pkg, platform):
         return []
     # A process's name is not always recorded: on a V2514, a capture without the
     # gfx atrace category never named the app's process at all. The app still
@@ -221,8 +298,9 @@ def _app_upids(tp, pkg):
                or p.name = '<pre-initialized>')""")]
 
 
-def _unmeasured_frames():
-    """Frame metrics when the app's process cannot be found in the trace.
+def _unmeasured_frames(note="app process not found in trace"):
+    """Frame metrics when they cannot be measured: the app's process is not in
+    the trace, or the platform records no frames (the iOS Simulator).
 
     The alternative -- counting every process's frames -- is what reported a
     device-wide 876MB "peak" and other processes' launch steps as the app's. A
@@ -230,7 +308,7 @@ def _unmeasured_frames():
     """
     return {"total": 0, "slow": 0, "janky": 0, "slow_pct": None, "janky_pct": None,
             "avg_ms": None, "max_ms": None, "thermal_drift_pct": None,
-            "note": "app process not found in trace"}
+            "note": note}
 
 
 def _in(col, ids):
@@ -241,6 +319,18 @@ def _in(col, ids):
 # so an exact match on the bare name counted zero frames on every real device --
 # and a frame count of zero then reported 0% slow, which reads as perfect.
 DOFRAME = "Choreographer#doFrame%"
+# Every name an app frame goes by, matched by prefix: Android's Choreographer
+# callback, and the platform-neutral slice the iOS converter writes. Giving iOS
+# frames Android's name would mislabel them in the Perfetto UI.
+IOS_FRAME = "swagperf.frame%"
+FRAME_SLICE_PATTERNS = (DOFRAME, IOS_FRAME)
+
+
+def frame_like(col="s.name"):
+    """SQL predicate matching any app frame slice in `col`."""
+    return "(" + " or ".join(f"{col} like '{p}'" for p in FRAME_SLICE_PATTERNS) + ")"
+
+
 DRIFT_SKIP_NS = 1_000_000_000   # launch + first composition
 DRIFT_MIN_FRAMES = 120          # two seconds of sustained 60fps
 
@@ -273,7 +363,7 @@ def _frames(tp, upids=None):
                sum(case when dur > {3 * FRAME_NS} then 1 else 0 end) janky,
                cast(avg(dur) as int) avg_dur,
                cast(max(dur) as int) max_dur
-        from slice s where s.name like '{DOFRAME}'{scope}
+        from slice s where {frame_like()}{scope}
     """)
     f = fr[0] if fr else {}
     total = f.get("total") or 0
@@ -286,8 +376,9 @@ def _frames(tp, upids=None):
         # zero frames read as zero slow frames, which looks like a clean pass.
         "slow_pct": round((f.get("slow") or 0) / total * 100, 2) if total else None,
         "janky_pct": round((f.get("janky") or 0) / total * 100, 2) if total else None,
-        "avg_ms": round((f.get("avg_dur") or 0) / 1e6, 2),
-        "max_ms": round((f.get("max_dur") or 0) / 1e6, 2),
+        # Unmeasured when no frames were counted, for the same reason as above.
+        "avg_ms": round(f["avg_dur"] / 1e6, 2) if total else None,
+        "max_ms": round(f["max_dur"] / 1e6, 2) if total else None,
     }
     # Thermal drift: second-half mean frame time against the first half. A rising
     # value means the device is throttling, which is a different problem from
@@ -301,7 +392,7 @@ def _frames(tp, upids=None):
     # reported as unmeasured (None) rather than as a number.
     halves = _rows(tp, f"""
         with a as (
-          select s.ts, s.dur from slice s where s.name like '{DOFRAME}'{scope}),
+          select s.ts, s.dur from slice s where {frame_like()}{scope}),
         f as (
           select dur, row_number() over (order by ts) rn, count(*) over () n
           from a where ts >= (select min(ts) from a) + {DRIFT_SKIP_NS})
@@ -365,7 +456,7 @@ def _memory(tp, upids=None):
     return mem
 
 
-def _extract(tp, path_kind, pkg=None):
+def _extract(tp, path_kind, pkg=None, platform="android"):
     # --- steps: top-level automation markers -------------------------------
     steps = _rows(tp, f"""
         select s.name, s.ts, s.dur, s.depth, s.id,
@@ -419,7 +510,21 @@ def _extract(tp, path_kind, pkg=None):
     crit = (CRITICAL_PATH_RETURNING if path_kind == "returning_user"
             else CRITICAL_PATH_FIRST_RUN)
     crit_steps = [s for s in step_metrics if s["step"] in crit]
-    ttff = round(max((s["start_ms"] + s["dur_ms"] for s in crit_steps), default=0.0), 2)
+    # Every critical-path step must be present. With one missing, the latest end
+    # among the rest is not the time to first camera frame, just the end of
+    # whatever happened to be recorded -- a shorter path read as a faster one.
+    # The iOS Simulator has no camera, so its camera steps never appear.
+    #
+    # The ordering check still uses the end of the path that *was* recorded:
+    # deferred work that started before it started before any camera frame.
+    missing = [c for c in crit if c not in {s["step"] for s in crit_steps}]
+    crit_end = round(max((s["start_ms"] + s["dur_ms"] for s in crit_steps), default=0.0), 2)
+    note = None
+    if missing and crit_steps:
+        ttff = None
+        note = f"critical path incomplete (no {', '.join(missing)})"
+    else:
+        ttff = crit_end
 
     # --- deferred-work violation: the architecture's ordering constraint ----
     violations = []
@@ -427,16 +532,16 @@ def _extract(tp, path_kind, pkg=None):
         for s in step_metrics:
             # 1ms tolerance: a deferred step legitimately starts *at* the first
             # frame boundary, and float rounding can place it a hair before.
-            if s["step"] in DEFERRED_STEPS and s["start_ms"] < ttff - ORDERING_TOLERANCE_MS:
+            if s["step"] in DEFERRED_STEPS and s["start_ms"] < crit_end - ORDERING_TOLERANCE_MS:
                 violations.append({
                     "step": s["step"],
                     "started_at_ms": s["start_ms"],
-                    "first_frame_ms": ttff,
-                    "detail": f"{s['step']} began {round(ttff - s['start_ms'], 2)}ms "
+                    "first_frame_ms": crit_end,
+                    "detail": f"{s['step']} began {round(crit_end - s['start_ms'], 2)}ms "
                               "before first usable camera frame",
                 })
 
-    upids = _app_upids(tp, pkg)
+    upids = _app_upids(tp, pkg, platform)
     frames = _frames(tp, upids) if (upids or not pkg) else _unmeasured_frames()
     mem = _memory(tp, upids) if (upids or not pkg) else {}
 
@@ -468,6 +573,7 @@ def _extract(tp, path_kind, pkg=None):
         "memory": mem,
         "budget_checks": checks,
         "breaches": breaches,
+        "note": note,
     }
 
 
@@ -530,8 +636,9 @@ def trace_metadata(trace_path, app_pkg=None):
     try:
         meta = {r.name: (r.str_value if r.str_value is not None else r.int_value)
                 for r in tp.query("select name, str_value, int_value from metadata")}
+        src = trace_source(tp)
         app = {}
-        if app_pkg:
+        if app_pkg and src["platform"] == "android":
             try:
                 row = next(iter(tp.query(
                     "select version_code, debuggable from package_list "
@@ -561,6 +668,14 @@ def trace_metadata(trace_path, app_pkg=None):
         "utc_offset_min": meta.get("timezone_off_mins"),
         "uuid": meta.get("trace_uuid"),
     }.items() if v is not None}
+    if src["platform"] == "ios":
+        # A converted iOS trace has none of Android's metadata keys; what it
+        # knows about the device is in its provenance marker.
+        device = {k: v for k, v in {
+            "platform": "ios", "model": src.get("device"), "os_version": src.get("os"),
+            "simulator": src.get("simulator")}.items() if v not in (None, "")}
+        if src.get("xctrace"):
+            trace["xctrace_version"] = src["xctrace"]
     out = {"device": device, "trace": trace, "source": "trace"}
     if app:
         out["app"] = app

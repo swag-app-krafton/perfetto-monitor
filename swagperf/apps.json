@@ -10,6 +10,12 @@
       "notes": "Emits step: markers, so extract.py reads them directly. Budgets come from the shell architecture."
     },
     {
+      "pkg": "com.cambench.compose.ios", "platform": "ios", "name": "Swag Pay", "role": "own",
+      "category": "upi_payments", "vendor": "KRAFTON", "region": "IN",
+      "instrumented": true, "verified": true,
+      "notes": "The iOS build. Its bundle id is still the prototype's placeholder: change it here and in iosApp.xcodeproj together. No budgets yet; iOS budgets are set from physical-device runs."
+    },
+    {
       "pkg": "com.phonepe.app", "name": "PhonePe", "role": "competitor",
       "category": "upi_payments", "vendor": "PhonePe", "region": "IN",
       "instrumented": false, "verified": false,

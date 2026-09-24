@@ -10,7 +10,7 @@ import type { ContextItem } from './types'
 /** What the panel is looking at: the tab, the run in view (the top bar's
  *  Run) and its benchmark. */
 export function defaultContext(scope: Scope | null, screen: ScreenDef): ContextItem[] {
-  const out: ContextItem[] = [{ kind: 'tab', id: screen.id, label: `${screen.label} tab` }]
+  const out: ContextItem[] = [{ kind: 'tab', id: screen.page ?? screen.id, label: `${screen.label} tab` }]
   const run = scope?.run
   if (run) out.push({ kind: 'run', id: run.id, label: `Run #${run.id}` })
   const bench = scope?.benchmarkRun

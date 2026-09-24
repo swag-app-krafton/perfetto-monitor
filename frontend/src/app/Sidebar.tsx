@@ -2,7 +2,15 @@ import { NavLink } from 'react-router'
 import { IconButton, Row, Spacer, Stack, Text } from '@/design'
 import { useProfiler } from './profiler'
 import { GROUPS, screensFor } from './routes'
+import type { Profiler } from './store'
 import s from './Shell.module.css'
+
+/** What produced the numbers each lane shows. */
+const FOOT: Record<Profiler, string> = {
+  perfetto: 'Perfetto trace processor',
+  ios: 'Instruments via xctrace, read by Perfetto',
+  flashlight: 'Flashlight, pinned npm build',
+}
 
 export function Sidebar({
   rail,
@@ -55,7 +63,7 @@ export function Sidebar({
         )}
         {full && (
           <Text as="div" variant="caption">
-            {screens[0]?.profiler === 'flashlight' ? 'Flashlight, pinned npm build' : 'Perfetto trace processor'}
+            {FOOT[screens[0]?.profiler ?? 'perfetto']}
             <br />
             <a href="/tokens.html" className={s.footLink}>
               LLM token usage ↗

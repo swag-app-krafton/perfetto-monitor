@@ -497,6 +497,8 @@ class TestScreenMetrics(unittest.TestCase):
             if "like 'screen:%'" in sql:
                 return [{"sid": 1, "nm": "screen:Onboarding",
                          "ts": 1_000_000_000, "dur": -1, "upid": 7}]
+            if "select 1 from sched_slice" in sql:
+                return [{"n": 1}]  # the trace has scheduler data
             if "sched_slice" in sql:
                 return [{"cpu_ns": 400_000_000}]
             if "mem.rss" in sql:
@@ -735,8 +737,10 @@ class TestManualModeConfig(unittest.TestCase):
 
     def test_manual_config_formats_with_pkg(self):
         from swagperf import capture
-        cfg = capture.MANUAL_CONFIG.format(pkg="com.example.app")
+        cfg = capture.MANUAL_CONFIG.format(pkg="com.example.app", log=capture.LOG_SOURCE)
         self.assertIn('atrace_apps: "com.example.app"', cfg)
+        # The app's error records and crash reports, and only those tags.
+        self.assertIn('filter_tags: "SwagPerfError"', cfg)
         # Braces survive as real perfetto config syntax; what must NOT survive
         # is a doubled brace, which would mean a placeholder was left unescaped.
         self.assertNotIn("{{", cfg)

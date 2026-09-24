@@ -57,6 +57,8 @@ export interface FrameStats {
   avg_ms: number | null
   max_ms: number | null
   thermal_drift_pct: number | null
+  /** Why frames are unmeasured, when they are ("not measured on the iOS Simulator"). */
+  note?: string
 }
 
 export interface MemoryStats {
@@ -91,6 +93,11 @@ export interface RunDetails {
     density_dpi: number
     refresh_hz: number
     serial: string
+    /** iOS: set on runs from the iOS lane. */
+    platform: 'android' | 'ios'
+    os_version: string
+    simulator: boolean
+    udid: string
   }>
   app: Partial<{
     package: string
@@ -104,11 +111,27 @@ export interface RunDetails {
     first_install: string
     last_update: string
     git_sha: string
+    /** iOS: "release" or "debug", and the JS bundle's form. */
+    build_type: string
+    js_bundle: string | null
   }>
-  state: Partial<{ battery_pct: number; battery_temp_c: number; charging: string; thermal_status: string }>
+  state: Partial<{
+    battery_pct: number
+    battery_temp_c: number
+    charging: string
+    thermal_status: string
+    /** A simulator run's Mac: its CPU was the run's CPU. */
+    host_power: string
+    host_battery_pct: number
+    host_thermal_warning: boolean
+    host_load_1m: number
+    xcode: string
+  }>
+  /** The Mac a simulator run executed on. */
+  host?: Partial<{ model: string; chip: string; ram_gb: number; macos: string }>
   /** When `state` was read: "before capture" or "end of session". */
   state_moment?: string | null
-  trace: Partial<{ path: string; size_mb: number; duration_s: number; perfetto_version: string; utc_offset_min: number; uuid: string }>
+  trace: Partial<{ path: string; size_mb: number; duration_s: number; perfetto_version: string; xctrace_version: string; utc_offset_min: number; uuid: string }>
   /** Which sources contributed: "capture" (adb at capture time), "from_trace". */
   sources: string[]
   trace_error?: string | null
@@ -127,6 +150,15 @@ export interface Run {
   app_name: string | null
   app_role: 'own' | 'competitor' | 'reference' | null
   derived: number
+  /** Which lane recorded it. Simulator runs compare only with each other. */
+  platform: Platform
+  simulator: boolean
+  /** Hangs after the first frame, JS errors, and whether the app died (stability.py). */
+  hang_count: number | null
+  longest_hang_ms: number | null
+  js_errors: number | null
+  crashed: number | null
+  stability: Stability | null
   ttff_ms: number | null
   slow_pct: number | null
   janky_pct: number | null
@@ -143,9 +175,73 @@ export interface Run {
   meta: RunDetails
 }
 
+export type Platform = 'android' | 'ios'
+
+/** A main-thread stall: microhang 100-250 ms, hang 250 ms or more (Apple's terms). */
+export interface HangEvent {
+  start_ms: number
+  dur_ms: number
+  kind: 'hang' | 'microhang'
+  screen: string | null
+}
+
+export interface ResolvedFrame {
+  fn: string | null
+  file: string | null
+  line: number | null
+  col: number | null
+  in_app: boolean
+  resolved: boolean
+  raw: string
+}
+
+export interface JsErrorEvent {
+  id: string
+  start_ms: number
+  name: string
+  source: 'global' | 'promise' | 'boundary' | 'manual'
+  fatal: boolean
+  screen: string | null
+  message: string | null
+  stack: string | null
+  component_stack: string | null
+  has_record: boolean
+  /** From /api/stability only: the stack resolved against the build's source map. */
+  frames?: ResolvedFrame[] | null
+  symbolicated?: boolean
+  fingerprint?: string
+}
+
+export interface Stability {
+  hangs: {
+    count: number
+    microhangs: number
+    longest_ms: number | null
+    total_ms: number
+    rate_s_per_hr: number | null
+    session_s: number
+    startup: { count: number; microhangs: number; longest_ms: number | null }
+    per_screen: Record<string, { count: number; longest_ms: number }>
+    events: HangEvent[]
+    source: string
+  }
+  errors: {
+    js: number
+    js_fatal: number
+    by_name: Record<string, number>
+    by_source: Record<string, number>
+    per_screen: Record<string, number>
+    events: JsErrorEvent[]
+    /** From /api/stability only: the map the stacks were resolved against. */
+    source_map?: string | null
+  }
+  crash: { crashed: boolean; reason: string | null }
+}
+
 export interface Benchmark {
   scope: string
   run_id: number
+  platform?: Platform
   note: string | null
   set_at: string
   label: string | null
@@ -191,12 +287,26 @@ export interface DevicePackage {
   instrumented: boolean
   in_catalogue: boolean
   version?: string
+  /** iOS: the installed build, which decides whether it can be captured. */
+  build?: { build_type: 'release' | 'debug'; version_name?: string; version_code?: string; js_bundle?: string | null }
+}
+
+export interface Simulator {
+  udid: string
+  name: string
+  state: string
+  os_version: string | null
 }
 
 export type DevicePayload =
-  | { connected: false; error?: string }
+  | { connected: false; error?: string; platform?: Platform; simulators?: Simulator[] }
   | {
       connected: true
+      platform?: Platform
+      /** iOS: the booted simulator. */
+      udid?: string
+      simulator?: boolean
+      simulators?: Simulator[]
       serial: string
       model: string
       release: string
@@ -301,7 +411,8 @@ export interface ScreenSummary {
   step: string | null
   visits: number
   total_ms: number
-  total_cpu_ms: number
+  /** null when the trace has no scheduler data (unmeasured). */
+  total_cpu_ms: number | null
   worst_ms: number
   frames: number
   slow_frames: number
@@ -324,7 +435,8 @@ export interface StackDepthRow {
   depth: number
   visits: number
   total_ms: number
-  total_cpu_ms: number
+  /** null when the trace has no scheduler data (unmeasured). */
+  total_cpu_ms: number | null
   mean_cpu_pct: number | null
   peak_rss_mb: number | null
   routes: [string, number][]
@@ -357,7 +469,7 @@ export type ScreensPayload =
       screen_summary: ScreenSummary[]
       stack_summary: StackDepthRow[]
       max_depth: number
-      timeline: { rss: [number, number][]; cpu: [number, number][]; bucket_ms: number }
+      timeline: { rss: [number, number][]; cpu: [number, number][]; cpu_measured?: boolean; bucket_ms: number }
       actions: ActionRow[]
       action_events: { at_ms: number; action: string; screen: string | null }[]
       navigations: Transition[]
@@ -388,6 +500,7 @@ export interface SpreadStats {
 }
 
 export interface StressTest {
+  platform?: Platform
   id: number
   ts: string
   app_pkg: string | null

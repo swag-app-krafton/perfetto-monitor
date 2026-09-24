@@ -9,7 +9,7 @@ from swagperf.synth import gen_trace
 
 
 def _every_step_name():
-    names = {name for name, _ in derive.PHASES}
+    names = {name for name, _ in derive.PHASES} | {name for name, _ in derive.IOS_PHASES}
     names |= set(budgets.STEP_RUNTIME) | set(budgets.STEP_BUDGETS_MS) | set(budgets.DEFERRED_STEPS)
     names |= set(budgets.CRITICAL_PATH_RETURNING) | set(budgets.CRITICAL_PATH_FIRST_RUN)
     return names

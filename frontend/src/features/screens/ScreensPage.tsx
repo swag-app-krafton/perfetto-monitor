@@ -113,7 +113,7 @@ export function ScreensPage() {
 function Usage({ d }: { d: Instrumented }) {
   const [open, setOpen] = useState<string | null>(null)
   const [metric, setMetric] = useState<VisitMetric>('cpu_pct_of_wall')
-  const maxCpu = Math.max(...d.screen_summary.map((r) => (r.total_ms ? (r.total_cpu_ms / r.total_ms) * 100 : 0)), 1)
+  const maxCpu = Math.max(...d.screen_summary.map((r) => (r.total_ms && r.total_cpu_ms != null ? (r.total_cpu_ms / r.total_ms) * 100 : 0)), 1)
   const bands = d.screens.map((v) => ({ start: v.start_ms, end: v.start_ms + v.duration_ms, label: v.route, detail: v.stack.length > 1 ? v.stack.join(' › ') : undefined }))
   const t0 = d.screens[0]?.start_ms ?? 0
   const navCost = new Map(d.navigations.map((n) => [`${n.from}->${n.to}`, n]))
@@ -143,7 +143,7 @@ function Usage({ d }: { d: Instrumented }) {
             bands={bands}
             panels={[
               { label: 'RAM (MB)', color: 'var(--c1)', unit: ' MB', points: d.timeline.rss },
-              { label: 'CPU busy (%)', color: 'var(--c2)', unit: '%', points: d.timeline.cpu },
+              ...(d.timeline.cpu_measured === false ? [] : [{ label: 'CPU busy (%)', color: 'var(--c2)', unit: '%', points: d.timeline.cpu }]),
             ]}
           />
         </Card>
@@ -230,7 +230,8 @@ function Usage({ d }: { d: Instrumented }) {
 }
 
 function screenCells(r: ScreenSummary, maxCpu: number) {
-  const cpu = r.total_ms ? (r.total_cpu_ms / r.total_ms) * 100 : null
+  // null when the trace has no scheduler data: unmeasured, never 0%.
+  const cpu = r.total_ms && r.total_cpu_ms != null ? (r.total_cpu_ms / r.total_ms) * 100 : null
   const growth = r.max_rss_delta_mb
   return [
     <Text key="screen" as="span" variant="body" tone="primary" weight={600} className={r.step ? s.substep : undefined}>
@@ -250,7 +251,7 @@ function screenCells(r: ScreenSummary, maxCpu: number) {
         {cpu == null ? '–' : `${fmt(cpu, 1)}%`}
       </Text>
     </Row>,
-    `${fmt(r.total_cpu_ms)} ms`,
+    r.total_cpu_ms == null ? '–' : `${fmt(r.total_cpu_ms)} ms`,
     r.peak_rss_mb == null ? '–' : `${fmt(r.peak_rss_mb)} MB`,
     <Text key="growth" as="span" variant="body" weight={600} align="right" tone={growth == null ? 'secondary' : growth > 10 ? 'fail' : growth < 0 ? 'pass' : 'secondary'}>
       {growth == null ? '–' : `${growth > 10 ? '▲ ' : growth < 0 ? '▼ ' : ''}${fmt(growth, 1)} MB`}
