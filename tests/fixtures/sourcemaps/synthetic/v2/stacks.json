@@ -1,0 +1,46 @@
+[
+ {
+  "id": "nested_function",
+  "text": "RangeError: divide by zero\n    at average (address at main.jsbundle:1:4654)\n    at nested_function (address at main.jsbundle:1:4085)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "class_method",
+  "text": "RangeError: divide by zero\n    at divide (address at main.jsbundle:1:4593)\n    at perItem (address at main.jsbundle:1:6342)\n    at class_method (address at main.jsbundle:1:4143)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "getter",
+  "text": "TypeError: Cannot read property 'name' of undefined\n    at get (address at main.jsbundle:1:6361)\n    at getter (address at main.jsbundle:1:4195)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "arrow_native",
+  "text": "SyntaxError: JSON Parse error: Unexpected character: o\n    at parse (native)\n    at fromJSON (address at main.jsbundle:1:6400)\n    at arrow_native (address at main.jsbundle:1:4238)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "object_method",
+  "text": "TypeError: Cannot read property 'value' of undefined\n    at onPress (address at main.jsbundle:1:5587)\n    at object_method (address at main.jsbundle:1:4279)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "rn_internal",
+  "text": "Error: listener failed\n    at anonymous (address at main.jsbundle:1:6602)\n    at apply (native)\n    at emit (address at main.jsbundle:1:6962)\n    at fireSettingsChanged (address at main.jsbundle:1:5769)\n    at rn_internal (address at main.jsbundle:1:4313)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "third_party",
+  "text": "TypeError: fake-lib: value is required\n    at validate (address at main.jsbundle:1:5998)\n    at checkPayee (address at main.jsbundle:1:5918)\n    at third_party (address at main.jsbundle:1:4348)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "third_party_callback",
+  "text": "Error: negative amount\n    at anonymous (address at main.jsbundle:1:7143)\n    at eachItem (address at main.jsbundle:1:6037)\n    at scanAmounts (address at main.jsbundle:1:5960)\n    at third_party_callback (address at main.jsbundle:1:4390)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "closure",
+  "text": "Error: counter overflow\n    at increment (address at main.jsbundle:1:7204)\n    at closure (address at main.jsbundle:1:4436)\n    at anonymous (address at main.jsbundle:1:1183)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "uncaught",
+  "text": "Error: fatal during boot\n    at boot (address at main.jsbundle:1:4044)\n    at anonymous (address at main.jsbundle:1:1250)\n    at loadModuleImplementation (address at main.jsbundle:1:3800)\n    at guardedLoadModule (address at main.jsbundle:1:3430)\n    at metroRequire (address at main.jsbundle:1:2881)\n    at global (address at main.jsbundle:1:1008)"
+ },
+ {
+  "id": "async_function",
+  "text": "Error: profile id missing\n    at ?anon_0_ (address at main.jsbundle:1:7371)\n    at next (native)\n    at asyncGeneratorStep (address at main.jsbundle:1:5613)\n    at _next (address at main.jsbundle:1:7777)\n    at tryCallOne (address at InternalBytecode.js:1:1296)\n    at anonymous (address at InternalBytecode.js:1:4984)"
+ }
+]

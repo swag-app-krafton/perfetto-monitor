@@ -14,7 +14,7 @@ point: a screen that is merely slow is a number, but a screen that is slow
 
 Everything here is deterministic SQL, like the rest of extraction. No model.
 """
-from .extract import _rows
+from .extract import _rows, frame_like
 
 SCREEN_PREFIX = "screen:"
 ACTION_PREFIX = "action:"
@@ -62,12 +62,24 @@ def has_markers(tp):
     return _has(tp, SCREEN_PREFIX) or _has(tp, ACTION_PREFIX)
 
 
+def _has_sched(tp):
+    """Whether the trace recorded scheduler data at all.
+
+    Without it CPU is unmeasured, not zero: an iOS trace converted from
+    Instruments, or an Android trace captured without sched_switch, has no
+    sched_slice rows, and summing nothing reported every screen as 0 ms CPU.
+    """
+    r = _rows(tp, "select count(*) as n from (select 1 from sched_slice limit 1)")
+    return bool(r and r[0].get("n"))
+
+
 def screen_visits(tp):
     """One row per screen visit, with CPU and RAM attributed to its span.
 
     CPU comes from `sched_slice` overlapped with the visit rather than from
     wall time: a screen that is merely *open* while the device idles has not
-    cost anything, and wall time cannot tell that apart from real work.
+    cost anything, and wall time cannot tell that apart from real work. A
+    trace with no scheduler data leaves CPU as None (unmeasured).
     """
     # A screen that is still on display when tracing stops is an *unfinished*
     # slice: Perfetto stores dur = -1 for it, because the closing event never
@@ -97,6 +109,7 @@ def screen_visits(tp):
     """)
     if not visits:
         return []
+    sched = _has_sched(tp)
 
     out = []
     for v in visits:
@@ -117,7 +130,7 @@ def screen_visits(tp):
         # thread that spans the boundary is not double-counted into it.
         upid = v.get("upid")
         cpu_ms = None
-        if upid is not None:
+        if upid is not None and sched:
             cpu = _rows(tp, f"""
                 select sum(min(ss.ts + ss.dur, {end}) - max(ss.ts, {start})) as cpu_ns
                 from sched_slice ss
@@ -171,7 +184,7 @@ def screen_visits(tp):
             from slice s
             join thread_track tt on s.track_id = tt.id
             join thread th on tt.utid = th.utid
-            where s.name like 'Choreographer#doFrame%'
+            where {frame_like()}
               and s.ts >= {start} and s.ts <= {end}
               {f"and th.upid = {upid}" if upid is not None else ""}
         """)
@@ -196,7 +209,7 @@ def screen_visits(tp):
             # CPU as a share of wall time says whether the screen was busy or
             # just on screen -- the number an engineer actually acts on.
             "cpu_pct_of_wall": (round(cpu_ms / (dur / 1e6) * 100, 1)
-                                if cpu_ms and dur else None),
+                                if cpu_ms is not None and dur else None),
             "rss": rss or None,
             "frames": n,
             "slow_frames": f.get("slow") or 0,
@@ -223,7 +236,9 @@ def screen_summary(visits, include_substeps=True):
         if not include_substeps and v.get("step"):
             continue
         s = by.setdefault(v["route"], {
-            "route": v["route"], "visits": 0, "total_ms": 0.0, "total_cpu_ms": 0.0,
+            "route": v["route"], "visits": 0, "total_ms": 0.0,
+            # None until a visit with measured CPU is added: unmeasured, not 0.
+            "total_cpu_ms": None,
             "worst_ms": 0.0, "frames": 0, "slow_frames": 0, "peak_rss_mb": None,
             "max_rss_delta_mb": None,
             # Carried through so the summary can be grouped or coloured by what
@@ -255,7 +270,8 @@ def screen_summary(visits, include_substeps=True):
         })
         s["visits"] += 1
         s["total_ms"] += v["duration_ms"]
-        s["total_cpu_ms"] += v["cpu_ms"] or 0.0
+        if v.get("cpu_ms") is not None:
+            s["total_cpu_ms"] = (s["total_cpu_ms"] or 0.0) + v["cpu_ms"]
         s["worst_ms"] = max(s["worst_ms"], v["duration_ms"])
         s["frames"] += v["frames"]
         s["slow_frames"] += v["slow_frames"]
@@ -264,7 +280,8 @@ def screen_summary(visits, include_substeps=True):
             s["max_rss_delta_mb"] = max(s["max_rss_delta_mb"] or 0, v["rss"]["delta_mb"])
     for s in by.values():
         s["total_ms"] = round(s["total_ms"], 2)
-        s["total_cpu_ms"] = round(s["total_cpu_ms"], 2)
+        if s["total_cpu_ms"] is not None:
+            s["total_cpu_ms"] = round(s["total_cpu_ms"], 2)
         s["slow_frame_pct"] = (round(s["slow_frames"] / s["frames"] * 100, 2)
                                if s["frames"] else None)
         s["stats"] = _visit_stats(s["visit_list"])
@@ -275,7 +292,8 @@ def screen_summary(visits, include_substeps=True):
         s["depths"] = depths
         s["depth_label"] = (str(depths[0]) if len(depths) == 1
                             else f"{depths[0]}\u2013{depths[-1]}") if depths else None
-    return sorted(by.values(), key=lambda s: -s["total_cpu_ms"])
+    # Costliest first: by CPU where it was measured, by time on screen otherwise.
+    return sorted(by.values(), key=lambda s: (-(s["total_cpu_ms"] or 0.0), -s["total_ms"]))
 
 
 def _mean(xs):
@@ -482,11 +500,12 @@ def stack_summary(visits):
     for v in visits:
         depth = v.get("depth", 1)
         d = by.setdefault(depth, {
-            "depth": depth, "visits": 0, "total_ms": 0.0, "total_cpu_ms": 0.0,
+            "depth": depth, "visits": 0, "total_ms": 0.0, "total_cpu_ms": None,
             "peak_rss_mb": None, "routes": {}, "beneath": {}})
         d["visits"] += 1
         d["total_ms"] += v["duration_ms"]
-        d["total_cpu_ms"] += v["cpu_ms"] or 0.0
+        if v.get("cpu_ms") is not None:
+            d["total_cpu_ms"] = (d["total_cpu_ms"] or 0.0) + v["cpu_ms"]
         if v.get("rss"):
             d["peak_rss_mb"] = max(d["peak_rss_mb"] or 0, v["rss"]["peak_mb"])
         d["routes"][v["route"]] = d["routes"].get(v["route"], 0) + 1
@@ -495,9 +514,10 @@ def stack_summary(visits):
     out = []
     for d in by.values():
         d["total_ms"] = round(d["total_ms"], 2)
-        d["total_cpu_ms"] = round(d["total_cpu_ms"], 2)
+        if d["total_cpu_ms"] is not None:
+            d["total_cpu_ms"] = round(d["total_cpu_ms"], 2)
         d["mean_cpu_pct"] = (round(d["total_cpu_ms"] / d["total_ms"] * 100, 1)
-                             if d["total_ms"] else None)
+                             if d["total_ms"] and d["total_cpu_ms"] is not None else None)
         d["routes"] = sorted(d["routes"].items(), key=lambda kv: -kv[1])
         d["beneath"] = sorted(d["beneath"].items(), key=lambda kv: -kv[1])
         out.append(d)
@@ -532,7 +552,7 @@ def navigations(tp, upids=None):
                      join thread th using(utid) where th.upid in ({ids}))"""
     frames = _rows(tp, f"""
         select s.ts as ts, s.ts + s.dur as e from slice s
-        where s.name like 'Choreographer#doFrame%' and s.dur > 0{scope}
+        where {frame_like()} and s.dur > 0{scope}
         order by s.ts
     """)
     starts = [f["ts"] for f in frames]
@@ -574,7 +594,7 @@ def navigations(tp, upids=None):
 
 # Bump whenever the shape or maths of extract_screens changes, so a cached
 # result computed by older code is never served as if it were current.
-SCREENS_CACHE_VERSION = 5
+SCREENS_CACHE_VERSION = 6
 
 
 def _cache_path(trace_path):
@@ -648,7 +668,7 @@ def session_timeline(tp, upids):
     each visit, so the dashboard can overlay the two without re-basing.
     """
     if not upids:
-        return {"rss": [], "cpu": [], "bucket_ms": TIMELINE_BUCKET_MS}
+        return {"rss": [], "cpu": [], "cpu_measured": False, "bucket_ms": TIMELINE_BUCKET_MS}
     ids = ",".join(str(int(u)) for u in upids)
     mb = 1024 * 1024
     rss = [[round(r["ts"] / 1e6, 1), round(r["v"] / mb, 1)] for r in _rows(tp, f"""
@@ -668,7 +688,8 @@ def session_timeline(tp, upids):
         where ss.utid in (select utid from thread where upid in ({ids}))
         group by b order by b
     """)]
-    return {"rss": rss, "cpu": cpu, "bucket_ms": TIMELINE_BUCKET_MS}
+    return {"rss": rss, "cpu": cpu, "cpu_measured": _has_sched(tp),
+            "bucket_ms": TIMELINE_BUCKET_MS}
 
 
 # Android's own FrameTimeline verdict on each late frame. "App Deadline

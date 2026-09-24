@@ -40,3 +40,28 @@ describe('run detail sections', () => {
     expect(text).not.toContain('Git SHA')
   })
 })
+
+describe('iOS runs', () => {
+  const ios = { ...run, platform: 'ios', simulator: true } as unknown as Run
+  const details: RunDetails = {
+    ...empty,
+    device: { platform: 'ios', model: 'iPhone 17', os_version: '27.0', simulator: true },
+    host: { chip: 'Apple M5 Pro', macos: '27.0' },
+    state: { host_power: 'ac', host_load_1m: 1.13 },
+  }
+
+  it('summarises a simulator run with the Mac it ran on', () => {
+    expect(deviceSummary(details, null)).toBe('iPhone 17 · iOS 27.0 · Simulator on Apple M5 Pro')
+    expect(deviceSummary({ ...details, device: { platform: 'ios', model: 'iPhone 17 Pro', os_version: '27.0' }, host: {} }, null)).toBe('iPhone 17 Pro · iOS 27.0')
+  })
+
+  it("lists the Mac's state for a simulator run", () => {
+    const secs = sections(ios, details)
+    expect(secs.map((s) => s.title)).toEqual(['Run', 'App', 'Device', 'Device state', 'Mac', 'Trace'])
+    const mac = secs.find((s) => s.title === 'Mac')!
+    expect(mac.items.find((i) => i.term === 'Chip')!.value).toBe('Apple M5 Pro')
+    expect(mac.items.find((i) => i.term === 'Power')!.value).toBe('Mains')
+    expect(secs.find((s) => s.title === 'Run')!.items.find((i) => i.term === 'Steps from')!.value).toContain('iOS')
+  })
+})
+

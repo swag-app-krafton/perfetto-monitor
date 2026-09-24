@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Spinner, Toast } from '@/design'
+import { Banner, Spinner, Toast } from '@/design'
 import { useHistory } from '@/api/hooks'
 import { useAuditScope } from '@/domain/audits'
 import { useScope, useSelectRun } from '@/domain/scope'
@@ -8,10 +8,11 @@ import { useHighlightTarget } from '@/lib/highlight'
 import { useIsNarrow, useIsWide } from '@/lib/useMediaQuery'
 import { AuditBox } from './AuditBox'
 import { PageHeader } from './PageHeader'
+import { toLane } from './profiler'
 import { screenByPath } from './routes'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
-import { useUi } from './store'
+import { platformOf, useUi } from './store'
 import { useApplyTheme } from './useApplyTheme'
 import s from './Shell.module.css'
 
@@ -42,14 +43,22 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const runParam = Number(params.get('run')) || null
-  const historyLoaded = !!useHistory().data
+  const history = useHistory().data
   useEffect(() => {
-    if (runParam == null || !historyLoaded) return
+    if (runParam == null || !history) return
     selectRun(runParam)
     const next = new URLSearchParams(params)
     next.delete('run')
-    navigate({ pathname: loc.pathname, search: next.toString() ? `?${next}` : '' }, { replace: true })
-  }, [runParam, historyLoaded, selectRun, navigate, params, loc.pathname])
+    // A run is only ever shown in its own lane: a link to an iOS run from the
+    // Android lane (or the reverse) opens the same page in the run's lane.
+    const run = history.runs.find((r) => r.id === runParam)
+    const lane = screen.profiler
+    const pathname =
+      run && lane !== 'flashlight' && platformOf(lane) !== (run.platform ?? 'android')
+        ? toLane(loc.pathname, run.platform === 'ios' ? 'ios' : 'perfetto')
+        : loc.pathname
+    navigate({ pathname, search: next.toString() ? `?${next}` : '' }, { replace: true })
+  }, [runParam, history, selectRun, navigate, params, loc.pathname, screen.profiler])
 
   // A tab change starts at the top of the page (a deep link then scrolls itself).
   useEffect(() => {
@@ -87,6 +96,12 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
               />
             ) : (
               <PageHeader group={screen.group} title={screen.label} hint={screen.hint} run={scope?.run ?? null} isLatest={scope?.isLatest ?? true} />
+            )}
+            {screen.profiler === 'ios' && scope?.run?.simulator && (
+              <Banner tone="warn" title="Simulator run: indicative only">
+                Measured on the iOS Simulator, on this Mac's CPU with a warm cache. It compares only with other simulator runs, carries no budgets and
+                can't be pinned as a benchmark. Frames are not measured on the simulator.
+              </Banner>
             )}
             <Suspense fallback={<Spinner />}>
               <Outlet />

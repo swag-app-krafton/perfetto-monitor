@@ -70,6 +70,8 @@ STEP_RUNTIME = {
     "step:activity_create": "Android framework", "step:layout_inflate": "Android framework",
     "step:activity_resume": "Android framework", "step:first_frame": "Android framework",
     "step:fully_drawn": "Android framework",
+    "step:pre_main": "iOS framework", "step:main_to_first_frame": "iOS framework",
+    "step:to_first_frame": "iOS framework", "step:first_frame_to_responsive": "iOS framework",
 }
 
 # What each step covers, in plain words, for a developer who is not an Android
@@ -113,6 +115,23 @@ STEP_DESCRIPTIONS = {
         "The app telling Android its first screen is complete, content included, by "
         "calling reportFullyDrawn(). Only apps that call it have this step; it marks "
         "time to full display (TTFD)."),
+    # iOS's own launch phases, for any app (derive.IOS_PHASES).
+    "step:pre_main": (
+        "iOS loading the app before any of its code runs: dyld maps the app and its "
+        "frameworks, fixes up pointers and runs static initializers. Many frameworks "
+        "or heavy static initializers make it slow."),
+    "step:main_to_first_frame": (
+        "From main() to the first frame on screen: UIKit starts, the app delegate and "
+        "scene are set up, and the first screen is built and drawn. Work done before "
+        "the first screen shows makes it slow."),
+    "step:to_first_frame": (
+        "The whole launch, process start to the first frame on screen, when the trace "
+        "could not split it at main(). It covers loading frameworks, static "
+        "initializers and building the first screen."),
+    "step:first_frame_to_responsive": (
+        "From the first frame to the app accepting touches, as Apple's launch "
+        "measurement defines it. Work queued on the main thread just after the first "
+        "frame makes it slow."),
     # Swag Pay's startup model (CRITICAL_PATH_*, DEFERRED_STEPS above).
     "step:bootstrap": (
         "Swag Pay's native start-up work before its first screen. It comes first on "

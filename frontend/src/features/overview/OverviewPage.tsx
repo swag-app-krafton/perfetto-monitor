@@ -4,6 +4,7 @@ import { fmt, signed } from '@/domain/format'
 import { METRICS, valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
 import { stepDeltas, worstRegression } from '@/domain/steps'
+import { useLanePath } from '@/app/profiler'
 import { useUi } from '@/app/store'
 import { FindingCard } from '@/features/shared/FindingCard'
 import { findingArea, findingId, summariseSeverity } from '@/features/shared/findings'
@@ -12,6 +13,7 @@ import { VerdictHero } from './VerdictHero'
 import { VerdictStrip } from './VerdictStrip'
 
 export function OverviewPage() {
+  const lp = useLanePath()
   const { scope, isLoading, error } = useScope()
   const askCopilot = useUi((st) => st.askCopilot)
   const pins = usePins()
@@ -20,7 +22,7 @@ export function OverviewPage() {
   if (error) return <EmptyState title="Could not load runs">{error.message}</EmptyState>
   if (!scope?.run) {
     return (
-      <EmptyState title="No runs yet" actions={<Link to="/capture">Profile an app</Link>}>
+      <EmptyState title="No runs yet" actions={<Link to={lp('/capture')}>Profile an app</Link>}>
         Capture a trace from a connected device, or record a manual session, and its verdict appears here.
       </EmptyState>
     )

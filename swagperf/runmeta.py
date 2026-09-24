@@ -39,6 +39,8 @@ def merge(run, raw, app_name=None):
         "device": device,
         "app": app,
         "state": state,
+        # The Mac a simulator run executed on: its CPU is the run's CPU.
+        "host": dict(cap.get("host") or {}),
         "state_moment": cap.get("moment"),
         "trace": trace,
         "sources": [k for k in ("capture", "from_trace") if (raw or {}).get(k)],

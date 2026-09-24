@@ -13,9 +13,14 @@ export function runKind(run: Run): string {
 
 export const startLabel = (kind: string) => `${pathLabel(kind)}${/^(cold|warm)$/.test(kind) ? ' start' : ''}`
 
-/** "vivo V2514 · Android 16", from whatever was recorded. */
+/** "vivo V2514 · Android 16", or "iPhone 17 · iOS 27.0 · Simulator on Apple M5 Pro",
+ *  from whatever was recorded. */
 export function deviceSummary(m: RunDetails, fallback: string | null): string {
   const d = m.device
+  if (d.platform === 'ios') {
+    const sim = d.simulator ? `Simulator${m.host?.chip ? ` on ${m.host.chip}` : ''}` : null
+    return [d.model ?? fallback ?? 'Unknown device', d.os_version ? `iOS ${d.os_version}` : null, sim].filter(Boolean).join(' · ')
+  }
   const name = [d.manufacturer && !(d.market_name ?? d.model ?? '').toLowerCase().startsWith(d.manufacturer.toLowerCase()) ? d.manufacturer : null, d.market_name ?? d.model ?? fallback]
     .filter(Boolean)
     .join(' ')
@@ -41,6 +46,27 @@ export function sections(run: Run, m: RunDetails): { title: string; note?: strin
   const a = m.app
   const st = m.state
   const t = m.trace
+  const h = m.host ?? {}
+  const ios = run.platform === 'ios'
+  // A simulator run executed on the Mac, so the Mac's state is the device state that matters.
+  const mac = run.simulator
+    ? [
+        {
+          title: 'Mac',
+          note: 'The simulator ran on this Mac, so its CPU and load were the run\'s.',
+          items: [
+            { term: 'Model', value: h.model },
+            { term: 'Chip', value: h.chip },
+            { term: 'RAM', value: withUnit(h.ram_gb, 'GB') },
+            { term: 'macOS', value: h.macos },
+            { term: 'Xcode', value: st.xcode },
+            { term: 'Power', value: st.host_power === 'ac' ? 'Mains' : st.host_power === 'battery' ? `Battery${st.host_battery_pct != null ? `, ${st.host_battery_pct}%` : ''}` : undefined },
+            { term: 'Load (1 min)', value: st.host_load_1m != null ? fmt(st.host_load_1m, 2) : undefined },
+            { term: 'Thermal warning', value: yesNo(st.host_thermal_warning) },
+          ],
+        },
+      ]
+    : []
   return [
     {
       title: 'Run',
@@ -51,7 +77,7 @@ export function sections(run: Run, m: RunDetails): { title: string; note?: strin
         { term: 'Kind', value: runKind(run) },
         { term: 'Label', value: run.label },
         { term: 'Verdict', value: run.analysis?.verdict?.toUpperCase() },
-        { term: 'Steps from', value: run.derived ? "Android's own slices (derived)" : 'the app\'s step: markers' },
+        { term: 'Steps from', value: run.derived ? (ios ? "iOS's own launch phases (derived)" : "Android's own slices (derived)") : 'the app\'s step: markers' },
       ],
     },
     {
@@ -63,6 +89,8 @@ export function sections(run: Run, m: RunDetails): { title: string; note?: strin
         { term: 'Build number', value: a.version_code },
         { term: 'Git SHA', value: a.git_sha, mono: true },
         { term: 'Debuggable build', value: yesNo(a.debuggable) },
+        { term: 'Build', value: a.build_type === 'release' ? 'Release' : a.build_type === 'debug' ? 'Debug' : undefined },
+        { term: 'JS bundle', value: a.js_bundle === 'hermes' ? 'Hermes bytecode' : a.js_bundle ?? undefined },
         { term: 'Target SDK', value: a.target_sdk },
         { term: 'Min SDK', value: a.min_sdk },
         { term: 'Installed by', value: a.installer, mono: true },
@@ -77,6 +105,9 @@ export function sections(run: Run, m: RunDetails): { title: string; note?: strin
         { term: 'Model', value: d.market_name && d.model && d.market_name !== d.model ? `${d.market_name} (${d.model})` : (d.market_name ?? d.model) },
         { term: 'Codename', value: d.codename },
         { term: 'Android', value: d.android_release && (d.sdk != null ? `${d.android_release} (SDK ${d.sdk})` : d.android_release) },
+        { term: 'iOS', value: d.os_version },
+        { term: 'Simulator', value: ios ? yesNo(d.simulator) : undefined },
+        { term: 'UDID', value: d.udid, mono: true },
         { term: 'Security patch', value: d.security_patch },
         { term: 'Build ID', value: d.build_id, mono: true },
         { term: 'Build type', value: d.build_type },
@@ -102,6 +133,7 @@ export function sections(run: Run, m: RunDetails): { title: string; note?: strin
         { term: 'Thermal status', value: st.thermal_status },
       ],
     },
+    ...mac,
     {
       title: 'Trace',
       items: [
@@ -109,6 +141,7 @@ export function sections(run: Run, m: RunDetails): { title: string; note?: strin
         { term: 'Size', value: withUnit(t.size_mb, 'MB', 1) },
         { term: 'Length', value: withUnit(t.duration_s, 's', 1) },
         { term: 'Perfetto', value: t.perfetto_version },
+        { term: 'Instruments', value: t.xctrace_version },
         { term: 'Trace ID', value: t.uuid, mono: true },
       ],
     },

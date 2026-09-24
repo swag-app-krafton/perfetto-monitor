@@ -1,14 +1,13 @@
 import { useState } from 'react'
 import { useRunMeta } from '@/api/hooks'
 import type { Run } from '@/api/types'
-import { Badge, Button, Icon, Row, Spacer, Stack, StatusPill, Text, type Tone } from '@/design'
+import { Badge, Button, Icon, Row, Spacer, Stack, StatusPill, Text } from '@/design'
 import { shortDate } from '@/domain/format'
+import { runVerdict } from '@/domain/metrics'
 import { useSelectRun } from '@/domain/scope'
 import { RunDetailsDialog } from './RunDetails'
 import { appSummary, deviceSummary, runKind, startLabel } from './runMeta'
 import s from './RunBox.module.css'
-
-const VERDICT_TONE: Record<string, Tone> = { pass: 'pass', warn: 'warn', fail: 'fail' }
 
 /** The run in view, on every screen: its ID and verdict, what it ran on, the
  *  app build, and a way to its full metadata. */
@@ -19,13 +18,13 @@ export function RunBox({ run, isLatest }: { run: Run; isLatest: boolean }) {
   // history's copy (device label only) is shown.
   const q = useRunMeta(run.id)
   const meta = q.data ?? run.meta
-  const verdict = run.analysis?.verdict
+  const verdict = run.analysis?.verdict ? runVerdict(run) : null
   return (
     <section className={s.box} aria-label={`Run #${run.id}`}>
       <Stack gap={8}>
         <Row gap={8} wrap>
           <span className={s.id}>RUN #{run.id}</span>
-          {verdict && <StatusPill tone={VERDICT_TONE[verdict] ?? 'neutral'} />}
+          {verdict && <StatusPill tone={verdict.tone}>{verdict.tone === 'neutral' ? verdict.word : undefined}</StatusPill>}
           <Spacer />
           {isLatest ? (
             <Badge tone="c1">Latest</Badge>

@@ -11,6 +11,11 @@ import s from './Startup.module.css'
 
 const SERIES = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)']
 
+/** What startup time measures for this run: the camera frame for our app's
+ *  own step markers, the launch phases otherwise. */
+const ttidMeaning = (r: Run) =>
+  !r.derived && r.app_role === 'own' ? ' (the first usable camera frame)' : r.platform === 'ios' ? ' (process start to the first frame on screen)' : ''
+
 export function StartupPage() {
   const { scope, isLoading } = useScope()
   const askCopilot = useUi((s) => s.askCopilot)
@@ -32,7 +37,7 @@ export function StartupPage() {
       <Card
         data-hl="ttidChart"
         title="TTID over runs"
-        hint={`Time to initial display${run.app_role === 'own' ? ' (the first usable camera frame)' : ''}.${budget ? ` Dashed line is the ${budget} ms budget.` : ' No budget is set for this app.'}`}
+        hint={`Time to initial display${ttidMeaning(run)}.${budget ? ` Dashed line is the ${budget} ms budget.` : run.simulator ? ' A simulator run is never judged against a budget.' : ' No budget is set for this app.'}`}
         actions={
           ttid != null && (
             <Stack gap={4} align="end">

@@ -17,7 +17,7 @@ export interface MetricDef {
 
 const own = (r: Run) => r.app_role === 'own'
 
-export const METRICS: MetricDef[] = [
+const TABLE: MetricDef[] = [
   {
     key: 'ttff_ms',
     label: 'Time to initial display',
@@ -82,6 +82,11 @@ export const METRICS: MetricDef[] = [
   },
 ]
 
+/** Budgets apply only to runs that can be judged. A simulator run's numbers
+ *  come from the Mac's CPU, so no gate, budget line or pass/fail colour is
+ *  ever drawn for one: that would be wrong data shown as right. */
+export const METRICS: MetricDef[] = TABLE.map((m) => ({ ...m, budget: (r, g) => (r.simulator ? null : m.budget(r, g)) }))
+
 export const metricByKey = (k: MetricDef['key']) => METRICS.find((m) => m.key === k)!
 
 /** A zero startup time means it could not be measured, not that it was instant. */
@@ -99,6 +104,16 @@ export function gateTone(value: number | null, budget: number | null): Tone {
   if (value > budget) return 'fail'
   if (value >= budget * 0.9) return 'warn'
   return 'pass'
+}
+
+/** How a run's verdict reads everywhere it is shown. A simulator run that
+ *  moved nothing against other simulator runs is STEADY, in neutral: it was
+ *  never judged against a budget, so it has no pass to show. */
+export function runVerdict(run: Pick<Run, 'analysis' | 'simulator'> | null | undefined): { tone: Tone; word: string } {
+  const v = run?.analysis?.verdict
+  if (run?.simulator && v === 'pass') return { tone: 'neutral', word: 'STEADY' }
+  const tone = verdictTone(v)
+  return { tone, word: tone === 'neutral' ? 'NO VERDICT' : tone.toUpperCase() }
 }
 
 export const verdictTone = (v: string | null | undefined): Tone =>

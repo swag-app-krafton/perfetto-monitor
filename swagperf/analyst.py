@@ -53,6 +53,12 @@ HOW TO ANALYSE:
 - Use the child-slice breakdown to attribute within a step. Say which child moved.
 - If the evidence does not identify a cause, say so plainly. Do not invent one.
 - Be concrete and brief. An engineer reads this at the top of a CI log.
+- The payload says which platform the run measured. When "simulator" is true the
+  run is on the iOS Simulator: its numbers come from the Mac's CPU with a warm
+  cache, it carries no budgets, and its regressions are against other simulator
+  runs only. Never return "fail" for a simulator run, and say the numbers are
+  indicative. Frames are not measured on the simulator; do not read their
+  absence as a finding.
 - Call the memory metric "RAM usage" (and its growth "RAM growth") in all prose.
   The payload keys are named peak_rss_mb / rss_growth_mb for schema stability, but
   "RSS" is jargon this dashboard does not show the reader -- never write it.
@@ -72,8 +78,20 @@ Return ONLY valid JSON, no markdown fence, matching exactly:
 }"""
 
 
+def _stability_summary(st):
+    if not st:
+        return None
+    h, e, cr = st.get("hangs") or {}, st.get("errors") or {}, st.get("crash") or {}
+    return {"hangs": {k: h.get(k) for k in ("count", "microhangs", "longest_ms", "total_ms",
+                                            "rate_s_per_hr", "startup", "per_screen")},
+            "js_errors": {k: e.get(k) for k in ("js", "js_fatal", "by_name", "by_source", "per_screen")},
+            "crashed": bool(cr.get("crashed"))}
+
+
 def build_payload(metrics, regs, baselines):
     return {
+        "platform": metrics.get("platform") or "android",
+        "simulator": bool(metrics.get("simulator")),
         "path_kind": metrics["path_kind"],
         "startup": metrics["startup"],
         "ordering_violations": metrics["ordering_violations"],
@@ -83,6 +101,9 @@ def build_payload(metrics, regs, baselines):
         "budget_breaches": metrics["breaches"],
         "steps": [{k: v for k, v in s.items() if k != "start_ms"} for s in metrics["steps"]],
         "regressions_vs_baseline": regs,
+        # Counts and names only: no stacks, which can be long and add nothing
+        # the numbers don't.
+        "stability": _stability_summary(metrics.get("stability")),
         "step_baselines": baselines,
         "risk_map": RISK_MAP,
     }
@@ -165,19 +186,36 @@ def analyse(metrics, regs, baselines, *, model=MODEL, api_key=None):
     return out
 
 
+SIMULATOR_PREFIX = "Simulator run, indicative only: "
+
+
+def cap_for_simulator(res, metrics):
+    """A simulator run never fails. Its numbers come from the Mac's CPU, so a
+    fail would be a verdict on the Mac; the most it can say is warn. Applied
+    to the model's answer too, rather than trusting the prompt to hold."""
+    if not metrics.get("simulator") or not isinstance(res, dict):
+        return res
+    if res.get("verdict") == "fail":
+        res["verdict"] = "warn"
+    head = res.get("headline") or ""
+    if not head.startswith(SIMULATOR_PREFIX):
+        res["headline"] = SIMULATOR_PREFIX + (head[:1].lower() + head[1:] if head else "")
+    return res
+
+
 def run_analysis(metrics, regs, baselines, *, model=MODEL, backend=None):
     """Try each backend in order and return the first that produces a verdict."""
     backend = backend or BACKEND
     if backend in ("auto", "cli"):
         res = analyse_via_cli(metrics, regs, baselines, model=model)
         if res:
-            return res
+            return cap_for_simulator(res, metrics)
         if backend == "cli":
             return heuristic(metrics, regs)
     if backend in ("auto", "api"):
         res = analyse(metrics, regs, baselines, model=model)
         if res and not res.get("_skipped"):
-            return res
+            return cap_for_simulator(res, metrics)
     return heuristic(metrics, regs)
 
 
@@ -211,6 +249,40 @@ NEXT_STEP = {
 }
 
 
+def stability_findings(metrics):
+    """Crashes, JS errors and hangs after the first frame (stability.py).
+    Hangs before the first frame are startup, which has its own metric."""
+    st = metrics.get("stability") or {}
+    out = []
+    cr = st.get("crash") or {}
+    if cr.get("crashed"):
+        out.append({"title": "The app crashed during the run", "runtime": "unknown",
+                    "severity": "high", "kind": "crash",
+                    "evidence": cr.get("reason") or "the process ended on its own",
+                    "architectural_risk": None,
+                    "recommendation": "Open Stability: a fatal JS error just before the end "
+                                      "points at React Native; none points at native code."})
+    e = st.get("errors") or {}
+    if e.get("js"):
+        top = sorted((e.get("by_name") or {}).items(), key=lambda kv: -kv[1])[:3]
+        names = ", ".join(f"{k} ×{v}" for k, v in top)
+        out.append({"title": f"{e['js']} JS error(s), {e.get('js_fatal', 0)} fatal",
+                    "runtime": "hermes_rn", "severity": "high" if e.get("js_fatal") else "medium",
+                    "kind": "js_error", "evidence": names, "architectural_risk": None,
+                    "recommendation": "Open Stability for the resolved stack and the screen "
+                                      "each error happened on."})
+    h = st.get("hangs") or {}
+    if h.get("count"):
+        out.append({"title": f"{h['count']} hang(s) after the first frame",
+                    "runtime": "unknown",
+                    "severity": "high" if (h.get("longest_ms") or 0) >= 1000 else "medium",
+                    "kind": "hang",
+                    "evidence": f"longest {h.get('longest_ms')} ms, {h.get('total_ms')} ms in all",
+                    "architectural_risk": None,
+                    "recommendation": "Open Stability: each hang names the screen it happened on."})
+    return out
+
+
 def heuristic(metrics, regs):
     """Deterministic fallback so the tool is useful with no API key at all."""
     findings = []
@@ -228,6 +300,7 @@ def heuristic(metrics, regs):
                          "evidence": f"{r['dur_ms']}ms vs baseline {r['baseline_ms']}ms (z={r['z']}, n={r['n_baseline']})",
                          "architectural_risk": None,
                          "recommendation": "Compare child slices against the previous run."})
+    findings += stability_findings(metrics)
     for b in metrics["breaches"]:
         # Same threshold regressions use. Hard-coding every breach as "medium"
         # meant no budget breach could ever fail a run: a session at 4x its RAM
@@ -245,12 +318,15 @@ def heuristic(metrics, regs):
     # reader open the list to learn anything, the top finding usually says it.
     order = {"high": 0, "medium": 1, "low": 2}
     top = sorted(findings, key=lambda f: order.get(f["severity"], 3))
-    if not top:
+    if not top and metrics.get("simulator"):
+        headline = ("No step moved against other simulator runs; no budgets apply on a "
+                    "simulator (rules only, no LLM).")
+    elif not top:
         headline = "Every measured metric is within budget and baseline (rules only, no LLM)."
     else:
         headline = f"{top[0]['title']}: {top[0]['evidence']}"
         if len(top) > 1:
             headline += f" (+{len(top) - 1} more)"
-    return {"verdict": verdict,
-            "headline": headline,
-            "findings": findings, "dismissed": [], "_heuristic": True}
+    return cap_for_simulator({"verdict": verdict,
+                              "headline": headline,
+                              "findings": findings, "dismissed": [], "_heuristic": True}, metrics)

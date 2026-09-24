@@ -1,0 +1,22 @@
+[
+ {
+  "id": "uncaught",
+  "text": "Invariant Violation: __fbBatchedBridgeConfig is not set, cannot invoke native modules\n    at invariant (address at main.jsbundle:1:173190)\n    at anonymous (address at main.jsbundle:1:27132)\n    at loadModuleImplementation (address at main.jsbundle:1:166966)\n    at guardedLoadModule (address at main.jsbundle:1:166587)\n    at metroRequire (address at main.jsbundle:1:166026)\n    at get (address at main.jsbundle:1:172912)\n    at anonymous (address at main.jsbundle:1:58534)\n    at loadModuleImplementation (address at main.jsbundle:1:166966)\n    at guardedLoadModule (address at main.jsbundle:1:166587)\n    at metroRequire (address at main.jsbundle:1:166026)\n    at anonymous (address at main.jsbundle:1:55957)\n    at loadModuleImplementation (address at main.jsbundle:1:166966)\n    at guardedLoadModule (address at main.jsbundle:1:166587)\n    at metroRequire (address at main.jsbundle:1:166026)\n    at setUpDefaltReactNativeEnvironment (address at main.jsbundle:1:310871)\n    at anonymous (address at main.jsbundle:1:46086)\n    at loadModuleImplementation (address at main.jsbundle:1:166966)\n    at guardedLoadModule (address at main.jsbundle:1:166546)\n    at metroRequire (address at main.jsbundle:1:166026)\n    at global (address at main.jsbundle:1:19612)"
+ },
+ {
+  "id": "surface_route",
+  "text": "TypeError: Cannot read property 'split' of undefined\n    at parseSurfaceRoute (address at main.jsbundle:1:427006)\n    at anonymous (/probe/probe.js:11:64)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:11:6)"
+ },
+ {
+  "id": "filter_contacts",
+  "text": "TypeError: Cannot read property 'toLowerCase' of null\n    at anonymous (address at main.jsbundle:1:682756)\n    at filter (native)\n    at filterContacts (address at main.jsbundle:1:444322)\n    at anonymous (/probe/probe.js:12:63)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:12:6)"
+ },
+ {
+  "id": "build_contact_list",
+  "text": "TypeError: Cannot read property 'name' of null\n    at buildContactList (address at main.jsbundle:1:444381)\n    at anonymous (/probe/probe.js:13:68)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:13:6)"
+ },
+ {
+  "id": "format_rupees",
+  "text": "RangeError: amount is not a number\n    at valueOf (/probe/probe.js:15:69)\n    at formatRupees (address at main.jsbundle:1:439346)\n    at anonymous (/probe/probe.js:15:24)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:14:6)"
+ }
+]

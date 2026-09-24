@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { screenByPath } from '@/app/routes'
-import { COPILOT_MAX, COPILOT_MIN, useUi } from '@/app/store'
+import { lanePath, useProfiler } from '@/app/profiler'
+import { COPILOT_MAX, COPILOT_MIN, platformOf, useUi } from '@/app/store'
 import { Avatar, DockPanel, Fab, Icon, IconButton, Kbd, ListButton, PanelBody, PanelFooter, PanelHeader, Stack, Text } from '@/design'
 import { useScope } from '@/domain/scope'
 import { focusHref } from '@/lib/highlight'
@@ -71,11 +72,17 @@ function Panel({ textareaRef, prompt, showToast }: { textareaRef: React.RefObjec
   const narrow = vw < 760
   const width = cp.maximised ? Math.min(760, Math.round(vw * 0.55)) : cp.width
   const screen = screenByPath(loc.pathname)
+  // The page, whichever lane shows it: iOS screens reuse the trace pages.
+  const tab = screen.page ?? screen.id
+  const lane = useProfiler()
   const bodyRef = useRef<HTMLDivElement>(null)
 
   const refs = useMemo(() => references(scope), [scope])
   const context = activeContext(defaultContext(scope, screen), chat.added, chat.removed)
-  const scopeReq = useMemo(() => ({ app: scope?.run?.app_pkg ?? undefined, path: scope?.run?.path_kind ?? undefined }), [scope])
+  const scopeReq = useMemo(
+    () => ({ app: scope?.run?.app_pkg ?? undefined, path: scope?.run?.path_kind ?? undefined, platform: platformOf(lane) }),
+    [scope, lane],
+  )
 
   const send = (text: string) => void chat.send({ text, context, scope: scopeReq, deep: chat.deep })
 
@@ -97,7 +104,8 @@ function Panel({ textareaRef, prompt, showToast }: { textareaRef: React.RefObjec
   }, [chat.messages.length, progress])
 
   const go = (href: string) => {
-    navigate(href)
+    // Citations name Android paths; they open in the lane in view.
+    navigate(lanePath(lane, href))
     // Full screen on a phone: close so the highlighted target is visible.
     if (narrow) setCopilot({ open: false })
   }
@@ -130,8 +138,8 @@ function Panel({ textareaRef, prompt, showToast }: { textareaRef: React.RefObjec
     onFeedback: (m, value) => void chat.setFeedback(m.id, value).catch(() => showToast('Could not save feedback')),
   }
 
-  const compare = screen.id === 'compare' ? { a: Number(params.get('a')) || null, b: Number(params.get('b')) || null } : undefined
-  const starters = startersFor(screen.id, scope, compare)
+  const compare = tab === 'compare' ? { a: Number(params.get('a')) || null, b: Number(params.get('b')) || null } : undefined
+  const starters = startersFor(tab, scope, compare)
 
   return (
     <DockPanel

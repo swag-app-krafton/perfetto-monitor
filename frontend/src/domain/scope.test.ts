@@ -1,4 +1,4 @@
-import { appsIn, benchmarkFor, pathsIn } from './scope'
+import { appsIn, benchmarkFor, laneHistory, pathsIn } from './scope'
 import { fmt, pathLabel, signed, stepName } from './format'
 import type { HistoryPayload, Run } from '@/api/types'
 
@@ -50,3 +50,20 @@ describe('format', () => {
     expect(stepName('step:bind_application')).toBe('bind_application')
   })
 })
+
+describe('lanes', () => {
+  it("shows a lane only its own platform's runs and benchmarks", () => {
+    const b = (run_id: number, platform?: 'android' | 'ios') => ({ run_id, app_pkg: 'com.swag.pay', path_kind: 'cold', device: null, platform }) as HistoryPayload['benchmarks'][number]
+    const h = history([run({ id: 1 }), run({ id: 2, platform: 'ios', simulator: true }), run({ id: 3, platform: 'android' })], [b(1), b(2, 'ios')])
+    expect(laneHistory(h, 'android').runs.map((r) => r.id)).toEqual([1, 3])
+    expect(laneHistory(h, 'ios').runs.map((r) => r.id)).toEqual([2])
+    expect(laneHistory(h, 'ios').benchmarks.map((x) => x.run_id)).toEqual([2])
+  })
+
+  it('never takes a benchmark from the other platform for the same app', () => {
+    const h = history([], [{ run_id: 9, app_pkg: 'com.swag.pay', path_kind: 'cold', device: null, platform: 'android' } as HistoryPayload['benchmarks'][number]])
+    expect(benchmarkFor(run({ id: 10, platform: 'ios' }), h)).toBeNull()
+    expect(benchmarkFor(run({ id: 11, platform: 'android' }), h)?.run_id).toBe(9)
+  })
+})
+

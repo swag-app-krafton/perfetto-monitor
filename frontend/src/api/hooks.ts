@@ -8,9 +8,11 @@ import type {
   Job,
   LivePayload,
   ManualStatus,
+  Platform,
   RunDetails,
   RunnerStatus,
   ScreensPayload,
+  Stability,
   StressTest,
 } from './types'
 
@@ -18,7 +20,7 @@ export const keys = {
   history: ['history'] as const,
   screens: (runId: number) => ['screens', runId] as const,
   compare: (a: number, b: number) => ['compare', a, b] as const,
-  device: ['device'] as const,
+  device: (platform: Platform) => ['device', platform] as const,
   manualStatus: ['manual', 'status'] as const,
   live: ['manual', 'live'] as const,
   stressList: ['stress'] as const,
@@ -26,6 +28,7 @@ export const keys = {
   job: (id: string) => ['job', id] as const,
   jobs: ['jobs'] as const,
   runMeta: (id: number) => ['run-meta', id] as const,
+  stability: (id: number) => ['stability', id] as const,
   audits: ['audits'] as const,
   audit: (id: number) => ['audits', id] as const,
 }
@@ -43,6 +46,15 @@ export const useScreens = (runId: number | null) =>
     staleTime: Infinity,
   })
 
+/** A run's hangs, JS errors and crash state, its error stacks resolved
+ *  against the build's source map when one is registered. */
+export const useStability = (runId: number | null) =>
+  useQuery({
+    queryKey: keys.stability(runId ?? -1),
+    queryFn: () => api.get<{ run_id: number; stability: Stability | null }>(`/api/stability?run=${runId}`),
+    enabled: runId != null,
+  })
+
 export const useCompare = (a: number | null, b: number | null) =>
   useQuery({
     queryKey: keys.compare(a ?? -1, b ?? -1),
@@ -50,8 +62,13 @@ export const useCompare = (a: number | null, b: number | null) =>
     enabled: a != null && b != null && a !== b,
   })
 
-export const useDevice = () =>
-  useQuery({ queryKey: keys.device, queryFn: () => api.get<DevicePayload>('/api/device'), refetchInterval: 15_000 })
+/** The connected device (Android) or booted simulator (iOS), with its apps. */
+export const useDevice = (platform: Platform = 'android') =>
+  useQuery({
+    queryKey: keys.device(platform),
+    queryFn: () => api.get<DevicePayload>(`/api/device?platform=${platform}`),
+    refetchInterval: 15_000,
+  })
 
 export const useManualStatus = (poll = false) =>
   useQuery({
@@ -110,9 +127,9 @@ export function useBenchmarkMutations() {
   }
 }
 
-export const startCapture = (v: { pkg: string; cold: boolean; duration_ms: number }) =>
+export const startCapture = (v: { pkg: string; cold: boolean; duration_ms: number; platform?: Platform }) =>
   api.post<{ job_id: string }>('/api/capture/start', v)
-export const startStress = (v: { pkg: string; sessions: number; cold: boolean; duration_ms: number }) =>
+export const startStress = (v: { pkg: string; sessions: number; cold: boolean; duration_ms: number; platform?: Platform }) =>
   api.post<{ job_id: string }>('/api/stress/start', v)
 export const manualStart = (v: { pkg: string; cold: boolean }) => api.post('/api/manual/start', v)
 export const manualStop = (v: { pkg: string }) => api.post<{ job_id: string }>('/api/manual/stop', v)
@@ -123,7 +140,10 @@ export const manualAbort = () => api.post('/api/manual/abort')
 export const useRecentJobs = () =>
   useQuery({
     queryKey: keys.jobs,
-    queryFn: () => api.get<{ jobs: (Job & { kind: string; pkg?: string; started: number; duration_ms?: number; cold?: boolean })[] }>('/api/jobs').then((r) => r.jobs),
+    queryFn: () =>
+      api
+        .get<{ jobs: (Job & { kind: string; pkg?: string; started: number; duration_ms?: number; cold?: boolean; platform?: Platform })[] }>('/api/jobs')
+        .then((r) => r.jobs),
     refetchInterval: (q) => (q.state.data?.some((j) => j.state === 'queued' || j.state === 'running') ? 1_500 : false),
   })
 

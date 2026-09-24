@@ -4,6 +4,7 @@ import { Card, EmptyState, Eyebrow, Grid, LineChart, Row, Stack, StackedBars, St
 import { fmt, signed } from '@/domain/format'
 import { metricByKey, valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
+import { useLanePath } from '@/app/profiler'
 import s from './Memory.module.css'
 
 /** What the trace can say about where the memory is. Real device traces carry
@@ -31,6 +32,7 @@ const barRow = (id: string, label: string, b: Breakdown, budget: number | null, 
 })
 
 export function MemoryPage() {
+  const lp = useLanePath()
   const { scope, isLoading } = useScope()
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
   const { run, runs, allRuns, benchmarkRun, history } = scope
@@ -134,7 +136,7 @@ export function MemoryPage() {
         </Card>
       )}
       <Card title="Where the growth happens" hint="Growth within a session is attributed to screens on the Screens tab: RAM over time with each screen visit behind it, and the navigation stack held open beneath each screen.">
-        <Link to="/screens">Open the session timeline →</Link>
+        <Link to={lp('/screens')}>Open the session timeline →</Link>
       </Card>
     </Stack>
   )

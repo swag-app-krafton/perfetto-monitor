@@ -8,6 +8,15 @@ export function FramesPage() {
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
   const { run, runs, allRuns, benchmarkRun, history } = scope
   if (!run) return <EmptyState title="No runs yet">Capture a trace to see frame pacing.</EmptyState>
+  // Unmeasured is not perfect: a simulator run has no frames to show, and
+  // empty charts would read as a clean run.
+  if (run.simulator)
+    return (
+      <EmptyState title="Not measured on the iOS Simulator">
+        The simulator supports none of Instruments' frame instruments (Hitches, Frame Lifetimes, Core Animation FPS). Slow and janky frames are measured on a
+        physical iPhone.
+      </EmptyState>
+    )
   const base = benchmarkRun ?? allRuns.filter((r) => r.id < run.id).pop() ?? null
   const labels = runs.map((r) => `#${r.id}`)
   const f = run.frames

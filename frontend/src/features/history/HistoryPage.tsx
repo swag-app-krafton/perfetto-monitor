@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
 import { useBenchmarkMutations } from '@/api/hooks'
 import type { Run } from '@/api/types'
 import { Badge, Button, Card, EmptyState, Grid, Row, SearchInput, Segmented, SectionTitle, SortTh, Stack, StatusPill, TableCard, TableEmptyRow, Text, numCell, selectedRow, useSort } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
-import { valueOf, verdictTone } from '@/domain/metrics'
+import { runVerdict, valueOf } from '@/domain/metrics'
 import { useScope, useSelectRun } from '@/domain/scope'
+import { useLaneNavigate } from '@/app/profiler'
 import { useUi } from '@/app/store'
 
 type Key = 'id' | 'ts' | 'build' | 'device' | 'verdict' | 'ttid' | 'slow' | 'janky' | 'peak'
@@ -25,7 +25,7 @@ const VERDICT_RANK = { fail: 3, warn: 2, pass: 1, neutral: 0 }
 
 export function HistoryPage() {
   const { scope, isLoading } = useScope()
-  const navigate = useNavigate()
+  const navigate = useLaneNavigate()
   const selectRun = useSelectRun()
   const { pin, unpin } = useBenchmarkMutations()
   const showToast = useUi((s) => s.showToast)
@@ -47,7 +47,7 @@ export function HistoryPage() {
       case 'ts': return r.ts
       case 'build': return build(r)
       case 'device': return r.device
-      case 'verdict': return VERDICT_RANK[verdictTone(r.analysis?.verdict)]
+      case 'verdict': return VERDICT_RANK[runVerdict(r).tone]
       case 'ttid': return valueOf(r, 'ttff_ms')
       case 'slow': return valueOf(r, 'slow_pct')
       case 'janky': return valueOf(r, 'janky_pct')
@@ -104,7 +104,7 @@ export function HistoryPage() {
         <tbody>
           {sorted.length === 0 && <TableEmptyRow colSpan={COLS.length + 1}>No runs match these filters.</TableEmptyRow>}
           {sorted.map((r) => {
-            const tone = verdictTone(r.analysis?.verdict)
+            const { tone, word } = runVerdict(r)
             const ttid = valueOf(r, 'ttff_ms')
             const over = ttid != null && r.ttid_budget_ms != null && ttid > r.ttid_budget_ms
             return (
@@ -129,7 +129,7 @@ export function HistoryPage() {
                   <Text variant="body">{r.device ?? '–'}</Text>
                 </td>
                 <td>
-                  <StatusPill tone={tone}>{tone === 'neutral' ? 'NONE' : undefined}</StatusPill>
+                  <StatusPill tone={tone}>{tone === 'neutral' ? (word === 'NO VERDICT' ? 'NONE' : word) : undefined}</StatusPill>
                 </td>
                 <td className={numCell}>
                   <Text variant="body" tone={over ? 'fail' : 'primary'} weight={600}>
@@ -149,7 +149,12 @@ export function HistoryPage() {
                         Compare
                       </Button>
                     )}
-                    <Button variant="mini" disabled={pinnedIds.has(r.id) || pin.isPending} onClick={() => doPin(r)}>
+                    <Button
+                      variant="mini"
+                      disabled={pinnedIds.has(r.id) || pin.isPending || r.simulator}
+                      onClick={() => doPin(r)}
+                      title={r.simulator ? "A simulator run can't be a benchmark: its numbers are the Mac's CPU, not a device's." : undefined}
+                    >
                       {pinnedIds.has(r.id) ? 'Pinned' : 'Pin as benchmark'}
                     </Button>
                   </Row>

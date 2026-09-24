@@ -9,14 +9,54 @@ WEB = os.path.join(os.path.dirname(__file__), "..", "web")
 DIST = os.path.join(WEB, "dist")  # the built dashboard; see frontend/README.md
 
 
-def _device_payload():
+def _ios_device_payload():
+    """The booted simulator and its apps, for the iOS lane's Capture page.
+    Flashlight and manual sessions do not exist on iOS yet, so their fields
+    say so rather than being left for the page to guess."""
+    from . import capture_ios as cap, catalogue
+    sims = cap.simulators()
+    info = cap.device_info()
+    base = {"platform": "ios", "simulators": sims,
+            "profilers": {"flashlight_runner": {"ready": False,
+                                                "reason": "Flashlight audits are Android-only."},
+                          "other_profilers": cap.other_profilers(),
+                          "perfetto_recording": False}}
+    if not info:
+        return {"connected": False, **base}
+    installed = set(cap.installed_packages(info["udid"]))
+    rows = []
+    for a in catalogue.load():
+        if a["platform"] != "ios":
+            continue
+        row = {**a, "installed": a["pkg"] in installed, "in_catalogue": True}
+        if row["installed"]:
+            try:
+                # Release or Debug decides whether a capture is allowed at all.
+                row["build"] = cap.parse_app_bundle(cap.app_path(info["udid"], a["pkg"]))
+            except RuntimeError:
+                pass
+        rows.append(row)
+    for pkg in sorted(installed - {r["pkg"] for r in rows}):
+        rows.append({"pkg": pkg, "name": pkg, "role": "competitor", "platform": "ios",
+                     "instrumented": False, "verified": True, "installed": True,
+                     "in_catalogue": False})
+    rows.sort(key=lambda a: (not a["installed"], a["role"] != "own",
+                             not a.get("in_catalogue", True), a["name"].lower()))
+    return {"connected": True, **info, **base, "packages": rows,
+            "health": cap.host_state(), "host": cap.host_info(),
+            "devices": cap.devices()}
+
+
+def _device_payload(platform="android"):
     """Device status merged with the catalogue, for the Capture tab's picker."""
+    if platform == "ios":
+        return _ios_device_payload()
     from . import capture as cap, catalogue
     info = cap.device_info()
     if not info:
-        return {"connected": False}
+        return {"connected": False, "platform": "android"}
     installed = set(cap.installed_packages())
-    known = catalogue.load()
+    known = [a for a in catalogue.load() if a["platform"] == "android"]
     seen = {a["pkg"] for a in known}
     rows = [{**a, "installed": a["pkg"] in installed} for a in known]
     for pkg in sorted(installed - seen):
@@ -33,7 +73,7 @@ def _device_payload():
                              a["role"] != "competitor", a["name"].lower()))
     from . import flashlight
     serial = info.get("serial")
-    return {"connected": True, **info, "packages": rows,
+    return {"connected": True, "platform": "android", **info, "packages": rows,
             "health": cap.device_health(serial),
             "devices": cap.devices(),
             # One profiler at a time per device: the pages use these to say
@@ -59,7 +99,7 @@ def _payload(limit=100):
     out = []
     for r in runs:
         d = dict(r)
-        for k in ("breaches_json", "violations_json", "frames_json", "memory_json"):
+        for k in ("breaches_json", "violations_json", "frames_json", "memory_json", "stability_json"):
             try:
                 d[k.replace("_json", "")] = json.loads(d.pop(k) or "null")
             except Exception:
@@ -72,13 +112,20 @@ def _payload(limit=100):
         # app. A derived (competitor) run only gets a budget if one was
         # explicitly entered for that package; otherwise it is None, and the
         # dashboard must not draw a budget line or colour a breach for it.
-        app = catalogue.get(d.get("app_pkg")) if d.get("app_pkg") else None
+        d["platform"] = d.get("platform") or "android"
+        d["simulator"] = bool(d.get("simulator"))
+        app = catalogue.get(d.get("app_pkg"), d["platform"]) if d.get("app_pkg") else None
         d["app_name"] = (app or {}).get("name") or d.get("app_pkg")
         d["app_role"] = (app or {}).get("role")
         d["meta"] = runmeta.merge(d, json.loads(d.pop("meta_json", None) or "{}"), (app or {}).get("name"))
-        d["ttid_budget_ms"] = (
-            GLOBAL_BUDGETS["time_to_first_camera_frame_ms"] if not d.get("derived")
-            else (app or {}).get("budgets", {}).get("ttid_ms"))
+        # A simulator run has no budget (its numbers are the Mac's); an iOS run
+        # has only what its catalogue entry states, until iOS budgets exist.
+        if d["simulator"]:
+            d["ttid_budget_ms"] = None
+        elif d["platform"] == "android" and not d.get("derived"):
+            d["ttid_budget_ms"] = GLOBAL_BUDGETS["time_to_first_camera_frame_ms"]
+        else:
+            d["ttid_budget_ms"] = (app or {}).get("budgets", {}).get("ttid_ms")
         out.append(d)
     from .budgets import (CRITICAL_PATH_FIRST_RUN, CRITICAL_PATH_RETURNING, DEFERRED_STEPS,
                           STEP_DESCRIPTIONS, STEP_RUNTIME)
@@ -292,7 +339,10 @@ class H(SimpleHTTPRequestHandler):
             except Exception as e:
                 return self._json({"error": str(e), "sessions": []}, 500)
         if u.path.startswith("/api/device"):
-            return self._json(_device_payload())
+            platform = q.get("platform", ["android"])[0]
+            if platform not in ("android", "ios"):
+                return self._json({"error": "platform must be android or ios"}, 400)
+            return self._json(_device_payload(platform))
         if u.path.startswith("/api/manual/status"):
             from .capture import manual_status
             return self._json(manual_status())
@@ -316,6 +366,24 @@ class H(SimpleHTTPRequestHandler):
                 return self._json(extract_screens(row["trace_path"]))
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
+        if u.path == "/api/stability":
+            # A run's hangs, JS errors and crash state, its error stacks
+            # resolved against the build's source map (found now, so a map
+            # added after the run still applies).
+            try:
+                rid = int(q.get("run", [""])[0])
+            except (ValueError, IndexError):
+                return self._json({"error": "run query param is required"}, 400)
+            run = store.run_row(rid)
+            if not run:
+                return self._json({"error": f"no run {rid}"}, 404)
+            from . import sourcemaps
+            st = json.loads(run.get("stability_json") or "null")
+            if st is None:
+                return self._json({"run_id": rid, "stability": None})
+            meta = runmeta.merge(run, json.loads(run.get("meta_json") or "{}"))
+            path = sourcemaps.map_for_run(run, meta)
+            return self._json({"run_id": rid, "stability": sourcemaps.resolve(st, path)})
         if u.path == "/api/run/meta":
             try:
                 rid = int(q.get("id", [""])[0])
@@ -402,8 +470,12 @@ class H(SimpleHTTPRequestHandler):
             k = store.clear_benchmark(run_id=payload.get("run_id"),
                                       path_kind=payload.get("path_kind"),
                                       device=payload.get("device"),
-                                      app_pkg=payload.get("app_pkg"))
+                                      app_pkg=payload.get("app_pkg"),
+                                      platform=payload.get("platform") or "android")
             return self._json({"ok": True, "cleared": k})
+        if u.path in ("/api/manual/start", "/api/audit/start") and payload.get("platform") == "ios":
+            return self._json({"error": "Manual sessions and Flashlight audits are not "
+                                        "available on iOS yet."}, 409)
         if u.path == "/api/manual/start":
             from .capture import manual_start
             from . import jobs
@@ -440,7 +512,9 @@ class H(SimpleHTTPRequestHandler):
                     cold=payload.get("cold", True),
                     duration_ms=payload.get("duration_ms", 8000),
                     label=payload.get("label"),
-                    use_llm=payload.get("use_llm", False))
+                    use_llm=payload.get("use_llm", False),
+                    device=payload.get("device") or None,
+                    platform=payload.get("platform") or "android")
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
             return self._json({"ok": True, "job_id": jid})
@@ -463,7 +537,9 @@ class H(SimpleHTTPRequestHandler):
                     cold=payload.get("cold", True),
                     duration_ms=payload.get("duration_ms", 10000),
                     label=payload.get("label"),
-                    use_llm=payload.get("use_llm", False))
+                    use_llm=payload.get("use_llm", False),
+                    device=payload.get("device") or None,
+                    platform=payload.get("platform") or "android")
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
             return self._json({"ok": True, "job_id": jid})
@@ -486,7 +562,8 @@ class H(SimpleHTTPRequestHandler):
             except Exception as e:  # a trace the processor cannot open: say so, once
                 raw = store.set_run_meta(rid, "from_trace", {"error": str(e)[:300]})
         from . import catalogue
-        app = catalogue.get(run.get("app_pkg")) if run.get("app_pkg") else None
+        app = catalogue.get(run.get("app_pkg"), run.get("platform") or "android") \
+            if run.get("app_pkg") else None
         return self._json({"run_id": rid, "meta": runmeta.merge(run, raw, (app or {}).get("name"))})
 
     def _copilot_ask(self, payload):

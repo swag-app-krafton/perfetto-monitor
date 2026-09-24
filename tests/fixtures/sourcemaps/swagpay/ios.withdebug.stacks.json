@@ -1,0 +1,22 @@
+[
+ {
+  "id": "uncaught",
+  "text": "Invariant Violation: __fbBatchedBridgeConfig is not set, cannot invoke native modules\n    at invariant (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:1747:26)\n    at anonymous (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:1850:35)\n    at loadModuleImplementation (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:160:14)\n    at guardedLoadModule (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:99:38)\n    at metroRequire (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:41:92)\n    at get (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:1704:35)\n    at anonymous (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:17440:59)\n    at loadModuleImplementation (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:160:14)\n    at guardedLoadModule (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:99:38)\n    at metroRequire (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:41:92)\n    at anonymous (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:16662:62)\n    at loadModuleImplementation (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:160:14)\n    at guardedLoadModule (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:99:38)\n    at metroRequire (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:41:92)\n    at setUpDefaltReactNativeEnvironment (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:13892:16)\n    at anonymous (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:13877:41)\n    at loadModuleImplementation (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:160:14)\n    at guardedLoadModule (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:92:47)\n    at metroRequire (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:41:92)\n    at global (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:55178:4)"
+ },
+ {
+  "id": "surface_route",
+  "text": "TypeError: Cannot read property 'split' of undefined\n    at parseSurfaceRoute (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:45601:31)\n    at anonymous (/probe/probe.js:11:64)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:11:6)"
+ },
+ {
+  "id": "filter_contacts",
+  "text": "TypeError: Cannot read property 'toLowerCase' of null\n    at anonymous (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:48739:61)\n    at filter (native)\n    at filterContacts (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:48739:25)\n    at anonymous (/probe/probe.js:12:63)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:12:6)"
+ },
+ {
+  "id": "build_contact_list",
+  "text": "TypeError: Cannot read property 'name' of null\n    at buildContactList (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:48752:28)\n    at anonymous (/probe/probe.js:13:68)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:13:6)"
+ },
+ {
+  "id": "format_rupees",
+  "text": "RangeError: amount is not a number\n    at valueOf (/probe/probe.js:15:69)\n    at formatRupees (/Users/dev/Library/Developer/Xcode/DerivedData/iosApp/Build/Products/Release-iphonesimulator/main.jsbundle:47983:18)\n    at anonymous (/probe/probe.js:15:24)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:14:6)"
+ }
+]

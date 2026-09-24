@@ -1,0 +1,22 @@
+[
+ {
+  "id": "uncaught",
+  "text": "Invariant Violation: __fbBatchedBridgeConfig is not set, cannot invoke native modules\n    at invariant (address at index.android.bundle:1:174217)\n    at anonymous (address at index.android.bundle:1:27224)\n    at loadModuleImplementation (address at index.android.bundle:1:167993)\n    at guardedLoadModule (address at index.android.bundle:1:167614)\n    at metroRequire (address at index.android.bundle:1:167053)\n    at get (address at index.android.bundle:1:173939)\n    at anonymous (address at index.android.bundle:1:58347)\n    at loadModuleImplementation (address at index.android.bundle:1:167993)\n    at guardedLoadModule (address at index.android.bundle:1:167614)\n    at metroRequire (address at index.android.bundle:1:167053)\n    at anonymous (address at index.android.bundle:1:55770)\n    at loadModuleImplementation (address at index.android.bundle:1:167993)\n    at guardedLoadModule (address at index.android.bundle:1:167614)\n    at metroRequire (address at index.android.bundle:1:167053)\n    at setUpDefaltReactNativeEnvironment (address at index.android.bundle:1:311382)\n    at anonymous (address at index.android.bundle:1:46089)\n    at loadModuleImplementation (address at index.android.bundle:1:167993)\n    at guardedLoadModule (address at index.android.bundle:1:167573)\n    at metroRequire (address at index.android.bundle:1:167053)\n    at global (address at index.android.bundle:1:19704)"
+ },
+ {
+  "id": "surface_route",
+  "text": "TypeError: Cannot read property 'split' of undefined\n    at parseSurfaceRoute (address at index.android.bundle:1:428883)\n    at anonymous (/probe/probe.js:11:64)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:11:6)"
+ },
+ {
+  "id": "filter_contacts",
+  "text": "TypeError: Cannot read property 'toLowerCase' of null\n    at anonymous (address at index.android.bundle:1:685652)\n    at filter (native)\n    at filterContacts (address at index.android.bundle:1:446199)\n    at anonymous (/probe/probe.js:12:63)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:12:6)"
+ },
+ {
+  "id": "build_contact_list",
+  "text": "TypeError: Cannot read property 'name' of null\n    at buildContactList (address at index.android.bundle:1:446258)\n    at anonymous (/probe/probe.js:13:68)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:13:6)"
+ },
+ {
+  "id": "format_rupees",
+  "text": "RangeError: amount is not a number\n    at valueOf (/probe/probe.js:15:69)\n    at formatRupees (address at index.android.bundle:1:441223)\n    at anonymous (/probe/probe.js:15:24)\n    at probe (/probe/probe.js:6:8)\n    at global (/probe/probe.js:14:6)"
+ }
+]

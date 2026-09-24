@@ -1,0 +1,46 @@
+[
+ {
+  "id": "nested_function",
+  "text": "RangeError: divide by zero\n    at average (/Users/dev/swagpay-fixture/build/index.android.bundle.js:219:27)\n    at nested_function (/Users/dev/swagpay-fixture/build/index.android.bundle.js:184:71)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "class_method",
+  "text": "RangeError: divide by zero\n    at divide (/Users/dev/swagpay-fixture/build/index.android.bundle.js:219:27)\n    at perItem (/Users/dev/swagpay-fixture/build/index.android.bundle.js:255:58)\n    at class_method (/Users/dev/swagpay-fixture/build/index.android.bundle.js:185:78)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "getter",
+  "text": "TypeError: Cannot read property 'name' of undefined\n    at get (/Users/dev/swagpay-fixture/build/index.android.bundle.js:260:29)\n    at getter (/Users/dev/swagpay-fixture/build/index.android.bundle.js:186:64)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "arrow_native",
+  "text": "SyntaxError: JSON Parse error: Unexpected character: o\n    at parse (native)\n    at fromJSON (/Users/dev/swagpay-fixture/build/index.android.bundle.js:265:39)\n    at arrow_native (/Users/dev/swagpay-fixture/build/index.android.bundle.js:187:69)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "object_method",
+  "text": "TypeError: Cannot read property 'value' of undefined\n    at onPress (/Users/dev/swagpay-fixture/build/index.android.bundle.js:356:26)\n    at object_method (/Users/dev/swagpay-fixture/build/index.android.bundle.js:188:73)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "rn_internal",
+  "text": "Error: listener failed\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:398:22)\n    at apply (native)\n    at emit (/Users/dev/swagpay-fixture/build/index.android.bundle.js:446:40)\n    at fireSettingsChanged (/Users/dev/swagpay-fixture/build/index.android.bundle.js:400:17)\n    at rn_internal (/Users/dev/swagpay-fixture/build/index.android.bundle.js:189:79)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "third_party",
+  "text": "TypeError: fake-lib: value is required\n    at validate (/Users/dev/swagpay-fixture/build/index.android.bundle.js:514:26)\n    at checkPayee (/Users/dev/swagpay-fixture/build/index.android.bundle.js:497:56)\n    at third_party (/Users/dev/swagpay-fixture/build/index.android.bundle.js:190:70)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "third_party_callback",
+  "text": "Error: negative amount\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:502:24)\n    at eachItem (/Users/dev/swagpay-fixture/build/index.android.bundle.js:520:15)\n    at scanAmounts (/Users/dev/swagpay-fixture/build/index.android.bundle.js:500:49)\n    at third_party_callback (/Users/dev/swagpay-fixture/build/index.android.bundle.js:191:80)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "closure",
+  "text": "Error: counter overflow\n    at increment (/Users/dev/swagpay-fixture/build/index.android.bundle.js:539:26)\n    at closure (/Users/dev/swagpay-fixture/build/index.android.bundle.js:195:11)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:200:23)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "uncaught",
+  "text": "Error: fatal during boot\n    at boot (/Users/dev/swagpay-fixture/build/index.android.bundle.js:207:20)\n    at anonymous (/Users/dev/swagpay-fixture/build/index.android.bundle.js:209:7)\n    at loadModuleImplementation (/Users/dev/swagpay-fixture/build/index.android.bundle.js:160:14)\n    at guardedLoadModule (/Users/dev/swagpay-fixture/build/index.android.bundle.js:99:38)\n    at metroRequire (/Users/dev/swagpay-fixture/build/index.android.bundle.js:41:92)\n    at global (/Users/dev/swagpay-fixture/build/index.android.bundle.js:546:4)"
+ },
+ {
+  "id": "async_function",
+  "text": "Error: profile id missing\n    at ?anon_0_ (/Users/dev/swagpay-fixture/build/index.android.bundle.js:346:24)\n    at next (native)\n    at asyncGeneratorStep (/Users/dev/swagpay-fixture/build/index.android.bundle.js:363:19)\n    at _next (/Users/dev/swagpay-fixture/build/index.android.bundle.js:377:29)\n    at tryCallOne (address at InternalBytecode.js:1:1296)\n    at anonymous (address at InternalBytecode.js:1:4984)"
+ }
+]

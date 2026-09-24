@@ -10,6 +10,7 @@ import threading, time, uuid, re
 
 _JOBS = {}
 _LOCK = threading.Lock()
+# Android package names; iOS bundle ids are validated by backends.validate_id.
 PKG_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$")
 
 # adb only ever talks to one device coherently at a time from this tool, and a
@@ -74,14 +75,41 @@ def _require_full_tracing(ex, trace_path):
         raise RuntimeError(f"not recorded: {lost} The trace is kept at {trace_path}.")
 
 
+def _require_complete(cap, trace_path, instrumented=False):
+    """_require_full_tracing for either platform: the backend says what makes
+    one of its captures unusable (Android: kernel tracing lost; iOS: the
+    recording never saw the app)."""
+    problem = cap.verify(trace_path, instrumented=instrumented)
+    if problem:
+        raise RuntimeError(f"not recorded: {problem} The trace is kept at {trace_path}.")
+
+
+def _platform_label(platform, info):
+    return f"{'iOS' if platform == 'ios' else 'Android'} {info.get('release')}" + \
+        (", Simulator" if info.get("simulator") else "")
+
+
+def _trace_out(platform, name):
+    """Where a capture's trace goes. iOS keeps its `.trace` bundle beside it."""
+    return f"traces/ios/{name}.pftrace" if platform == "ios" else f"traces/{name}.pftrace"
+
+
+def _capture_kw(platform, jid):
+    """The iOS backend reports progress through the job log; adb's does not."""
+    return {"on_log": lambda line: _log(jid, line)} if platform == "ios" else {}
+
+
 def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=False,
-                  device=None):
+                  device=None, platform="android"):
     """Validate inputs, then run capture + extract + record on a background
     thread. Returns the job id immediately."""
-    if not PKG_RE.match(pkg or ""):
-        raise ValueError(f"'{pkg}' does not look like an Android package name")
+    from . import backends
+    backends.validate_id(platform, pkg)
+    if platform == "ios" and not cold:
+        raise ValueError("Warm captures are not supported on iOS yet. Capture cold.")
     duration_ms = max(2000, min(int(duration_ms), 120_000))
-    jid = _new("capture", pkg=pkg, cold=bool(cold), duration_ms=duration_ms)
+    jid = _new("capture", pkg=pkg, cold=bool(cold), duration_ms=duration_ms,
+               platform=platform)
 
     def run():
         if not _capture_lock.acquire(blocking=False):
@@ -90,25 +118,27 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
             return
         try:
             _set(jid, state="running")
-            from . import capture as cap, extract as ex, store, catalogue
+            from . import backends, extract as ex, store, catalogue
+            cap = backends.get(platform)
             info = cap.device_info(device)
             if not info:
-                raise RuntimeError("No adb device connected.")
-            _log(jid, f"device: {info.get('model')} (Android {info.get('release')})")
+                raise RuntimeError(backends.NO_DEVICE[platform])
+            _log(jid, f"device: {info.get('model')} ({_platform_label(platform, info)})")
 
-            app = catalogue.get(pkg)
+            app = catalogue.get(pkg, platform)
             if not app:
                 _log(jid, f"{pkg} is not in the catalogue yet; recording it as an "
                           "unlabelled competitor so this run is still attributable.")
-                catalogue.add(pkg, name=pkg, role="competitor", auto=True)
+                catalogue.add(pkg, name=pkg, role="competitor", auto=True, platform=platform)
 
             meta = _run_metadata(cap, pkg, device, "before capture")
-            out = f"traces/{pkg}_{'cold' if cold else 'warm'}_{jid}.pftrace"
+            out = _trace_out(platform, f"{pkg}_{'cold' if cold else 'warm'}_{jid}")
             _log(jid, f"{'force-stopping and cold-launching' if cold else 'capturing warm'} "
                       f"{pkg} for {duration_ms}ms…")
-            cap.capture(out, pkg=pkg, duration_ms=duration_ms, cold=cold, serial=device)
+            cap.capture(out, pkg=pkg, duration_ms=duration_ms, cold=cold, serial=device,
+                        **_capture_kw(platform, jid))
             _log(jid, f"trace saved -> {out}")
-            _require_full_tracing(ex, out)
+            _require_complete(cap, out, instrumented=catalogue.is_instrumented(pkg, platform))
 
             _log(jid, "extracting metrics…")
             m = ex.extract_any(out, app_pkg=pkg)
@@ -149,7 +179,8 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
             _set(jid, state="done",
                 result={"run_id": rid, "path_kind": m["path_kind"],
                        "app_pkg": m.get("app_pkg"), "verdict": res.get("verdict"),
-                       "headline": res.get("headline")})
+                       "headline": res.get("headline"),
+                       "simulator": bool(m.get("simulator"))})
         except Exception as e:
             _log(jid, f"ERROR: {e}")
             _set(jid, state="error", error=str(e))
@@ -161,7 +192,7 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
 
 
 def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
-                 settle_ms=1500, use_llm=False, device=None):
+                 settle_ms=1500, use_llm=False, device=None, platform="android"):
     """Capture N cold-start sessions of one app back to back.
 
     A single cold start is a noisy measurement: the same app on the same device
@@ -170,12 +201,14 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
     this records each session as an ordinary run and groups them, reporting the
     spread rather than a single number.
     """
-    if not PKG_RE.match(pkg or ""):
-        raise ValueError(f"'{pkg}' does not look like an Android package name")
+    from . import backends
+    backends.validate_id(platform, pkg)
+    if platform == "ios" and not cold:
+        raise ValueError("Warm captures are not supported on iOS yet. Stress-test cold.")
     sessions = max(2, min(int(sessions), 30))
     duration_ms = max(2000, min(int(duration_ms), 60_000))
     jid = _new("stress", pkg=pkg, cold=bool(cold), duration_ms=duration_ms,
-               sessions=sessions)
+               sessions=sessions, platform=platform)
 
     def run():
         if not _capture_lock.acquire(blocking=False):
@@ -185,19 +218,20 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
         stress_id = None
         try:
             _set(jid, state="running")
-            from . import capture as cap, extract as ex, store, catalogue
+            from . import backends, extract as ex, store, catalogue
+            cap = backends.get(platform)
             info = cap.device_info(device)
             if not info:
-                raise RuntimeError("No adb device connected.")
+                raise RuntimeError(backends.NO_DEVICE[platform])
             dev_label = info.get("model") or info.get("device")
-            if not catalogue.get(pkg):
-                catalogue.add(pkg, name=pkg, role="competitor", auto=True)
+            if not catalogue.get(pkg, platform):
+                catalogue.add(pkg, name=pkg, role="competitor", auto=True, platform=platform)
 
             stress_id = store.stress_create(
                 app_pkg=pkg, device=dev_label, label=label, sessions=sessions,
-                cold=cold, duration_ms=duration_ms)
+                cold=cold, duration_ms=duration_ms, platform=platform)
             _set(jid, stress_id=stress_id)
-            _log(jid, f"device: {info.get('model')} (Android {info.get('release')})")
+            _log(jid, f"device: {info.get('model')} ({_platform_label(platform, info)})")
             _log(jid, f"stress test #{stress_id}: {sessions} "
                       f"{'cold' if cold else 'warm'} session(s) of {pkg}")
 
@@ -205,14 +239,14 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
             for i in range(1, sessions + 1):
                 _log(jid, f"session {i}/{sessions}: capturing…")
                 _set(jid, progress={"current": i, "total": sessions})
-                out = f"traces/stress{stress_id}_{pkg}_{i:02d}.pftrace"
+                out = _trace_out(platform, f"stress{stress_id}_{pkg}_{i:02d}")
                 try:
                     # Per session: battery temperature and thermal state move
                     # over a run of back-to-back cold starts.
                     meta = _run_metadata(cap, pkg, device, "before capture")
                     cap.capture(out, pkg=pkg, duration_ms=duration_ms, cold=cold,
                                 serial=device)
-                    _require_full_tracing(ex, out)
+                    _require_complete(cap, out, instrumented=catalogue.is_instrumented(pkg, platform))
                     m = ex.extract_any(out, app_pkg=pkg)
                     problems = ex.capture_problems(m, requested_pkg=pkg)
                     fatal = [p for p in problems

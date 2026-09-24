@@ -39,6 +39,7 @@ perfetto_init — swagperf launcher
 
 Examples
   perfetto_init capture --pkg com.phonepe.app --cold --analyse
+  perfetto_init capture --platform ios --pkg com.cambench.compose.ios --analyse
   perfetto_init stress run --pkg com.swagpay -n 10
   perfetto_init manual start --pkg com.swagpay --cold
   perfetto_init screens traces/session.pftrace
@@ -95,6 +96,26 @@ PYEOF
             fi
         else
             printf '%s\n' "${c_red}missing${c_off}  adb not on PATH"
+        fi
+        # iOS lane: Xcode's xctrace and a booted simulator.
+        if xcrun --find xctrace >/dev/null 2>&1; then
+            printf '%s\n' "${c_grn}ok${c_off}       xctrace — $(xcrun xctrace version 2>/dev/null)"
+            "$PY" - <<'PYEOF'
+from swagperf import capture_ios as ci, catalogue
+i = ci.device_info()
+if not i:
+    print("         no booted iOS Simulator — xcrun simctl boot \"iPhone 17\"")
+else:
+    print(f"         {i['model']}  iOS {i['os_version']} (Simulator)")
+    for a in (a for a in catalogue.load() if a["platform"] == "ios"):
+        try:
+            b = ci.parse_app_bundle(ci.app_path(i["udid"], a["pkg"]))
+            print(f"         {a['name']}: {b.get('version_name')} ({b.get('version_code')}), {b['build_type']} build")
+        except RuntimeError:
+            print(f"         {a['name']}: not installed on this simulator")
+PYEOF
+        else
+            printf '%s\n' "${c_yel}none${c_off}     xctrace not found — install Xcode for the iOS lane"
         fi
         runs=$("$PY" -c "from swagperf import store; c=store.connect(); print(list(c.execute('select count(*) from runs'))[0][0]); c.close()" 2>/dev/null || echo '?')
         printf '%s\n' "${c_dim}history${c_off}  $runs run(s) in history.db"

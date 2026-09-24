@@ -108,10 +108,48 @@ def next_issue_id(issues):
 
 # ------------------------------------------------------------------ signals
 
+def _app_key(run):
+    """The app part of a signal key. An iOS signal never lands on an Android
+    issue for the same id, so it is platform-prefixed (`ios:com.swag.pay`);
+    Android keys keep their original form so existing issues still match."""
+    app, platform = run.get("app_pkg"), run.get("platform") or "android"
+    return app if platform == "android" else f"{platform}:{app}"
+
+
+def _where(error):
+    """`fn (src/money.ts)` for the first resolved app frame of an error, if any."""
+    f = next((f for f in error.get("frames") or [] if f.get("resolved") and f.get("in_app")), None)
+    return f"{f.get('fn')} ({f.get('path') or f.get('file')})" if f else None
+
+
+def _key_scope(key):
+    """(app, path) of a signal key, `kind:subject:app:path`. Read from the
+    end: a subject can hold colons itself (`regression:step:activity_create:...`),
+    and an iOS app is `ios:<pkg>`."""
+    parts = (key or "").split(":")
+    if len(parts) < 4:
+        return None
+    if len(parts) >= 5 and parts[-3] == "ios":
+        return (f"ios:{parts[-2]}", parts[-1])
+    return (parts[-2], parts[-1])
+
+
+def _resolved(run):
+    """The run with its JS error stacks resolved against its build's source map."""
+    st = run.get("stability") or {}
+    if not (st.get("errors") or {}).get("js"):
+        return run
+    from . import sourcemaps
+    try:
+        return {**run, "stability": sourcemaps.resolve(st, sourcemaps.map_for_run(run, run.get("meta")))}
+    except Exception:
+        return run
+
+
 def signals_of(run, regs):
     """The signals one run raised, from its stored breaches, violations and
     step regressions (`regs`, as store.regressions returns them)."""
-    app, path = run.get("app_pkg"), run.get("path_kind")
+    app, path = _app_key(run), run.get("path_kind")
     out = []
     for b in run.get("breaches") or []:
         m = b["metric"]
@@ -128,6 +166,28 @@ def signals_of(run, regs):
                     "value": r.get("dur_ms"), "reference": r.get("baseline_ms"),
                     "reference_kind": "benchmark" if r.get("reference") == "benchmark" else "baseline",
                     "over_pct": pct, "severity": "high" if (pct or 0) > 25 else "medium"})
+    st = run.get("stability") or {}
+    if (st.get("crash") or {}).get("crashed"):
+        out.append({"key": f"crash:app:{app}:{path}", "kind": "crash", "subject": "crash",
+                    "title": "The app crashed during the run", "unit": "",
+                    "value": None, "reference": None, "reference_kind": None,
+                    "over_pct": None, "severity": "high",
+                    "detail": (st.get("crash") or {}).get("reason")})
+    # One signal per error, by its fingerprint: the resolved function it was
+    # thrown in (sourcemaps.resolve), stable across builds where a raw Hermes
+    # offset is not. Without a source map, by error class.
+    groups = {}
+    for e in (st.get("errors") or {}).get("events") or []:
+        fp = e.get("fingerprint") or e.get("name") or "Error"
+        g = groups.setdefault(fp, {"name": e.get("name") or "Error", "n": 0, "fatal": False,
+                                   "where": _where(e)})
+        g["n"] += 1
+        g["fatal"] = g["fatal"] or bool(e.get("fatal"))
+    for fp, g in sorted(groups.items()):
+        out.append({"key": f"js_error:{fp}:{app}:{path}", "kind": "js_error", "subject": fp,
+                    "title": f"JS error: {g['name']}" + (f" in {g['where']}" if g["where"] else ""),
+                    "unit": "", "value": g["n"], "reference": None, "reference_kind": None,
+                    "over_pct": None, "severity": "high" if g["fatal"] else "medium"})
     for v in run.get("violations") or []:
         s = v["step"]
         out.append({"key": f"ordering:{s}:{app}:{path}", "kind": "ordering_violation", "subject": s,
@@ -238,14 +298,19 @@ def review(history, *, after, regressions=None, issues=None, lookback=10, screen
     history_reset = after > max((r["id"] for r in runs), default=0)
     if history_reset:
         after = 0
-    window = [r for r in runs if r["id"] > after]
-    mine = [r for r in window if r.get("app_role") == "own"]
+    window = [_resolved(r) for r in runs if r["id"] > after]
+    mine = [r for r in window if r.get("app_role") == "own" and not r.get("simulator")]
     skipped = [{"id": r["id"], "app": r.get("app_name") or r.get("app_pkg"),
                 "reason": "not an own app: no budgets to hold it to, nothing to fix here"}
                for r in window if r.get("app_role") != "own"]
+    # A simulator run is indicative only: its numbers are the Mac's, so it
+    # opens no performance issue.
+    skipped += [{"id": r["id"], "app": r.get("app_name") or r.get("app_pkg"),
+                 "reason": "simulator run: indicative only, never judged"}
+                for r in window if r.get("app_role") == "own" and r.get("simulator")]
 
     def scope(r):
-        return (r.get("app_pkg"), r.get("path_kind"))
+        return (_app_key(r), r.get("path_kind"))
 
     def prior_of(r, n):
         return [p for p in runs if p["id"] < r["id"] and p.get("app_role") == "own" and scope(p) == scope(r)][-n:]
@@ -261,7 +326,7 @@ def review(history, *, after, regressions=None, issues=None, lookback=10, screen
         for s in sigs:
             g = by_key.setdefault(s["key"], {k: s[k] for k in ("key", "kind", "subject", "title", "unit")}
                                   | {"app": r.get("app_pkg"), "app_name": r.get("app_name"), "path": r.get("path_kind"),
-                                     "severity": "medium", "runs": []})
+                                     "scope_app": _app_key(r), "severity": "medium", "runs": []})
             g["runs"].append({"run": r["id"], "ts": r.get("ts"), "device": r.get("device"),
                               "value": s["value"], "reference": s["reference"],
                               "reference_kind": s["reference_kind"], "over_pct": s["over_pct"],
@@ -284,7 +349,7 @@ def review(history, *, after, regressions=None, issues=None, lookback=10, screen
     for key, g in by_key.items():
         ids = [x["run"] for x in g["runs"]]
         last = newest[ids[-1]]
-        in_scope = [r["id"] for r in mine if scope(r) == (g["app"], g["path"])]
+        in_scope = [r["id"] for r in mine if scope(r) == (g["scope_app"], g["path"])]
         g.update({"first_seen": ids[0], "last_seen": ids[-1], "count": len(ids),
                   "of_runs": len(in_scope),
                   # Runs of its scope after it last fired: it may have stopped.
@@ -303,8 +368,7 @@ def review(history, *, after, regressions=None, issues=None, lookback=10, screen
     for i in issues:
         if i["status"] not in OPEN or not i["signal"] or i["signal"] in fired:
             continue
-        parts = i["signal"].split(":")
-        checked = [r["id"] for r in mine if len(parts) >= 4 and scope(r) == (parts[-2], parts[-1])]
+        checked = [r["id"] for r in mine if scope(r) == _key_scope(i["signal"])]
         if checked:
             quiet.append({"id": i["id"], "signal": i["signal"], "status": i["status"], "file": i["file"],
                           "runs_checked": checked})

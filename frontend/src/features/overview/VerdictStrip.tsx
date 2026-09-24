@@ -1,22 +1,23 @@
-import { useNavigate } from 'react-router'
 import type { Run } from '@/api/types'
 import { Button, Card, Legend, Row, Spacer, StatusPill, StatusStrip, Text } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
-import { verdictTone } from '@/domain/metrics'
+import { runVerdict } from '@/domain/metrics'
+import { useLaneNavigate } from '@/app/profiler'
 import s from './Overview.module.css'
 
 /** Every run in range as a verdict cell, oldest to newest. The run in view
  *  (picked in the top bar) is outlined and its numbers are shown below. */
 export function VerdictStrip({ runs, run: sel, latest, benchmarkId }: { runs: Run[]; run: Run; latest: Run | null; benchmarkId: number | null }) {
-  const navigate = useNavigate()
+  const navigate = useLaneNavigate()
   const counts = { pass: 0, warn: 0, fail: 0 }
   for (const r of runs) {
-    const t = verdictTone(r.analysis?.verdict)
+    const t = runVerdict(r).tone
     if (t !== 'neutral') counts[t]++
   }
   const first = runs[0]!
   const last = runs[runs.length - 1]!
-  const selTone = verdictTone(sel.analysis?.verdict)
+  const selVerdict = runVerdict(sel)
+  const selTone = selVerdict.tone
 
   return (
     <Card
@@ -29,11 +30,11 @@ export function VerdictStrip({ runs, run: sel, latest, benchmarkId }: { runs: Ru
         <StatusStrip
           label="Verdict of each run, oldest to newest"
           cells={runs.map((r) => {
-            const t = verdictTone(r.analysis?.verdict)
+            const v = runVerdict(r)
             return {
               key: String(r.id),
-              tone: t,
-              label: `Run #${r.id}, ${shortDate(r.ts)}, ${t === 'neutral' ? 'no verdict' : t.toUpperCase()}, TTID ${fmt(r.ttff_ms)} ms`,
+              tone: v.tone,
+              label: `Run #${r.id}, ${shortDate(r.ts)}, ${v.word.toLowerCase()}, TTID ${fmt(r.ttff_ms)} ms`,
               current: r.id === sel.id,
               mark: r.id === benchmarkId ? 'B' : undefined,
             }
@@ -44,7 +45,7 @@ export function VerdictStrip({ runs, run: sel, latest, benchmarkId }: { runs: Ru
         />
       </div>
       <Row gap={14} wrap className={s.detail}>
-        <StatusPill tone={selTone}>{selTone === 'neutral' ? 'NO VERDICT' : undefined}</StatusPill>
+        <StatusPill tone={selTone}>{selTone === 'neutral' ? selVerdict.word : undefined}</StatusPill>
         <Text variant="heading-sm" as="span">
           Run #{sel.id}
         </Text>

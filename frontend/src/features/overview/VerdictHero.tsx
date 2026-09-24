@@ -1,10 +1,11 @@
-import { Link, useNavigate } from 'react-router'
+import { Link } from 'react-router'
 import type { GlobalBudgets, Run } from '@/api/types'
 import { Button, Card, Eyebrow, Icon, Label, Meter, Row, Stack, StatusSquare, Text, toneColor } from '@/design'
 import { fmt, signed, stepName } from '@/domain/format'
-import { gateTone, METRICS, valueOf, verdictTone } from '@/domain/metrics'
+import { gateTone, METRICS, runVerdict, valueOf } from '@/domain/metrics'
 import type { worstRegression } from '@/domain/steps'
 import { focusHref } from '@/lib/highlight'
+import { useLaneNavigate, useLanePath } from '@/app/profiler'
 import { useUi } from '@/app/store'
 import s from './Overview.module.css'
 
@@ -25,10 +26,10 @@ export function VerdictHero({
   budgets: GlobalBudgets
   isLatest: boolean
 }) {
-  const navigate = useNavigate()
+  const navigate = useLaneNavigate()
+  const lp = useLanePath()
   const askCopilot = useUi((st) => st.askCopilot)
-  const tone = verdictTone(run.analysis?.verdict)
-  const word = tone === 'neutral' ? 'NO VERDICT' : tone.toUpperCase()
+  const { tone, word } = runVerdict(run)
   const gates = METRICS.map((m) => ({ m, value: valueOf(run, m.key), budget: m.budget(run, budgets) })).filter(
     (g) => g.budget != null,
   )
@@ -56,7 +57,7 @@ export function VerdictHero({
           {!benchmark && (
             <Text variant="body">
               No benchmark is pinned for this app and path, so steps are compared with the median of recent runs.{' '}
-              <Link to="/history">Pin a benchmark</Link> to compare against a known-good build.
+              <Link to={lp('/history')}>Pin a benchmark</Link> to compare against a known-good build.
             </Text>
           )}
 
@@ -97,7 +98,9 @@ export function VerdictHero({
 
         <Stack gap={14} className={s.gates}>
           <Label>RELEASE GATES</Label>
-          {gates.length === 0 && <Text variant="body">No budgets apply to this app.</Text>}
+          {gates.length === 0 && (
+            <Text variant="body">{run.simulator ? 'No budgets apply: a simulator run is never judged against them.' : 'No budgets apply to this app.'}</Text>
+          )}
           {gates.map(({ m, value, budget }) => {
             const t = gateTone(value, budget)
             return (

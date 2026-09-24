@@ -9,6 +9,10 @@ Roles:
   own         the app we build; instrumented, has budgets
   competitor  someone else's binary; derived steps only, no budgets
   reference   not a rival, used to validate the pipeline or bound the scale
+
+Entries are keyed by (platform, pkg): an iOS bundle id can equal the Android
+package name (`com.swag.pay` on both), and the two are different binaries
+with different budgets. `platform` defaults to "android".
 """
 import json, os, copy
 
@@ -43,40 +47,52 @@ def _is_placeholder(a):
     return bool(a.get("auto")) or a.get("name") == a.get("pkg")
 
 
+PLATFORMS = ("android", "ios")
+
+
+def platform_of(a):
+    return a.get("platform") or "android"
+
+
+def _key(a):
+    return (platform_of(a), a["pkg"])
+
+
 def load():
-    """Built-in catalogue with any local additions merged in by package name."""
-    base = {a["pkg"]: a for a in _read(BUILTIN).get("apps", [])}
+    """Built-in catalogue with any local additions merged in by (platform, package)."""
+    base = {_key(a): {**a, "platform": platform_of(a)} for a in _read(BUILTIN).get("apps", [])}
     for a in _read(USER).get("apps", []):
+        k = _key(a)
         if a.get("_deleted"):
-            base.pop(a["pkg"], None)
+            base.pop(k, None)
             continue
-        if a["pkg"] in base and _is_placeholder(a):
+        if k in base and _is_placeholder(a):
             continue
-        base[a["pkg"]] = {**base.get(a["pkg"], {}), **a}
+        base[k] = {**base.get(k, {}), **a, "platform": platform_of(a)}
     return sorted(base.values(),
                   key=lambda a: (ROLES.index(a.get("role", "competitor"))
                                  if a.get("role") in ROLES else 9, a.get("name", "")))
 
 
-def get(pkg):
+def get(pkg, platform="android"):
     for a in load():
-        if a["pkg"] == pkg:
+        if a["pkg"] == pkg and a["platform"] == (platform or "android"):
             return a
     return None
 
 
-def display(pkg):
-    a = get(pkg)
+def display(pkg, platform="android"):
+    a = get(pkg, platform)
     return a["name"] if a else (pkg or "unknown")
 
 
-def is_instrumented(pkg):
-    a = get(pkg)
+def is_instrumented(pkg, platform="android"):
+    a = get(pkg, platform)
     return bool(a and a.get("instrumented"))
 
 
-def budgets_for(pkg):
-    a = get(pkg)
+def budgets_for(pkg, platform="android"):
+    a = get(pkg, platform)
     return (a or {}).get("budgets") or {}
 
 
@@ -87,13 +103,17 @@ def save_user(apps):
 
 def add(pkg, *, name=None, role="competitor", category=None, vendor=None,
         region=None, instrumented=False, notes=None, verified=False, budgets=None,
-        auto=False):
+        auto=False, platform="android"):
     if role not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
+    if platform not in PLATFORMS:
+        raise ValueError(f"platform must be one of {PLATFORMS}")
     cur = _read(USER).get("apps", [])
-    cur = [a for a in cur if a.get("pkg") != pkg]
+    cur = [a for a in cur if _key(a) != (platform, pkg)]
     entry = {"pkg": pkg, "name": name or pkg, "role": role,
              "instrumented": bool(instrumented), "verified": bool(verified)}
+    if platform != "android":
+        entry["platform"] = platform
     for k, v in (("category", category), ("vendor", vendor), ("region", region),
                  ("notes", notes), ("budgets", budgets), ("auto", auto)):
         if v:
@@ -103,21 +123,26 @@ def add(pkg, *, name=None, role="competitor", category=None, vendor=None,
     return entry
 
 
-def remove(pkg):
+def remove(pkg, platform="android"):
     """Tombstone a package so a built-in entry can be hidden too."""
-    cur = [a for a in _read(USER).get("apps", []) if a.get("pkg") != pkg]
-    if any(a["pkg"] == pkg for a in _read(BUILTIN).get("apps", [])):
-        cur.append({"pkg": pkg, "_deleted": True})
+    cur = [a for a in _read(USER).get("apps", []) if _key(a) != (platform, pkg)]
+    if any(_key(a) == (platform, pkg) for a in _read(BUILTIN).get("apps", [])):
+        tomb = {"pkg": pkg, "_deleted": True}
+        if platform != "android":
+            tomb["platform"] = platform
+        cur.append(tomb)
     save_user(cur)
 
 
-def mark_verified(pkgs):
+def mark_verified(pkgs, platform="android"):
     """Record that these packages were seen on a real device."""
-    cur = {a["pkg"]: a for a in _read(USER).get("apps", [])}
+    cur = {_key(a): a for a in _read(USER).get("apps", [])}
     for p in pkgs:
-        base = copy.deepcopy(get(p) or {"pkg": p, "name": p, "role": "competitor"})
-        base.update(cur.get(p, {}))
+        base = copy.deepcopy(get(p, platform) or {"pkg": p, "name": p, "role": "competitor"})
+        base.update(cur.get((platform, p), {}))
         base["verified"] = True
         base.pop("_deleted", None)
-        cur[p] = base
+        if platform != "android":
+            base["platform"] = platform
+        cur[(platform, p)] = base
     save_user(list(cur.values()))
