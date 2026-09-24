@@ -1,0 +1,46 @@
+.strip {
+  display: flex;
+  gap: 4px;
+}
+.col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cell {
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--on-st);
+  font: 800 11px var(--font-ui);
+  outline-offset: 2px;
+}
+.pass {
+  background: var(--pass);
+}
+.warn {
+  background: var(--warn);
+}
+.fail {
+  background: var(--fail);
+}
+.neutral {
+  background: var(--s3);
+}
+.cell[aria-current='true'] {
+  outline: 2px solid var(--tx);
+}
+.mark {
+  height: 12px;
+  text-align: center;
+  font: 700 9px var(--font-display);
+  color: var(--c4);
+}
+.foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}

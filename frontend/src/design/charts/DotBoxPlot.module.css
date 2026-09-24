@@ -1,0 +1,76 @@
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* Label, strip, figure: shared by every row and the axis, so the axis lines up. */
+.grid {
+  display: grid;
+  grid-template-columns: 120px 1fr 80px;
+  gap: 12px;
+  align-items: center;
+}
+.label {
+  font: 600 13px var(--font-ui);
+  color: var(--tx);
+}
+.value {
+  font: 700 13px var(--font-ui);
+  text-align: right;
+  color: var(--tx);
+}
+/* Positions along the axis and the series colour come from the data. */
+.track {
+  position: relative;
+  height: 48px;
+  background: var(--bg);
+}
+.box {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  background: var(--s2);
+  border: 1.5px solid;
+}
+.median {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  margin-left: -1.5px;
+}
+.dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  opacity: 0.85;
+}
+.budget {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  border-left: 1.5px dashed var(--accent);
+}
+.axis {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--tx3);
+}
+/* The unit sits under the figures, clear of the last tick. */
+.axis > :last-child {
+  text-align: right;
+}
+.ticks {
+  position: relative;
+  height: 14px;
+}
+.tick {
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.budgetTick {
+  color: var(--accent-tx);
+}

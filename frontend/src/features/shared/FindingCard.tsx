@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Finding } from '@/api/types'
-import { Button, Icon, Row, SeverityPill, Spacer, Stack, Text } from '@/design'
+import { Button, Card, Icon, Row, SeverityPill, Spacer, Stack, Text } from '@/design'
 import s from './FindingCard.module.css'
 
 const EDGE = { high: 'var(--fail)', medium: 'var(--warn)', low: 'var(--c1)' } as const
@@ -23,9 +23,8 @@ export function FindingCard({
 }) {
   const sev = finding.severity in EDGE ? finding.severity : 'low'
   return (
-    <Stack as="article" direction="row" data-hl={id} className={`${s.card} ${compact ? s.compact : ''}`}>
-      <div className={s.edge} style={{ background: EDGE[sev] }} />
-      <Stack gap={compact ? 10 : 14} grow className={s.body}>
+    <Card as="article" edge={{ side: 'left', color: EDGE[sev] }} data-hl={id} className={compact ? `${s.card} ${s.compact}` : s.card}>
+      <Stack gap={compact ? 10 : 14}>
         <Row gap={10} wrap>
           <SeverityPill level={sev} />
           <Text variant="meta">
@@ -68,6 +67,6 @@ export function FindingCard({
           )}
         </div>
       </Stack>
-    </Stack>
+    </Card>
   )
 }

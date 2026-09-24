@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router'
 import type { Run } from '@/api/types'
-import { Button, Card, GLYPH, Legend, Row, Spacer, Stack, StatusPill, Text, toneColor } from '@/design'
+import { Button, Card, Legend, Row, Spacer, StatusPill, StatusStrip, Text } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
 import { verdictTone } from '@/domain/metrics'
 import s from './Overview.module.css'
@@ -25,36 +25,24 @@ export function VerdictStrip({ runs, run: sel, latest, benchmarkId }: { runs: Ru
       hint={`${runs.length === 1 ? 'One run' : `Last ${runs.length} runs`}, oldest to newest. The outlined run is the one in view; pick another in the top bar.`}
       actions={<Legend label="Verdict counts" items={(['pass', 'warn', 'fail'] as const).map((k) => ({ label: `${counts[k]} ${k}`, color: `var(--${k})` }))} />}
     >
-      <Row gap={4} align="stretch" className={s.strip}>
-        {runs.map((r) => {
-          const t = verdictTone(r.analysis?.verdict)
-          const label = `Run #${r.id}, ${shortDate(r.ts)}, ${t === 'neutral' ? 'no verdict' : t.toUpperCase()}, TTID ${fmt(r.ttff_ms)} ms`
-          return (
-            <Stack key={r.id} gap={6} align="stretch" grow>
-              <span
-                role="img"
-                className={s.cell}
-                aria-label={label}
-                title={label}
-                aria-current={r.id === sel.id}
-                style={{ background: t === 'neutral' ? 'var(--s3)' : toneColor(t) }}
-              >
-                {t === 'warn' || t === 'fail' ? GLYPH[t] : ''}
-              </span>
-              <span className={s.bMark}>{r.id === benchmarkId ? 'B' : ''}</span>
-            </Stack>
-          )
-        })}
-      </Row>
-      <Row gap={8} justify="between" className={s.stripFoot}>
-        <Text variant="caption">
-          #{first.id} · {shortDate(first.ts)}
-        </Text>
-        {benchmarkId != null && <Text variant="caption">B = pinned benchmark</Text>}
-        <Text variant="caption">
-          #{last.id} · {shortDate(last.ts)}
-        </Text>
-      </Row>
+      <div className={s.strip}>
+        <StatusStrip
+          label="Verdict of each run, oldest to newest"
+          cells={runs.map((r) => {
+            const t = verdictTone(r.analysis?.verdict)
+            return {
+              key: String(r.id),
+              tone: t,
+              label: `Run #${r.id}, ${shortDate(r.ts)}, ${t === 'neutral' ? 'no verdict' : t.toUpperCase()}, TTID ${fmt(r.ttff_ms)} ms`,
+              current: r.id === sel.id,
+              mark: r.id === benchmarkId ? 'B' : undefined,
+            }
+          })}
+          start={`#${first.id} · ${shortDate(first.ts)}`}
+          middle={benchmarkId != null ? 'B = pinned benchmark' : undefined}
+          end={`#${last.id} · ${shortDate(last.ts)}`}
+        />
+      </div>
       <Row gap={14} wrap className={s.detail}>
         <StatusPill tone={selTone}>{selTone === 'neutral' ? 'NO VERDICT' : undefined}</StatusPill>
         <Text variant="heading-sm" as="span">

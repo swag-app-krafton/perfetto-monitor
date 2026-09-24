@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useBenchmarkMutations } from '@/api/hooks'
 import type { Run } from '@/api/types'
-import { Badge, Button, Card, EmptyState, Grid, Row, SearchInput, Segmented, SectionTitle, SortHeader, Stack, StatusPill, TableCard, TableEmptyRow, Text, numCell, selectedRow, useSort } from '@/design'
+import { Badge, Button, Card, EmptyState, Grid, Row, SearchInput, Segmented, SectionTitle, SortTh, Stack, StatusPill, TableCard, TableEmptyRow, Text, numCell, selectedRow, useSort } from '@/design'
 import { fmt, shortDate } from '@/domain/format'
 import { valueOf, verdictTone } from '@/domain/metrics'
 import { useScope, useSelectRun } from '@/domain/scope'
@@ -96,9 +96,7 @@ export function HistoryPage() {
         <thead>
           <tr>
             {COLS.map((c) => (
-              <th key={c.key} className={c.num ? numCell : undefined} aria-sort={sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                <SortHeader label={c.label} active={sort.key === c.key} dir={sort.dir} onClick={() => toggle(c.key)} align={c.num ? 'right' : 'left'} />
-              </th>
+              <SortTh key={c.key} label={c.label} sortKey={c.key} sort={sort} onSort={toggle} align={c.num ? 'right' : 'left'} />
             ))}
             <th>Actions</th>
           </tr>

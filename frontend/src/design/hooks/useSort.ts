@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react'
 
 export type SortDir = 'asc' | 'desc'
 
+/** The `aria-sort` value for a sortable column header. */
+export const ariaSort = (active: boolean, dir: SortDir) => (active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none')
+
 /** Sortable rows. Clicking the active column flips it; a new column starts
  *  descending (the largest value is usually what a reader is looking for).
  *  Nulls always sort last, in either direction. */

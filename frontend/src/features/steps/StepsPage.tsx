@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import type { ChildSlice, Run } from '@/api/types'
-import { Button, EmptyState, FlushCard, Icon, Label, Meter, Row, SortHeader, Sparkline, Stack, Stat, StatGrid, Term, Text, type TextTone } from '@/design'
+import { Button, EmptyState, ExpandableTable, FlushCard, Icon, Label, Meter, Row, Sparkline, Stack, Stat, StatGrid, Term, Text, type ExpandableColumn, type TextTone } from '@/design'
 import { fmt, signed, stepName } from '@/domain/format'
 import { useScope } from '@/domain/scope'
 import { stepDeltas, type StepDelta } from '@/domain/steps'
@@ -10,13 +10,14 @@ import { useUi } from '@/app/store'
 import s from './Steps.module.css'
 
 type Key = 'name' | 'runtime' | 'current' | 'baseline' | 'deltaMs' | 'deltaPct'
-const COLS: { key: Key; label: string; right?: boolean }[] = [
-  { key: 'name', label: 'Step' },
-  { key: 'runtime', label: 'Runtime' },
-  { key: 'current', label: 'Current', right: true },
-  { key: 'baseline', label: 'Baseline', right: true },
-  { key: 'deltaMs', label: 'Δ ms', right: true },
-  { key: 'deltaPct', label: 'Δ %', right: true },
+const COLS: ExpandableColumn<Key>[] = [
+  { key: 'name', sortKey: 'name', label: 'Step', width: 'minmax(240px, 2.4fr)' },
+  { key: 'runtime', sortKey: 'runtime', label: 'Runtime', width: '140px' },
+  { key: 'current', sortKey: 'current', label: 'Current', width: '90px', align: 'right' },
+  { key: 'baseline', sortKey: 'baseline', label: 'Baseline', width: '90px', align: 'right' },
+  { key: 'deltaMs', sortKey: 'deltaMs', label: 'Δ ms', width: '90px', align: 'right' },
+  { key: 'deltaPct', sortKey: 'deltaPct', label: 'Δ %', width: '80px', align: 'right' },
+  { key: 'trend', label: 'Trend · 12', width: '120px', align: 'right' },
 ]
 
 // Same floor the backend's regression rule uses: a move under 5ms is not
@@ -68,66 +69,53 @@ export function StepsPage() {
         </Text>
       }
     >
-      <div className={s.table} role="table" aria-label="Step durations">
-        <div className={`${s.cols} ${s.hrow}`} role="row">
-          <span />
-          {COLS.map((c) => (
-            <span key={c.key} role="columnheader" aria-sort={sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-              <SortHeader label={c.label} active={sort.key === c.key} dir={sort.dir} onClick={() => toggle(c.key)} align={c.right ? 'right' : 'left'} />
-            </span>
-          ))}
-          <Text variant="th" align="right">
-            TREND · 12
-          </Text>
-        </div>
-        {sorted.map((d) => {
-          const isOpen = open === d.step
+      <ExpandableTable
+        label="Step durations"
+        minWidth={920}
+        columns={COLS}
+        rows={sorted}
+        rowKey={(d) => d.step}
+        rowAttrs={(d) => ({ 'data-hl': d.step })}
+        toggleLabel={(d) => stepName(d.step)}
+        openKey={open}
+        onToggle={(k) => setOpen(open === k ? null : k)}
+        sort={{ ...sort, onSort: toggle }}
+        cells={(d) => {
           const tone = deltaTone(d)
-          return (
-            <div key={d.step} className={s.row} data-hl={d.step} role="rowgroup">
-              {/* The step's name is the row's toggle, stretched over the whole
-                  row; the "?" beside it sits above, so it is not inside a button. */}
-              <div className={`${s.cols} ${s.rowLine} ${isOpen ? s.open : ''}`}>
-                <Text as="span" variant="body" tone="muted" align="center" aria-hidden="true">
-                  {isOpen ? '▾' : '▸'}
-                </Text>
-                <Term description={descriptionOf[d.step]} label={stepName(d.step)} weight={600}>
-                  <button type="button" className={s.toggle} aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : d.step)}>
-                    {stepName(d.step)}
-                  </button>
-                </Term>
-                <Text variant="meta" tone="secondary">
-                  {runtimeOf[d.step] ?? '–'}
-                </Text>
-                <Text as="span" variant="body" tone="primary" weight={600} align="right">
-                  {fmt(d.current, 1)} ms
-                </Text>
-                <Text as="span" variant="body" align="right">
-                  {d.baseline == null ? '–' : `${fmt(d.baseline, 1)} ms`}
-                </Text>
-                <Text as="span" variant="body" tone={tone} weight={600} align="right">
-                  {d.deltaMs == null ? '–' : signed(d.deltaMs, 1)}
-                </Text>
-                <Text as="span" variant="body" tone={tone} align="right">
-                  {d.deltaPct == null ? '–' : signed(d.deltaPct, 1, '%')}
-                </Text>
-                <Sparkline values={d.history.slice(-12)} height={24} color={tone === 'fail' ? 'var(--fail)' : 'var(--c1)'} />
-              </div>
-              {isOpen && (
-                <Drill
-                  d={d}
-                  run={run}
-                  prior={scope.allRuns}
-                  bench={scope.benchmarkRun}
-                  runtime={runtimeOf[d.step]}
-                  description={descriptionOf[d.step]}
-                  onAsk={() => askCopilot(`Why did ${stepName(d.step)} change in run #${run.id}?`)}
-                />
-              )}
-            </div>
-          )
-        })}
-      </div>
+          return [
+            <Term key="name" description={descriptionOf[d.step]} label={stepName(d.step)} weight={600}>
+              {stepName(d.step)}
+            </Term>,
+            <Text key="runtime" variant="meta" tone="secondary">
+              {runtimeOf[d.step] ?? '–'}
+            </Text>,
+            <Text key="current" as="span" variant="body" tone="primary" weight={600}>
+              {fmt(d.current, 1)} ms
+            </Text>,
+            <Text key="baseline" as="span" variant="body">
+              {d.baseline == null ? '–' : `${fmt(d.baseline, 1)} ms`}
+            </Text>,
+            <Text key="deltaMs" as="span" variant="body" tone={tone} weight={600}>
+              {d.deltaMs == null ? '–' : signed(d.deltaMs, 1)}
+            </Text>,
+            <Text key="deltaPct" as="span" variant="body" tone={tone}>
+              {d.deltaPct == null ? '–' : signed(d.deltaPct, 1, '%')}
+            </Text>,
+            <Sparkline key="trend" values={d.history.slice(-12)} height={24} color={tone === 'fail' ? 'var(--fail)' : 'var(--c1)'} />,
+          ]
+        }}
+        detail={(d) => (
+          <Drill
+            d={d}
+            run={run}
+            prior={scope.allRuns}
+            bench={scope.benchmarkRun}
+            runtime={runtimeOf[d.step]}
+            description={descriptionOf[d.step]}
+            onAsk={() => askCopilot(`Why did ${stepName(d.step)} change in run #${run.id}?`)}
+          />
+        )}
+      />
     </FlushCard>
   )
 }
@@ -169,7 +157,7 @@ function Drill({
     { label: 'Runtime', value: runtime ?? '–' },
   ]
   return (
-    <Stack gap={18} className={s.drill}>
+    <Stack gap={18}>
       {description && (
         <Text as="p" variant="body" className={s.about}>
           {description}

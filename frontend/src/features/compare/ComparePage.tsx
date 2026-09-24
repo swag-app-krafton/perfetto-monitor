@@ -69,7 +69,7 @@ export function ComparePage() {
       <Grid min={320}>
         <Card>
           <Stack gap={10}>
-            <Label style={{ color: 'var(--c1)' }}>RUN A</Label>
+            <Label color="var(--c1)">RUN A</Label>
             <Row gap={10} className={s.pinnedRun}>
               <Text variant="heading-lg">#{a}</Text>
               <Badge tone="c1">In view</Badge>
@@ -80,7 +80,7 @@ export function ComparePage() {
         </Card>
         <Card>
           <Stack gap={10}>
-            <Label style={{ color: 'var(--c4)' }}>RUN B</Label>
+            <Label color="var(--c4)">RUN B</Label>
             {mode === 'bench' && bench ? (
               <Row gap={10} className={s.pinnedRun}>
                 <Text variant="heading-lg">#{bench.id}</Text>

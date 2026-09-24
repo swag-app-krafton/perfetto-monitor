@@ -4,6 +4,7 @@ import type { Tone } from './tone'
 import s from './Layout.module.css'
 
 export function Card({
+  as: Tag = 'section',
   title,
   hint,
   actions,
@@ -13,6 +14,8 @@ export function Card({
   style,
   ...rest
 }: {
+  /** An article for a self-contained item in a list (a finding). */
+  as?: 'section' | 'article'
   title?: ReactNode
   hint?: ReactNode
   actions?: ReactNode
@@ -21,7 +24,7 @@ export function Card({
 } & HTMLAttributes<HTMLElement>) {
   const edgeStyle = edge ? { [edge.side === 'top' ? 'borderTop' : 'borderLeft']: `${edge.width ?? 4}px solid ${edge.color}` } : undefined
   return (
-    <section className={`${s.card} ${className ?? ''}`} style={edgeStyle || style ? { ...edgeStyle, ...style } : undefined} {...rest}>
+    <Tag className={`${s.card} ${className ?? ''}`} style={edgeStyle || style ? { ...edgeStyle, ...style } : undefined} {...rest}>
       {(title || actions) && (
         <div className={s.cardHead}>
           <div className={s.cardHeadText}>
@@ -32,7 +35,7 @@ export function Card({
         </div>
       )}
       {children}
-    </section>
+    </Tag>
   )
 }
 
@@ -42,8 +45,9 @@ export const Eyebrow = ({ children, style }: { children: ReactNode; style?: CSSP
   </div>
 )
 
-export const Label = ({ children, style }: { children: ReactNode; style?: CSSProperties }) => (
-  <div className={s.label} style={style}>
+/** A small uppercase label. `color` ties it to a series (Run A in c1). */
+export const Label = ({ children, color }: { children: ReactNode; color?: string }) => (
+  <div className={s.label} style={color ? { color } : undefined}>
     {children}
   </div>
 )

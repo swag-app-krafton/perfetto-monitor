@@ -45,32 +45,6 @@
   background: var(--accent-hover);
 }
 
-/* ResizeHandle: the draggable left edge of a docked panel. */
-.handle {
-  position: absolute;
-  left: -4px;
-  top: 0;
-  bottom: 0;
-  width: 8px;
-  z-index: var(--z-raised);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: col-resize;
-  touch-action: none;
-}
-.handle:hover,
-.handle:focus-visible,
-.handle[data-dragging='true'] {
-  background: var(--accent-soft);
-}
-.grip {
-  width: 2px;
-  height: 32px;
-  border-radius: 2px;
-  background: var(--line2);
-}
-
 /* ListButton: a full-width row that does one thing. */
 .listButton {
   width: 100%;

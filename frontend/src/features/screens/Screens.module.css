@@ -1,43 +1,3 @@
-.table {
-  min-width: 1080px;
-}
-.cols {
-  display: grid;
-  grid-template-columns: minmax(140px, 1.2fr) 110px 60px 60px minmax(160px, 1.3fr) 100px 90px 100px 80px 110px;
-  gap: 8px;
-  align-items: center;
-}
-.hrow {
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--line);
-}
-.hcell {
-  display: flex;
-  align-items: center;
-  font: 600 11px var(--font-ui);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--tx3);
-}
-.right {
-  justify-content: flex-end;
-  text-align: right;
-}
-.row {
-  width: 100%;
-  padding: 14px 24px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
-  color: var(--tx);
-  font: 400 13px var(--font-ui);
-  text-align: left;
-  cursor: pointer;
-}
-.row:hover,
-.row[aria-expanded='true'] {
-  background: var(--s2);
-}
 .substep {
   padding-left: 16px;
 }
@@ -48,34 +8,6 @@
 .cpuValue {
   flex: none;
   width: 48px;
-}
-.detail {
-  padding: 18px 24px 22px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-}
-.node {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--bg);
-  border: 1px solid var(--line);
-}
-.nodeName {
-  font: 700 13px var(--font-display);
-  flex: 1;
-}
-.link {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0 6px 20px;
-}
-.linkBar {
-  width: 1px;
-  height: 18px;
-  background: var(--line2);
 }
 .action {
   display: grid;

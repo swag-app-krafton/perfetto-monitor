@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import type { Run } from '@/api/types'
-import { Card, EmptyState, Eyebrow, Grid, LineChart, Row, Stack, Stat, StatGrid, Swatch, Text } from '@/design'
+import { Card, EmptyState, Eyebrow, Grid, LineChart, Row, Stack, StackedBars, Stat, StatGrid, Swatch, Text, type StackRow } from '@/design'
 import { fmt, signed } from '@/domain/format'
 import { metricByKey, valueOf } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
@@ -17,29 +17,18 @@ function breakdown(r: Run | null) {
   return { total: rss, parts }
 }
 
-function Bar({ label, b, max, dim }: { label: string; b: NonNullable<ReturnType<typeof breakdown>>; max: number; dim?: boolean }) {
-  return (
-    <div className={dim ? `${s.bar} ${s.dim}` : s.bar}>
-      <Text variant="body" tone="primary" weight={600}>
-        {label}
-      </Text>
-      <div className={s.track}>
-        {b.parts.map((p) => (
-          <div key={p.name} title={`${p.name} · ${fmt(p.mb)} MB`} className={s.segment} style={{ width: `${(p.mb / max) * 100}%`, background: p.color }}>
-            {p.mb / max > 0.08 && (
-              <Text variant="caption" tone="inherit" weight={600}>
-                {fmt(p.mb)}
-              </Text>
-            )}
-          </div>
-        ))}
-      </div>
-      <Text variant="ui" weight={700} align="right">
-        {fmt(b.total)} MB
-      </Text>
-    </div>
-  )
-}
+type Breakdown = NonNullable<ReturnType<typeof breakdown>>
+
+/** One bar row per run: the parts stacked, the peak at the right. */
+const barRow = (id: string, label: string, b: Breakdown, budget: number | null, dim?: boolean): StackRow => ({
+  id,
+  label,
+  dim,
+  segments: b.parts.map((p) => ({ key: p.name, value: p.mb, title: `${p.name} · ${fmt(p.mb)} MB`, text: fmt(p.mb) })),
+  total: b.total,
+  totalText: `${fmt(b.total)} MB`,
+  over: budget != null && b.total > budget,
+})
 
 export function MemoryPage() {
   const { scope, isLoading } = useScope()
@@ -49,7 +38,8 @@ export function MemoryPage() {
   const base = benchmarkRun ?? allRuns.filter((r) => r.id < run.id).pop() ?? null
   const cur = breakdown(run)
   const prev = breakdown(base)
-  const max = Math.max(cur?.total ?? 0, prev?.total ?? 0, metricByKey('peak_rss_mb').budget(run, history.global_budgets) ?? 0) * 1.05 || 1
+  const peakBudget = metricByKey('peak_rss_mb').budget(run, history.global_budgets)
+  const colors = Object.fromEntries([...(cur?.parts ?? []), ...(prev?.parts ?? [])].map((p) => [p.name, p.color]))
   const labels = runs.map((r) => `#${r.id}`)
   const hasHermes = runs.some((r) => r.memory?.hermes_heap)
   const perRuntime = !!cur && cur.parts.length > 1
@@ -66,10 +56,16 @@ export function MemoryPage() {
               </Text>
             </Stack>
             {cur ? (
-              <Stack gap={12}>
-                <Bar label={`Run #${run.id}`} b={cur} max={max} />
-                {prev && base && <Bar label={benchmarkRun ? `Benchmark #${base.id}` : `Previous #${base.id}`} b={prev} max={max} dim />}
-              </Stack>
+              <StackedBars
+                size="lg"
+                unit="MB"
+                budget={peakBudget}
+                colors={colors}
+                rows={[
+                  barRow(String(run.id), `Run #${run.id}`, cur, peakBudget),
+                  ...(prev && base ? [barRow(String(base.id), benchmarkRun ? `Benchmark #${base.id}` : `Previous #${base.id}`, prev, peakBudget, true)] : []),
+                ]}
+              />
             ) : (
               <EmptyState>No memory samples were recorded for run #{run.id}.</EmptyState>
             )}
@@ -118,7 +114,7 @@ export function MemoryPage() {
             label="Peak RAM per run"
             labels={labels}
             series={[{ name: 'Peak RAM', color: 'var(--c1)', values: runs.map((r) => valueOf(r, 'peak_rss_mb')) }]}
-            budget={metricByKey('peak_rss_mb').budget(run, history.global_budgets)}
+            budget={peakBudget}
             unit="MB"
           />
         </Card>

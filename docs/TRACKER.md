@@ -74,6 +74,7 @@ Problems in the app under test, opened from runs by the automatic review. Each h
 
 | ID | Title | Commit | Date |
 |---|---|---|---|
+| T-003 | Dashboard pages built only from the design system: the three hand-drawn charts (Stress box plot, Startup ordering, Memory breakdown) and the two hand-built expandable tables now use `DotBoxPlot`, `SpanTimeline`, `StackedBars` lg and `ExpandableTable`; pickers use `Table`/`SortTh`/`RowAction`; no inline styles or raw controls in pages, enforced by oxlint; every component on `/design-system`, enforced by a test | not yet committed | 2026-09-24 |
 | — | Flashlight + Perfetto on one device (step 2 of the note): tested and ruled out, harness in `experiments/flashlight-concurrency/` | not yet committed | 2026-09-23 |
 | F-002 | Tracker, product-manager agent and automatic run review | added with this file | 2026-09-23 |
 | — | README: quick start, full instructions, what to monitor per screen | 8d997d8 | 2026-09-23 |

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, startCapture, useDevice, useJob, useRecentJobs } from '@/api/hooks'
 import type { DevicePayload } from '@/api/types'
-import { Banner, Button, Card, EmptyState, Grid, LogConsole, Progress, Row, SearchInput, Segmented, Stack, Stat, StatGrid, Stepper, Swatch, Text } from '@/design'
+import { Banner, Button, Card, ChoiceList, EmptyState, Grid, LogConsole, Progress, Row, SearchInput, Segmented, Stack, Stat, StatGrid, Stepper, Swatch, Text } from '@/design'
 import { fmt } from '@/domain/format'
 import { useUi } from '@/app/store'
 import { STAGES, stageStates } from './stages'
@@ -112,32 +112,14 @@ export function CapturePage() {
           <Card title="Installed packages">
             <Stack gap={12}>
               <SearchInput label="Search installed apps" placeholder="Search by name or package id" value={q} onChange={setQ} />
-              <Stack gap={6} role="radiogroup" aria-label="Package to profile" className={s.pkgList}>
-                {list.map((p) => {
-                  const on = p.pkg === selected
-                  return (
-                    <button key={p.pkg} type="button" role="radio" aria-checked={on} onClick={() => setPkg(p.pkg)} className={s.pkg}>
-                      <span aria-hidden="true" className={s.radio}>
-                        {on && <Swatch color="var(--accent)" shape="circle" size={6} />}
-                      </span>
-                      <Stack as="span" grow>
-                        <Text as="span" variant="body" tone="primary" weight={600}>
-                          {p.name}
-                          {p.role === 'own' ? ' · ours' : ''}
-                        </Text>
-                        <Text variant="meta" breakAnywhere>
-                          {p.pkg}
-                        </Text>
-                      </Stack>
-                    </button>
-                  )
-                })}
-                {list.length === 0 && (
-                  <Text variant="body" tone="muted" className={s.noMatch}>
-                    No installed apps match that search.
-                  </Text>
-                )}
-              </Stack>
+              <ChoiceList
+                label="Package to profile"
+                maxHeight={360}
+                value={selected}
+                onChange={setPkg}
+                options={list.map((p) => ({ value: p.pkg, title: `${p.name}${p.role === 'own' ? ' · ours' : ''}`, description: p.pkg }))}
+                empty="No installed apps match that search."
+              />
             </Stack>
           </Card>
         )}

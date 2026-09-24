@@ -26,23 +26,25 @@ export function Button({
 }
 
 /** An icon-only button. The label is required: it is the accessible name
- *  and the hover title. `pressed` marks a toggle that is on. */
+ *  and the hover title. `pressed` marks a toggle that is on; `outlined`
+ *  gives it a border, for a control that stands alone in a bar. */
 export function IconButton({
   icon,
   label,
   pressed,
+  outlined,
   size = 'md',
   className,
   type = 'button',
   ...rest
-}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { icon: IconName; label: string; pressed?: boolean; size?: 'sm' | 'md' }) {
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { icon: IconName; label: string; pressed?: boolean; outlined?: boolean; size?: 'sm' | 'md' }) {
   return (
     <button
       type={type}
       aria-label={label}
       title={label}
       aria-pressed={pressed}
-      className={[s.btn, s.ghost, size === 'sm' && s.ghostSm, className].filter(Boolean).join(' ')}
+      className={[s.btn, s.ghost, size === 'sm' && s.ghostSm, outlined && s.outlined, className].filter(Boolean).join(' ')}
       {...rest}
     >
       <Icon name={icon} size={size === 'sm' ? 14 : 16} />
