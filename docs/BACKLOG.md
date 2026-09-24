@@ -143,3 +143,197 @@ and is on-demand, not live, which is why it is not in the dashboard.
 
 Answer quality has to be judged separately: a cheaper answer that is worse is
 not a saving, and the token counts alone cannot see that.
+
+---
+
+## Screenshot testing with Maestro (visual regression lane)
+
+**Tracker:** F-012
+**Status:** not started. Designed, then parked by the user on 2026-09-24.
+**Raised:** 2026-09-24
+**Shareable plan:** [screenshot-testing-plan.html](screenshot-testing-plan.html)
+
+### What
+
+Maestro flows kept in this repo (`flows/<app_pkg>/<flow>.yaml`) take a
+`takeScreenshot` at named checkpoints. swagperf compares each screenshot with an
+approved baseline for that app, cohort, device class, flow and checkpoint, and
+fails the run on an unexpected change. A person reviews the diff in the dashboard
+and approves it, and the approved image becomes the new baseline.
+
+### Why
+
+swagperf sees timings, frames and RAM usage, but not how a screen looks, so a
+build that renders a broken layout quickly passes every gate. The Maestro POC
+(`~/Documents/app-automation-poc/maestro`) keeps ADB screenshots as evidence but
+never compares them: its report only says "Review screenshots for visual
+regression if needed" (`runners/maestro_worker/evidence.py`). ADR 0001 already
+names Maestro as the executor for repeatable CI plans. This is the first lane
+that would use it.
+
+### Decisions already taken
+
+- **A regression gate, not only a gallery:** baselines, diffs, approval, and a
+  non-zero exit code.
+- **A separate lane from Perfetto runs:** never inside a measured trace window,
+  because screencaps cost CPU and would skew frames and TTID. Visual runs link to
+  perf runs by app build and device.
+- **Flows live in swagperf**, not in the POC catalog. Importing POC flows can
+  come later.
+- **Android first.** The comparison doesn't depend on the platform. The iOS
+  simulator lane comes later.
+- **swagperf does the comparison, not Maestro.** Maestro 2.10 has
+  `assertScreenshot` (`path`, `thresholdPercentage`, `cropOn`, `optional`,
+  checked in the installed jar). It stops the flow at the first mismatch and has
+  no region masks, per-device baselines or approval step. Flows only take
+  screenshots; swagperf compares them.
+
+### Shape of the work
+
+- **Run.** Command:
+  `maestro --device <serial> test <flow> --test-output-dir <dir> --format junit --output <dir>/junit.xml -e APP_ID=<pkg> --no-ansi`.
+  - Screenshots are collected from the flow's `manifest.json` (artifact kind
+    `TAKE_SCREENSHOT`), never from guessed paths.
+  - The first failed step comes from `commands.json`.
+- **Compare.** With Pillow:
+  - mask the status bar and fractional regions from an optional
+    `<flow>.visual.json`;
+  - count pixels over a per-pixel tolerance;
+  - find changed regions on a grid, and write a diff overlay.
+- **Statuses:**
+
+  | Status | Meaning |
+  |---|---|
+  | `pass` | Within tolerance |
+  | `changed` | Split into `layout_changed` / `render_changed` once layout hashes exist |
+  | `new` | No baseline for this key |
+  | `missing` | A baseline exists but this run didn't capture it |
+  | `size_changed` | Different dimensions; never resized to force a match |
+  | `error` | No screenshots, a failed Maestro step, or a cohort mismatch. Never counts as a pass. |
+
+- **Exit codes:** 0 all pass, 1 any failure, 2 only `new` checkpoints waiting
+  for approval.
+- **Modules:**
+  - `swagperf/maestro.py`: the adapter, on the same subprocess and watchdog
+    pattern as `flashlight.run_audit`. It finds the binary through
+    `SWAGPERF_MAESTRO`, then PATH, then `~/.maestro/bin`, and checks for JDK 17
+    or 21 first.
+  - `swagperf/visual.py`: comparison, baselines and approval.
+  - `capture.py`: display info and device prep (SystemUI demo mode and
+    animations off, always restored).
+  - `store.py`: `visual_runs`, `visual_checks`, `visual_baselines`, with
+    approval history.
+  - `jobs.start_visual`, under the capture lock.
+  - CLI `swagperf visual run|list|show|approve`.
+  - `/api/visual*` routes that serve images by database id.
+  - Design-system `ImageFrame` and `ImageCompare`.
+  - A Visual page, and an Overview line: "Visual: n/m pass on this build".
+- **After v1:**
+  - the iOS simulator lane;
+  - running a flow inside a Perfetto session;
+  - automatic tracker issues for visual regressions (a `visual:` signal kind in
+    `triage.signals_of`);
+  - importing POC catalog flows;
+  - the CI lane.
+
+### Several cohorts with different layouts
+
+Pixel diffing on its own isn't robust across cohorts. It only knows "different
+from the baseline", so cohort B compared with cohort A's baseline reads as a
+regression. Four additions make it robust:
+
+1. **Cohort goes into the baseline key:**
+   `(app, cohort, device class, flow, checkpoint)`.
+2. **The cohort is pinned, not inferred:** a fixed test account per cohort (the
+   POC has `config/test-data/`) or a forced-cohort override in debug builds.
+3. **The cohort is checked at run time.** The app reports it, for example as a
+   `cohort:<id>` trace marker or a test tag the flow asserts. A mismatch is an
+   `error`, never a `changed` diff.
+4. **The data is frozen, and the layout recorded.**
+   - Runs use the mock environment, with recorded `/page/fetch` responses per
+     cohort.
+   - Each checkpoint stores a hash of its layout response, or its layout-contract
+     version. A diff can then say `layout_changed` (the backend sent a new layout:
+     expected) or `render_changed` (same layout, different pixels: likely an app
+     regression).
+
+Baselines multiply as cohorts × device classes × checkpoints (5 × 3 × 20 is 300
+images). Keep pixel baselines for a handful of key screens per cohort, and cover
+the rest with the layout checks under "Device sizes".
+
+### Keeping baselines current
+
+- **An intentional UI change is approved, not re-recorded.** It arrives as
+  `changed` with a diff. A reviewer approves it per checkpoint, or in bulk per
+  flow, cohort or device class, with a note. Every approval is kept (who, when,
+  which build, why), so one can be rolled back.
+- **The whole matrix in one pass.** A rebaseline run covers every cohort and
+  device class, and identical changes across device classes are grouped for one
+  approval.
+- **Housekeeping shows up as statuses:**
+  - backend layout changes arrive labelled `layout_changed`;
+  - checkpoints no longer captured read `missing`;
+  - baselines with no run in 30 days are flagged as possibly dead.
+- **Flows stay stable by targeting ids** (Compose `testTag`, `resource-id`),
+  never on-screen text.
+- **Where baselines live.** Once a CI lane exists, baselines should live where
+  the UI change is reviewed: committed to the app repo with Git LFS, so new
+  images show up in the pull request.
+
+### Device sizes
+
+A pixel baseline never carries across screen sizes, so there are two layers:
+
+- **Pixel baselines on a fixed matrix of device classes, not phone models.**
+  - About three classes: a small phone, the common 393–412 dp width, and a large
+    or foldable screen.
+  - Plus font scale 1.3 and dark mode where supported.
+  - Emulators with fixed profiles in CI; the Vivo stays for smoke runs, because
+    vendor skins change fonts and system bars.
+  - The key is resolution + density + font scale + theme. An unknown class reads
+    `new`.
+- **Layout checks at any size, with no baseline.** These are read from the view
+  hierarchy:
+  - key elements are visible and fully on screen;
+  - interactive elements don't overlap;
+  - touch targets are at least 48 dp;
+  - key labels aren't cut off with an ellipsis;
+  - nothing sits under the system bars.
+
+  They run on every device and cohort.
+
+One experiment comes first. Maestro 2.10 saves a view hierarchy only for failed
+or warned steps. Try three ways to get one at each checkpoint: an intentionally
+optional assert, `maestro hierarchy` between flow segments, and
+`uiautomator dump` (checking it doesn't clash with Maestro's driver).
+
+### Watch out for
+
+- **Home shows a live camera preview.** Mask it, or the Home checkpoint always
+  fails.
+- **Maestro's device server hangs on the Vivo after Store→Rewards** (POC
+  README). The POC drives its two real scenarios with raw ADB taps for this
+  reason.
+- **Use JDK 17 or 21.** Java 25 hangs Maestro's Android driver.
+- **Restore the device.** Device prep (animations off, demo mode) must always be
+  undone. A perf capture should warn if animations are still off.
+- **Keep the model away.** No screenshot is ever sent to it, the same boundary
+  swagperf keeps for traces.
+
+### Revisit when
+
+- work starts on ADR 0001's Maestro CI lane or its contract registry;
+- a UI regression reaches a build that a screenshot would have caught;
+- a phone where Maestro drives Swag Pay without the Vivo hang is attached, or an
+  emulator lane exists;
+- Swag Pay has cohort test accounts or a forced-cohort override;
+- the user asks.
+
+### Open questions
+
+- Which is the source of truth for cohorts: test accounts, a forced override, or
+  both?
+- Where do baselines live once CI exists: the local store, or the app repo with
+  Git LFS?
+- Which device classes make up the matrix?
+- How is a view hierarchy captured at each checkpoint?

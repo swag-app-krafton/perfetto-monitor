@@ -423,8 +423,10 @@ four kinds of item:
 - **performance issues found in runs** (P-). Each has a file in `docs/issues/`
   for a developer to review.
 
-A product-manager agent ([`.claude/agents/product-manager.md`](.claude/agents/product-manager.md))
-keeps the list current.
+A product-manager skill ([`.agents/skills/product-manager/SKILL.md`](.agents/skills/product-manager/SKILL.md))
+keeps the list current. It's one definition shared by every coding agent. Claude Code runs it as the
+`product-manager` agent, and the Claude Code and Cursor skills point to it. It also keeps a queue of
+parked work, and says when each item is worth coming back to.
 
 **After every recorded run** (a capture, a manual session, the end of a stress
 test, or `analyse`), swagperf reviews what is new:
@@ -1057,7 +1059,8 @@ tests/            154 tests over the pipeline, the store, the server, the Copilo
                   and Flashlight audits
 docs/             TRACKER.md (the live list), issues/ (perf issues from runs),
                   backlog, decisions and plans
-.claude/agents/   the product-manager agent
+.agents/skills/   the product-manager skill, shared by every coding agent
+.claude/agents/   the Claude Code product-manager agent (a pointer to the skill)
 ```
 
 ## Adapting it
