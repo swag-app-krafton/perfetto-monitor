@@ -1,0 +1,1 @@
+import{Dn as e,K as t}from"./design-CwizoajJ.js";import{_ as n,m as r}from"./index-CLLp9EKd.js";var i=e();function a({label:e,help:a,value:o,base:s,unit:c,note:l}){return(0,i.jsx)(t,{label:e,help:a,value:o==null?null:r(o),unit:c,delta:o!=null&&s!=null?{value:o-s,text:n(o-s,0,c?` ${c}`:``),against:`vs ${r(s)} in the previous run`}:null,note:l})}export{a as t};

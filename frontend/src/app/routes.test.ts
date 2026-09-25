@@ -34,3 +34,11 @@ describe('crashes & ANRs', () => {
     for (const to of Object.values(MOVED_PATHS)) expect(SCREENS.some((x) => x.path === to)).toBe(true)
   })
 })
+
+describe('hangs moved to Frame pacing', () => {
+  it('says so where readers look for them', () => {
+    expect(screenByPath('/frames').hint).toMatch(/hangs/i)
+    expect(screenByPath('/ios/frames').hint).toMatch(/hangs/i)
+    expect(screenByPath('/crashes').hint).toMatch(/hangs are on Frame pacing/i)
+  })
+})

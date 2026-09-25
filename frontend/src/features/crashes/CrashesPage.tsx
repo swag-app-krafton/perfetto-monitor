@@ -3,7 +3,7 @@ import { useStability } from '@/api/hooks'
 import type { AnrEvent, CrashEvent, JsErrorEvent, ResolvedFrame, Run, Stability } from '@/api/types'
 import { Card, CodeBlock, EmptyState, ExpandableTable, Grid, LineChart, Segmented, Stack, StatusPill, Text, type SegmentOption, type Tone } from '@/design'
 import { fmt } from '@/domain/format'
-import { filterIncidents, incidentCounts, incidentsOf, type Incident, type IncidentFilter } from '@/domain/incidents'
+import { filterIncidents, incidentCounts, incidentsOf, JS_SOURCE, nothingFound, runCrashCount, type Incident, type IncidentFilter } from '@/domain/incidents'
 import { useScope } from '@/domain/scope'
 import { DeltaTile } from '@/features/shared/DeltaTile'
 
@@ -58,7 +58,7 @@ export function CrashesPage() {
             series={[
               { name: 'JS exceptions', color: 'var(--c3)', values: scope.runs.map((r) => r.js_errors) },
               { name: 'ANRs', color: 'var(--c2)', values: scope.runs.map((r) => r.anr_count ?? null) },
-              { name: 'Crashes', color: 'var(--c1)', values: scope.runs.map((r) => r.crash_count ?? r.crashed) },
+              { name: 'Crashes', color: 'var(--c1)', values: scope.runs.map(runCrashCount) },
             ]}
             unit=""
             decimals={0}
@@ -66,10 +66,10 @@ export function CrashesPage() {
         </Card>
       )}
 
-      <Card title="What went wrong" hint="Every JS exception, ANR and crash in the run, in time order. Open a row for its stack, reason or crash log.">
+      <Card title="What went wrong" hint="Every JS exception, ANR and crash in the run, in time order. Open a row for its stack, reason or crash log. Hangs are on Frame pacing.">
         <Stack gap={12}>
           <Segmented label="Show" options={FILTERS} value={filter} onChange={setFilter} />
-          <IncidentTable rows={filterIncidents(all, filter)} empty={all.length ? 'None of this kind in this run.' : 'No JS exception, ANR or crash in this run.'} />
+          <IncidentTable rows={filterIncidents(all, filter)} empty={all.length ? 'None of this kind in this run.' : nothingFound(st)} />
           {st.errors.js > 0 && <SourceMapNote st={st} run={run} />}
         </Stack>
       </Card>
@@ -151,6 +151,7 @@ function JsErrorDetail({ e }: { e: JsErrorEvent }) {
   if (!e.has_record) return <Text variant="body">Only the marker arrived: the error's record (message and stack) is missing from the trace.</Text>
   return (
     <Stack gap={12}>
+      <Text variant="small">{JS_SOURCE[e.source]}</Text>
       {e.message ? <Text variant="body">{e.message}</Text> : null}
       {e.frames ? <CodeBlock lang="Stack, resolved (library frames indented)" code={e.frames.map(frameLine).join('\n')} /> : e.stack && <CodeBlock lang="Stack, as Hermes reported it" code={e.stack} />}
       {e.component_stack && <CodeBlock lang="Component stack" code={e.component_stack.trim()} defaultOpen={false} />}

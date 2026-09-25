@@ -25,12 +25,12 @@ export interface ScreenDef {
 const TRACE_SCREENS: ScreenDef[] = [
   { id: 'overview', path: '/overview', label: 'Overview', code: 'OV', group: 'ANALYSE', hint: 'The run in view against the pinned benchmark, or the run before it.', profiler: 'perfetto' },
   { id: 'startup', path: '/startup', label: 'Startup', code: 'ST', group: 'ANALYSE', hint: 'Time to initial display, critical-path composition and the ordering constraint.', profiler: 'perfetto' },
-  { id: 'frames', path: '/frames', label: 'Frame pacing', code: 'FP', group: 'ANALYSE', hint: 'Slow and janky frames, and whether the device throttled.', profiler: 'perfetto' },
+  { id: 'frames', path: '/frames', label: 'Frame pacing', code: 'FP', group: 'ANALYSE', hint: 'Slow and janky frames, hangs, and whether the device throttled.', profiler: 'perfetto' },
   { id: 'memory', path: '/memory', label: 'Memory', code: 'ME', group: 'ANALYSE', hint: 'Peak RAM and growth across the session.', profiler: 'perfetto' },
   { id: 'steps', path: '/steps', label: 'Steps', code: 'SP', group: 'ANALYSE', hint: 'Every startup step against its trailing baseline, with child slices.', profiler: 'perfetto' },
   { id: 'screens', path: '/screens', label: 'Screens', code: 'SC', group: 'ANALYSE', hint: "Per-screen CPU and RAM from the app's own screen markers.", profiler: 'perfetto' },
   { id: 'trend', path: '/trend', label: 'Trend', code: 'TR', group: 'ANALYSE', hint: 'Each metric across app versions, a line per device, with its pinned benchmark dotted.', profiler: 'perfetto', ignores: ['version', 'run', 'range'] },
-  { id: 'crashes', path: '/crashes', label: 'Crashes & ANRs', code: 'CR', group: 'ANALYSE', hint: 'JS exceptions, ANRs and crashes: when, on which screen, with the stack or crash log.', profiler: 'perfetto' },
+  { id: 'crashes', path: '/crashes', label: 'Crashes & ANRs', code: 'CR', group: 'ANALYSE', hint: 'JS exceptions, ANRs and crashes: when, on which screen, with the stack or crash log. Hangs are on Frame pacing.', profiler: 'perfetto' },
   { id: 'capture', path: '/capture', label: 'Capture', code: 'CA', group: 'RUN', hint: 'Profile an app installed on the connected device.', profiler: 'perfetto' },
   { id: 'stress', path: '/stress', label: 'Stress', code: 'SS', group: 'RUN', hint: 'Repeat cold starts to separate a real regression from noise.', profiler: 'perfetto' },
   { id: 'manual', path: '/manual', label: 'Manual', code: 'MA', group: 'RUN', hint: 'Drive the app by hand while it is traced, then analyse.', profiler: 'perfetto' },
@@ -48,7 +48,7 @@ const FLASHLIGHT_SCREENS: ScreenDef[] = [
 // The iOS lane: the trace screens again, reading iOS runs (Instruments
 // recordings converted to Perfetto traces). Manual sessions are not on iOS yet.
 const IOS_HINTS: Record<string, string> = {
-  frames: 'Slow and janky frames. Not measured on the iOS Simulator, which supports none of Instruments\' frame instruments.',
+  frames: 'Slow and janky frames, and hangs. Frames are not measured on the iOS Simulator, which supports none of Instruments\' frame instruments; hangs are.',
   capture: 'Profile an app installed on the booted iOS Simulator.',
   stress: 'Repeat cold starts on the simulator to separate a real change from noise.',
 }

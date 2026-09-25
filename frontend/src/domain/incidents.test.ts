@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { Stability } from '@/api/types'
-import { filterIncidents, incidentCounts, incidentsOf } from './incidents'
+import type { Run, Stability } from '@/api/types'
+import { filterIncidents, incidentCounts, incidentsOf, nothingFound, runCrashCount } from './incidents'
 
 const st = (over: Partial<Stability> = {}): Stability => ({
   hangs: {
@@ -74,5 +74,29 @@ describe('incidents', () => {
   it('says a trace without the crash log did not measure crashes', () => {
     const none = st({ crash: { measured: false, crashed: false, reason: null, count: null, events: [] } })
     expect(incidentCounts(none).crash).toBeNull()
+  })
+
+  it('says how each JS exception surfaced', () => {
+    expect(incidentsOf(st()).find((i) => i.kind === 'js')!.how).toBe('Uncaught')
+  })
+
+  it('charts a run whose crashes were not measured as a gap, never 0', () => {
+    const noLog = st({ crash: { measured: false, crashed: false, reason: null, count: null, events: [] } })
+    expect(runCrashCount({ stability: noLog, crashed: 0 } as Run)).toBeNull()
+    expect(runCrashCount({ stability: null, crashed: 0 } as Run)).toBeNull()
+    expect(runCrashCount({ stability: st(), crashed: 1 } as Run)).toBe(1)
+  })
+
+  it('says which kinds were not measured when nothing was found', () => {
+    const none = { js: 0, js_fatal: 0, by_name: {}, by_source: {}, per_screen: {}, events: [] }
+    const noAnr = { measured: true, count: 0, by_type: {}, per_screen: {}, events: [] }
+    const noCrash = { measured: true, crashed: false, reason: null, count: 0, events: [] }
+    expect(nothingFound(st({ errors: none, anrs: noAnr, crash: noCrash }))).toBe('No JS exception, ANR or crash in this run.')
+    expect(nothingFound(st({ errors: none, anrs: noAnr, crash: { ...noCrash, measured: false, count: null } }))).toBe(
+      'No JS exception or ANR in this run. Crashes were not measured.',
+    )
+    expect(nothingFound(st({ errors: none, anrs: undefined, crash: { ...noCrash, measured: false, count: null } }))).toBe(
+      'No JS exception in this run. ANRs and crashes were not measured.',
+    )
   })
 })
