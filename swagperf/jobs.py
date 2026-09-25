@@ -99,7 +99,7 @@ def _capture_kw(platform, jid):
     return {"on_log": lambda line: _log(jid, line)} if platform == "ios" else {}
 
 
-def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=False,
+def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, ai_summary=False,
                   device=None, platform="android"):
     """Validate inputs, then run capture + extract + record on a background
     thread. Returns the job id immediately."""
@@ -109,7 +109,8 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
         raise ValueError("Warm captures are not supported on iOS yet. Capture cold.")
     duration_ms = max(2000, min(int(duration_ms), 120_000))
     jid = _new("capture", pkg=pkg, cold=bool(cold), duration_ms=duration_ms,
-               platform=platform)
+               platform=platform, ai_summary=bool(ai_summary))
+    recorded = []
 
     def run():
         if not _capture_lock.acquire(blocking=False):
@@ -168,10 +169,11 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
             rid = store.record(m, label=label or f"{'cold' if cold else 'warm'}-capture",
                                device=dev_label, trace_path=out, app_pkg=m.get("app_pkg"), meta=meta)
             _log(jid, f"recorded as run {rid} ({m['path_kind']})")
+            recorded.append(rid)
 
             from .cli import _analyse_run
-            _log(jid, "running analysis (rules)" + (" + model" if use_llm else "") + "…")
-            res, regs = _analyse_run(rid, m, use_llm=use_llm)
+            _log(jid, "running analysis (rules)…")
+            res, regs = _analyse_run(rid, m, use_llm=False)
             _log(jid, f"verdict: {res.get('verdict')} — {res.get('headline','')}")
             from . import pm
             _log(jid, pm.request_review())
@@ -186,13 +188,14 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, use_llm=Fals
             _set(jid, state="error", error=str(e))
         finally:
             _capture_lock.release()
+            _summarise_after(jid, recorded, ai_summary)
 
     threading.Thread(target=run, daemon=True).start()
     return jid
 
 
 def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
-                 settle_ms=1500, use_llm=False, device=None, platform="android"):
+                 settle_ms=1500, ai_summary=False, device=None, platform="android"):
     """Capture N cold-start sessions of one app back to back.
 
     A single cold start is a noisy measurement: the same app on the same device
@@ -208,7 +211,8 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
     sessions = max(2, min(int(sessions), 30))
     duration_ms = max(2000, min(int(duration_ms), 60_000))
     jid = _new("stress", pkg=pkg, cold=bool(cold), duration_ms=duration_ms,
-               sessions=sessions, platform=platform)
+               sessions=sessions, platform=platform, ai_summary=bool(ai_summary))
+    recorded = []
 
     def run():
         if not _capture_lock.acquire(blocking=False):
@@ -256,8 +260,11 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
                     rid = store.record(
                         m, label=f"stress{stress_id}-s{i:02d}", device=dev_label,
                         trace_path=out, app_pkg=m.get("app_pkg"), meta=meta)
+                    recorded.append(rid)
                     from .cli import _analyse_run
-                    _analyse_run(rid, m, use_llm=use_llm)
+                    # Rules only, inside the loop: a model call here would put
+                    # minutes between cold starts that should be back to back.
+                    _analyse_run(rid, m, use_llm=False)
                     ttid = m["startup"]["time_to_first_camera_frame_ms"]
                     store.stress_session_done(stress_id, i, run_id=rid, ttid_ms=ttid)
                     ok += 1
@@ -302,12 +309,13 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
             _set(jid, state="error", error=str(e))
         finally:
             _capture_lock.release()
+            _summarise_after(jid, recorded, ai_summary)
 
     threading.Thread(target=run, daemon=True).start()
     return jid
 
 
-def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
+def start_manual_stop(*, label=None, app_pkg=None, ai_summary=False, device=None):
     """Stop a manual session, then pull, extract and record it.
 
     Stopping is quick but pulling a long manual trace is not -- a ring buffer
@@ -317,7 +325,8 @@ def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
     from . import capture as cap
     if not cap.manual_status(device)["recording"]:
         raise RuntimeError("No manual trace is recording.")
-    jid = _new("manual_stop", pkg=app_pkg)
+    jid = _new("manual_stop", pkg=app_pkg, ai_summary=bool(ai_summary))
+    recorded = []
 
     def run():
         if not _capture_lock.acquire(blocking=False):
@@ -364,8 +373,9 @@ def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
             except Exception as se:
                 _log(jid, f"screen extraction skipped: {se}")
 
+            recorded.append(rid)
             from .cli import _analyse_run
-            res, _ = _analyse_run(rid, m, use_llm=use_llm)
+            res, _ = _analyse_run(rid, m, use_llm=False)
             _log(jid, f"verdict: {res.get('verdict')} — {res.get('headline','')}")
             from . import pm
             _log(jid, pm.request_review())
@@ -380,6 +390,7 @@ def start_manual_stop(*, label=None, app_pkg=None, use_llm=False, device=None):
             _set(jid, state="error", error=str(e))
         finally:
             _capture_lock.release()
+            _summarise_after(jid, recorded, ai_summary)
 
     threading.Thread(target=run, daemon=True).start()
     return jid
@@ -468,3 +479,94 @@ def start_audit(pkg, *, iterations=5, duration_ms=10000, label=None, device=None
 
     threading.Thread(target=run, daemon=True).start()
     return jid
+
+
+# ------------------------------------------------------------- AI summaries
+# Run ids with a summary being written, so two requests can't write two at
+# once (under _LOCK).
+_summarising = set()
+# How often a waiting summary job checks whether the device is free.
+SUMMARY_WAIT_S = 1.0
+
+
+def _summarise_after(jid, run_ids, wanted):
+    """After a capture job has released the device: start the AI summaries
+    its switch asked for, and link that job from the capture job."""
+    if not (wanted and run_ids):
+        return
+    try:
+        sid = start_summary(run_ids)
+        _set(jid, summary_job=sid)
+        _log(jid, f"writing the AI summary in job {sid}")
+    except Exception as e:   # never let a summary fail the capture
+        _log(jid, f"AI summary not started: {e}")
+
+
+def start_summary(run_ids):
+    """Write an AI summary for each run, one after another, on a background
+    thread (F-023). Returns the job id immediately.
+
+    It doesn't hold the capture lock: it touches no device. It waits while a
+    capture holds it instead, because a model call during a capture competes
+    for the machine a simulator run measures, and a capture's own timing
+    shouldn't depend on it. A run already being summarised is refused."""
+    ids = []
+    for r in run_ids:
+        r = int(r)
+        if r not in ids:
+            ids.append(r)
+    if not ids:
+        raise ValueError("no run to summarise")
+    with _LOCK:
+        taken = [r for r in ids if r in _summarising]
+        if taken:
+            raise RuntimeError(f"A summary of run #{taken[0]} is already being written.")
+        _summarising.update(ids)
+    jid = _new("summary", run_ids=ids)
+
+    def run():
+        written, failed = [], []
+        try:
+            _set(jid, state="running")
+            from . import summary
+            for i, rid in enumerate(ids, 1):
+                _set(jid, progress={"current": i, "total": len(ids)})
+                if busy():
+                    _log(jid, "waiting for the capture on the device to finish…")
+                    while busy():
+                        time.sleep(SUMMARY_WAIT_S)
+                _log(jid, f"run {rid}: writing the AI summary…")
+                try:
+                    res = summary.write(rid)
+                except Exception as e:
+                    failed.append({"run_id": rid, "error": str(e)})
+                    _log(jid, f"run {rid}: FAILED: {e}")
+                    continue
+                if res is None:
+                    failed.append({"run_id": rid, "error": summary.NO_MODEL})
+                    _log(jid, f"run {rid}: {summary.NO_MODEL}")
+                    continue
+                written.append(rid)
+                _log(jid, f"run {rid}: {res.get('headline', '')}")
+            result = {"run_ids": ids, "written": written, "failed": failed}
+            if written:
+                _set(jid, state="done", result=result)
+            else:
+                _set(jid, state="error", result=result,
+                     error=failed[0]["error"] if failed else "nothing was written")
+        except Exception as e:
+            _log(jid, f"ERROR: {e}")
+            _set(jid, state="error", error=str(e), result={"run_ids": ids, "written": written,
+                                                           "failed": failed})
+        finally:
+            with _LOCK:
+                _summarising.difference_update(ids)
+
+    threading.Thread(target=run, daemon=True).start()
+    return jid
+
+
+def summarising(run_id):
+    """Whether a summary of this run is being written now."""
+    with _LOCK:
+        return int(run_id) in _summarising

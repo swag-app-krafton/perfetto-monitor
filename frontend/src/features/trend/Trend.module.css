@@ -1,0 +1,6 @@
+/* The pickers above the charts: one ChipGroup per row. */
+.pickers {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

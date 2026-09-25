@@ -391,3 +391,196 @@ phone, and frames can't be measured on it at all.
 - The bundle id is still the prototype's placeholder, `com.cambench.compose.ios`. Change
   it in `apps.json` and `iosApp.xcodeproj` together, and before recording runs that should
   be kept.
+
+---
+
+## AI run summary, and a benchmark comparison
+
+**Tracker:** F-023, F-024
+**Status:** implemented 2026-09-25, after T-001 (see F-023 and F-024 in TRACKER.md for what was built). The user answered Q-S1 and Q-S2 on 2026-09-25 (see "Answered by the user").
+**Raised:** 2026-09-25, when the user asked: "I want for each run an AI generated summary
+view to be available, or maybe give one toggle while capturing a run to auto-generate RUN
+summary. And compare against some benchmark as well"
+
+### What
+
+1. **A summary for every run (F-023).** The run's model-written analysis in the dashboard:
+   verdict, headline, each finding with its evidence, runtime, architectural risk and
+   recommendation, and the signals it looked at and dismissed. The summary also says who
+   wrote it (which model and when, or "rules").
+2. **Generate on demand (F-023).** A run analysed by the rules only gets a **Generate
+   summary** action. It runs the analyst on the run's stored metrics and adds a row to
+   `analyses`, and the rules row stays.
+3. **Auto-generate at capture (F-023).** A switch on Capture, Stress and manual sessions:
+   write an AI summary when the run is recorded. Off by default, because it spends the
+   user's Claude quota.
+4. **Benchmark comparison (F-024).** The summary says how the run compares with a
+   benchmark: per metric and per step, the run's value, the benchmark's value, the
+   difference, and the model's reading of it. The benchmark is the pinned benchmark run (Q-S1).
+
+### What exists today
+
+- **The model analyst.** `analyst.run_analysis` tries the local `claude` CLI first (the
+  user's subscription, so no API key), then the Anthropic API, then rules. It returns a
+  verdict, headline, findings and dismissed signals. `cli._analyse_run` stores each result
+  in `analyses` with the model's name. The analyst sees only extracted metrics and
+  baselines, never a trace.
+- **The CLI uses it; the dashboard doesn't.** `swagperf analyze` uses the model by default
+  (`--no-llm`, `--backend`). Dashboard runs are rules only: the server's
+  `/api/capture/start`, `/api/stress/start` and `/api/manual/stop` already accept
+  `use_llm` and pass it to `jobs.py`, but the dashboard never sends it. So most of item 3
+  is a switch.
+- **The view mostly exists.** Overview shows the newest analysis's headline, "Run #N vs
+  Benchmark #M" (or the recent median) and its findings as `FindingCard`s, and Startup
+  shows its own findings. Nothing shows the dismissed signals, or whether a model or the
+  rules wrote the analysis.
+- **Benchmarks.** One run is pinned per app, path and device (`swagperf benchmark set`,
+  History's **Pin as benchmark**). A pinned benchmark replaces the trailing baseline in
+  `store.regressions`. It is never taken from another app, and a simulator run can't be
+  pinned. The analyst's payload (`analyst.build_payload`) gets the regressions judged
+  against it, but not the benchmark run's own numbers or its id.
+- **Competitors.** The catalogue lists competitor apps, which are captured as derived runs.
+  Compare diffs any two runs.
+
+### Shape of the work
+
+- **F-023, server.**
+  - A `POST /api/analysis/generate` that runs `_analyse_run(..., use_llm=True)` on a
+    recorded run from its stored metrics, as a job, so the page follows it the way it
+    follows a capture.
+  - Returns the new analysis, or the rules result under a banner when no model backend
+    worked. `run_analysis` already falls back to the rules.
+- **F-023, dashboard.**
+  - A Summary section on Overview, built from the design system (T-003's lint rule and
+    showcase test apply). It shows the author and time, the findings, the dismissed signals
+    and the Generate summary action.
+  - The capture switch on Capture, Stress and manual sessions sends `use_llm`.
+- **F-024.**
+  - `build_payload` gains the benchmark: its run id, its top-line metrics and its step
+    durations, taken from `store.get_benchmark` for the run's scope.
+  - The prompt asks for a comparison section.
+  - The summary shows the comparison as a table built from the payload, not from the
+    model's text. The model's words sit beside the table.
+
+### Watch out for
+
+- **T-001 first.** The server accepted POSTs from any website, so a Generate summary endpoint
+  would have let one request spend the user's Claude quota with no phone connected. T-001
+  landed first, on 2026-09-25.
+- **Numbers.** Measurement is deterministic and judgement isn't. Every number in the summary
+  must come from the payload. Flag any number the model writes that isn't in the payload,
+  as F-001 plans for the Copilot.
+- **Wrong data read aloud.** A summary of a derived Swag Pay startup repeats B-010's wrong
+  pass in confident prose. Land B-010's interim guard first. Also apply B-009's debug-build
+  kind and the simulator rules to the summary: verdict capped at warn, and no benchmark.
+- **Stress tests.** `jobs.py` analyses each session inside the capture loop, and each model
+  call can take up to 180 s (`analyse_via_cli`'s timeout). With the switch on, a 10-session
+  stress test makes 10 model calls between its cold starts. That changes the spacing
+  between sessions, and each session's recorded thermal state depends on that spacing.
+  Write summaries after the last capture, or write one summary for the whole stress test.
+- **Verdicts changing after the fact.** The dashboard shows each run's newest `analyses`
+  row, so a summary generated later can change a run's pass, warn or fail (Q-S2).
+- **Re-extraction.** `swagperf reextract` recomputes verdicts with the rules and lists
+  runs that a model analysed as out of date. The summary should say when it is out of date.
+- **Backend choice.** F-001 plans a Rules / Claude / Codex switch for the Copilot. Use one
+  choice for both features, not two.
+
+### Answered by the user
+
+- **Q-S1, which benchmark a summary compares against** (2026-09-25): "Yes the same pinned
+  benchmark". The summary compares the run with the pinned benchmark run for its app, path
+  and device. Competitor runs and published thresholds are not part of F-024.
+- **Q-S2, whether a later summary may change the run's verdict** (2026-09-25): "No, summary is
+  text only". The verdict stays the rules' verdict recorded at capture. A summary is stored as
+  its own kind of analysis row, and when the model reads the run differently the page says so
+  beside the recorded verdict. CLI `analyse` and `capture --analyse` keep writing model verdicts,
+  as before.
+
+### Open questions (the user's call)
+
+None open.
+
+---
+
+## Release archive: bundles and source maps per build
+
+**Tracker:** F-030
+**Status:** in progress since 2026-09-25. The swag-pay half is on branch `release-archive`
+(worktree `~/Documents/swag-pay-release-tooling`), committed and not pushed. The swagperf
+half is in the working tree.
+**Raised:** 2026-09-25, when the user asked where JS exceptions should be resolved to "the
+exact site", then set the flow: "build generation (input versionNumber + versionCode) -> git
+tag -> store hbc file"
+
+### What
+
+- **One command per release in swag-pay:** `apps/mobile/scripts/release_build.py
+  --version-name 1.2.0 --version-code 42`.
+  - It builds Android (the release APK) and iOS (the Release simulator app).
+  - It tags the commit `v1.2.0-42` and pushes the tag.
+  - It attaches each platform's Hermes bundle, composed source map and a `manifest.json`
+    to a GitHub Release on that tag.
+- **swagperf fetches from the archive:** `swagperf maps fetch --tag v1.2.0-42` (or `--all`)
+  downloads a Release and registers each map under its bundle's hash and under
+  `build-<versionCode>`. The Stability page then resolves that build's JS errors.
+
+### Why
+
+- **Only that build's map fits.** A release build's JS error reads
+  `at fn (address at index.android.bundle:1:4974)`, and only that exact build's composed map
+  turns the offset back into a file and line. On 2026-09-25, four real errors in Swag Pay's
+  Android release build resolved to their exact throwing lines this way (see F-014).
+- **The build number can't find the map.** Every local build is versionCode 1 / 1.0.0 on
+  Android and 2026090403 on iOS. The test fixtures' build and the 2026-09-25 build are both
+  versionCode 1, yet Metro's module ids differ between them (520 became 517).
+- **Nothing kept the maps.** Each build overwrote the last one's.
+
+### Decisions already taken
+
+The user decided these on 2026-09-25:
+- **Where the archive lives:** a GitHub Release on the tag, in `swag-app-krafton/swag-pay`,
+  which is private. The maps carry the full source (`sourcesContent`), so they must never go
+  anywhere public.
+- **How the version gets in:** at build time, as `-Pswag.versionCode/-Pswag.versionName` for
+  Gradle and `MARKETING_VERSION/CURRENT_PROJECT_VERSION` for xcodebuild. There are no version
+  commits, so the tagged commit is exactly what was built. Without the properties a build is
+  1 / 1.0.0, which marks a local dev build.
+- **Platforms:** Android and iOS, under one tag.
+
+Settled in the plan the user approved:
+- **Tag format:** `v<name>-<code>`. `+` is avoided because GitHub URLs have mishandled it.
+- **Version rules:** the code is 2 or more, and above every earlier tag's.
+- **Where it builds:** a dedicated worktree (`~/Documents/swag-pay-release`), detached at the
+  commit, never the tree other sessions share.
+- **Checks before archiving:**
+  - The APK's own bundle has the same sha256 as the archived one.
+  - The APK's version and package match.
+  - The app's Info.plist version matches.
+- **Asking first:** the script asks before it tags and pushes.
+- **Dry runs** build as `<name>-dryrun` / code 1 and never tag.
+
+### Watch out for
+
+- **The first real release has to wait for the merge.** `--ref origin/main` needs the
+  `build.gradle.kts` hunk, and until `release-archive` is merged the script refuses to build
+  a commit without it.
+- **Killcam must sit next to the build worktree.** origin/main resolves Killcam from a
+  sibling checkout (`../killcam`), so the build worktree has to be next to it. The script
+  checks this.
+- **Lint errors that don't fail the build.** The Android release build logs Kotlin metadata
+  errors from `killcam-no-op` (compiled with Kotlin 2.4, while the app uses 2.2), but it
+  completes. That's Killcam's to fix, not this item's.
+- **Build numbers aren't unique on iOS runs.** A run that recorded its bundle's hash (iOS
+  does) is now matched by the hash alone: a local build shares a build number with other
+  builds, and falling back to it could pick the wrong map. Android runs record only the
+  version code, so they rely on `build-<n>`, which is safe only for tagged builds.
+
+### Follow-ups, not in this item
+
+- **JS error records carry the bundle hash.** An error pasted or uploaded on its own can then
+  find its map. Today the record has name, message, stack, component stack, fatal and source.
+- **Android capture reads the bundle hash from the installed APK**, as iOS capture already
+  does (`capture_ios.py`).
+- **The crash reporter gets its upload from the same step**, once Datadog or Sentry is
+  chosen.
+- **A "Resolve" page**, where you paste a stack or upload a trace, after T-001.

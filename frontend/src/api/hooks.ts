@@ -11,9 +11,11 @@ import type {
   Platform,
   RunDetails,
   RunnerStatus,
+  RunSummary,
   ScreensPayload,
   Stability,
   StressTest,
+  TrendPayload,
 } from './types'
 
 export const keys = {
@@ -31,7 +33,19 @@ export const keys = {
   stability: (id: number) => ['stability', id] as const,
   audits: ['audits'] as const,
   audit: (id: number) => ['audits', id] as const,
+  summary: (runId: number) => ['summary', runId] as const,
+  trend: (app: string, path: string, platform: Platform) => ['trend', app, path, platform] as const,
 }
+
+/** One app and start path across every version (F-026), from every run, not
+ *  the newest 100 that /api/history holds. */
+export const useTrend = (app: string, path: string, platform: Platform) =>
+  useQuery({
+    queryKey: keys.trend(app, path, platform),
+    queryFn: () =>
+      api.get<TrendPayload>(`/api/trend?app=${encodeURIComponent(app)}&path=${encodeURIComponent(path)}&platform=${platform}`),
+    enabled: !!app && !!path,
+  })
 
 export const useHistory = () =>
   useQuery({ queryKey: keys.history, queryFn: () => api.get<HistoryPayload>('/api/history') })
@@ -127,12 +141,31 @@ export function useBenchmarkMutations() {
   }
 }
 
-export const startCapture = (v: { pkg: string; cold: boolean; duration_ms: number; platform?: Platform }) =>
+export const startCapture = (v: { pkg: string; cold: boolean; duration_ms: number; platform?: Platform; ai_summary?: boolean }) =>
   api.post<{ job_id: string }>('/api/capture/start', v)
-export const startStress = (v: { pkg: string; sessions: number; cold: boolean; duration_ms: number; platform?: Platform }) =>
+export const startStress = (v: { pkg: string; sessions: number; cold: boolean; duration_ms: number; platform?: Platform; ai_summary?: boolean }) =>
   api.post<{ job_id: string }>('/api/stress/start', v)
 export const manualStart = (v: { pkg: string; cold: boolean }) => api.post('/api/manual/start', v)
-export const manualStop = (v: { pkg: string }) => api.post<{ job_id: string }>('/api/manual/stop', v)
+export const manualStop = (v: { pkg: string; ai_summary?: boolean }) => api.post<{ job_id: string }>('/api/manual/stop', v)
+
+/** A run's AI summary (F-023), and whether one is being written now. Polls
+ *  while it is, so the card fills in when the job finishes. */
+export const useSummary = (runId: number | null) =>
+  useQuery({
+    queryKey: keys.summary(runId ?? -1),
+    queryFn: () => api.get<{ run_id: number; summary: RunSummary | null; generating: boolean }>(`/api/summary?run=${runId}`),
+    enabled: runId != null,
+    refetchInterval: (q) => (q.state.data?.generating ? 2_000 : false),
+  })
+
+/** Start writing a run's AI summary. The job is followed with useJob. */
+export function useGenerateSummary() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (runId: number) => api.post<{ job_id: string }>('/api/summary/generate', { run_id: runId }),
+    onSuccess: (_r, runId) => qc.invalidateQueries({ queryKey: keys.summary(runId) }),
+  })
+}
 export const manualAbort = () => api.post('/api/manual/abort')
 
 /** Recent background jobs, so a page can find its running job again after a

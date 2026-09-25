@@ -6,7 +6,7 @@ import type { Scope } from '@/domain/scope'
 import { NO_VERSION, versionLabel } from '@/domain/versions'
 import { AuditPicker } from './AuditPicker'
 import { PROFILERS, toLane, useProfiler } from './profiler'
-import { homeOf, SCREENS } from './routes'
+import { homeOf, SCREENS, screenByPath } from './routes'
 import { RunPicker } from './RunPicker'
 import { useUi, type Profiler, type RangeKey } from './store'
 import s from './Shell.module.css'
@@ -38,6 +38,7 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
   const audits = useAuditScope().scope
   // The trace lanes (Android and iOS) share their screens and controls.
   const trace = profiler !== 'flashlight'
+  const ignores = screenByPath(pathname).ignores ?? []
   // Switching between the trace lanes keeps the page (Memory stays Memory);
   // anything else opens the lane's first screen.
   const switchProfiler = (p: Profiler) => {
@@ -84,7 +85,7 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
             onChange={(v) => setFilters({ path: v })}
           />
         )}
-        {trace && scope && scope.versions.some((v) => v.key !== NO_VERSION) && (
+        {trace && scope && !ignores.includes('version') && scope.versions.some((v) => v.key !== NO_VERSION) && (
           <SelectField
             label="Version"
             value={scope.versions.some((v) => v.key === version) ? version : ''}
@@ -96,8 +97,8 @@ export function TopBar({ scope, narrow }: { scope: Scope | null; narrow: boolean
           />
         )}
         {/* The one place a run is chosen: every screen shows the run picked here. */}
-        {trace && scope && scope.allRuns.length > 0 && <RunPicker scope={scope} runId={runId} />}
-        {trace && <SelectField label="Range" value={range} options={RANGES} onChange={(v) => setFilters({ range: v })} />}
+        {trace && scope && !ignores.includes('run') && scope.allRuns.length > 0 && <RunPicker scope={scope} runId={runId} />}
+        {trace && !ignores.includes('range') && <SelectField label="Range" value={range} options={RANGES} onChange={(v) => setFilters({ range: v })} />}
         <Link className={s.tokensLink} to="/design-system">
           Tokens
         </Link>

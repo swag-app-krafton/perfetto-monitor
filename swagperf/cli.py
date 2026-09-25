@@ -20,23 +20,12 @@ from . import extract as ex, store, analyst, synth
 
 def _analyse_run(rid, metrics, *, use_llm, db=None):
     regs = store.regressions(rid, db=db)
-    # Scoped like regressions(): the same app, platform and kind of device.
-    baselines = {s["step"]: store.baseline(
-                     s["step"], exclude_run=rid, app_pkg=metrics.get("app_pkg"),
-                     platform=metrics.get("platform") or "android",
-                     simulator=bool(metrics.get("simulator")), db=db)
-                 for s in metrics["steps"]}
-    baselines = {k: v for k, v in baselines.items() if v}
+    baselines = store.step_baselines(rid, metrics, db=db)
     if use_llm:
         res = analyst.run_analysis(metrics, regs, baselines)
     else:
         res = analyst.heuristic(metrics, regs)
-    c = store.connect(db)
-    from datetime import datetime, timezone
-    c.execute("insert into analyses (run_id,created,model,verdict,json) values (?,?,?,?,?)",
-              (rid, datetime.now(timezone.utc).isoformat(timespec="seconds"),
-               res.get("_model", "heuristic"), res.get("verdict"), json.dumps(res)))
-    c.commit(); c.close()
+    store.add_analysis(rid, res, kind="verdict", db=db)
     return res, regs
 
 
@@ -49,10 +38,12 @@ def _print(res, regs, metrics):
     print(f"\n  {word}  {res.get('headline','')}\n")
     st = metrics["startup"]
     label = metrics.get("startup_metric", "time to first camera frame")
-    budget_txt = (f" / {st['budget_ms']}ms budget" if st.get("budget_ms")
-                  else " (simulator run: no budget applies)" if metrics.get("simulator")
-                  else " (no budget set for this app)")
-    print(f"  {label}  {st['time_to_first_camera_frame_ms']}ms{budget_txt}")
+    target_txt = (f" / {st['budget_ms']}ms North Star target" if st.get("budget_ms")
+                  else " (simulator run: no North Star target applies)" if metrics.get("simulator")
+                  else " (no startup North Star target)")
+    print(f"  {label}  {st['time_to_first_camera_frame_ms']}ms{target_txt}")
+    if not st.get("budget_ms") and st.get("target_reason") and not metrics.get("simulator"):
+        print(f"  {st['target_reason']}")
     if metrics.get("derived"):
         why = ("its step: markers are untimed" if "untimed" in (metrics.get("note") or "")
                else "not instrumented")
@@ -88,7 +79,7 @@ def _print_compare(d):
           f"  vs  run {b['id']} ({b['label'] or 'no label'}{', ' + b['git_sha'] if b['git_sha'] else ''})")
     if not d["comparable"]:
         print(f"  \033[33mWARNING\033[0m different startup paths "
-              f"({a['path_kind']} vs {b['path_kind']}) \u2014 these budgets are not comparable")
+              f"({a['path_kind']} vs {b['path_kind']}) \u2014 their North Star targets are not comparable")
     if not d["same_device"]:
         print(f"  \033[33mWARNING\033[0m different devices "
               f"({a['device'] or '?'} vs {b['device'] or '?'}) \u2014 variance will be inflated")
@@ -294,7 +285,7 @@ def main(argv=None):
     apa.add_argument("--category"); apa.add_argument("--region")
     apa.add_argument("--instrumented", action="store_true")
     apa.add_argument("--ttid-budget", type=float,
-                     help="startup budget in ms; only meaningful for your own app")
+                     help="startup North Star target in ms; only meaningful for your own app")
     apa.add_argument("--notes")
     apr = apx.add_parser("remove", help="remove an app")
     apr.add_argument("pkg")
@@ -307,6 +298,10 @@ def main(argv=None):
     cm.add_argument("base", nargs="?", type=int,
                     help="the run to compare against (default: the pinned benchmark)")
     cm.add_argument("--json", action="store_true")
+
+    sm = sub.add_parser("summary", help="write an AI summary of a recorded run (never changes its verdict)")
+    sm.add_argument("run", type=int)
+    sm.add_argument("--json", action="store_true")
 
     bm = sub.add_parser("benchmark", help="pin, show or clear the reference run")
     bmx = bm.add_subparsers(dest="bcmd", required=True)
@@ -637,7 +632,7 @@ def main(argv=None):
                 if not a.get("verified"):
                     flags.append("unverified pkg")
                 if a.get("budgets"):
-                    flags.append("has budgets")
+                    flags.append("has North Star targets")
                 print(f"  {a['platform']:<8} {a.get('role',''):<11} {a['pkg']:<42} {a.get('name',''):<20}"
                       + (f"  [{', '.join(flags)}]" if flags else ""))
             print(f"\n  {len(rows)} app(s). Unverified package names should be confirmed "
@@ -688,6 +683,30 @@ def main(argv=None):
                     print(f"      \u2026 and {len(extra) - 25} more")
             print("\n  verified flags updated for installed catalogue apps.")
             return 0
+
+    if n.cmd == "summary":
+        from . import summary
+        try:
+            res = summary.write(n.run)
+        except LookupError as e:
+            print(f"  {e}", file=sys.stderr)
+            return 2
+        if res is None:
+            print(f"  {summary.NO_MODEL}", file=sys.stderr)
+            return 1
+        if n.json:
+            print(json.dumps(res, indent=2))
+            return 0
+        print(f"\n  {res.get('headline', '')}\n")
+        if res.get("summary"):
+            print(f"  {res['summary']}\n")
+        b = res.get("_benchmark")
+        if b and res.get("benchmark_comparison"):
+            print(f"  Against benchmark run {b['base']['id']}: {res['benchmark_comparison']}\n")
+        if res.get("_unverified"):
+            print(f"  \033[33mnot found in the run's data:\033[0m {', '.join(res['_unverified'])}")
+        print(f"  written by {res.get('_model')}; the run's verdict is unchanged")
+        return 0
 
     if n.cmd == "benchmark":
         if n.bcmd == "set":
@@ -804,12 +823,9 @@ def main(argv=None):
         # are cheap and deterministic, so they are recomputed. An LLM-written
         # analysis is not regenerated behind the user's back (it costs API
         # calls); those runs are listed so they can be re-analysed on purpose.
-        c = store.connect()
-        latest = {r["run_id"]: r["model"] for r in c.execute(
-            """select a.run_id, a.model from analyses a join
-               (select run_id, max(id) mid from analyses group by run_id) m
-               on a.id = m.mid""")}
-        c.close()
+        # Verdict rows only: an AI summary (F-023) is never the verdict.
+        latest = {rid: r["model"] for rid, r in store.latest_analyses("verdict").items()}
+        summarised = set(store.latest_analyses("summary"))
         redone, stale = 0, []
         for rid, m in res.get("metrics", {}).items():
             if latest.get(rid, "heuristic") == "heuristic":
@@ -820,6 +836,11 @@ def main(argv=None):
         print(f"  re-analysed {redone} rules-only verdict(s)")
         if stale:
             print(f"  left as-is (LLM analysis; re-run `analyse` to refresh): {stale}")
+        # A summary describes the numbers it was written from. The new verdict
+        # row marks it stale on the dashboard; say so here too.
+        outdated = sorted(summarised & set(res.get("metrics", {})))
+        if outdated:
+            print(f"  AI summaries now out of date (regenerate with `swagperf summary RUN`): {outdated}")
         return 0
 
     if n.cmd == "triage":

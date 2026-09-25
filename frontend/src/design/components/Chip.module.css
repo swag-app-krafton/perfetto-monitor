@@ -81,3 +81,26 @@
   color: var(--tx3);
   font-variant-numeric: tabular-nums;
 }
+
+.toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.25;
+}
+.toggle:disabled:hover {
+  border-color: var(--line2);
+}
+
+/* A labelled row of toggles: the label leads, the chips wrap after it. */
+.group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.groupLabel {
+  min-width: 96px;
+  font: 600 11px var(--font-ui);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tx3);
+}

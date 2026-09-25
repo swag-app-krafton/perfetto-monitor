@@ -22,3 +22,5 @@ The skill is the one definition every coding agent shares. Claude Code runs it a
 ## Wording
 
 In anything a reader sees, call the memory metric "RAM usage" and its growth "RAM growth", never "RSS". The `rss` names in code and keys stay as they are, for schema stability.
+
+Call a metric's threshold its "North Star target" (e.g. "Peak RAM usage over its North Star target: 493.3 MB vs 320 MB"), never its "budget". The time a single frame has to draw (16.67 ms at 60 Hz) is the "frame deadline". Code names and keys stay as they are, for schema stability: `budgets.py`, `budget:` signal keys, `budget_ms`, `over_budget`, `ttid_budget_ms`, `budget_breach`, and the `budgets` field in `apps.json`.

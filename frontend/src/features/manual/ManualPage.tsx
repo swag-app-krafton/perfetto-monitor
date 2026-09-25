@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, manualAbort, manualStart, manualStop, useDevice, useJob, useLiveMarkers, useManualStatus, useRecentJobs } from '@/api/hooks'
 import type { DevicePayload, LiveEvent } from '@/api/types'
-import { Banner, Button, Card, EmptyState, Grid, LogConsole, Row, Segmented, SelectField, Spinner, Stack, StatusPill, Stepper, Swatch, Text, ToggleChip } from '@/design'
+import { Banner, Button, Card, EmptyState, Grid, LogConsole, Row, Segmented, SelectField, Spinner, Stack, StatusPill, Stepper, Swatch, Switch, Text, ToggleChip } from '@/design'
 import { useUi } from '@/app/store'
 import s from './Manual.module.css'
 
@@ -28,7 +28,7 @@ function useElapsed(since: number | null) {
 export function ManualPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const { app, setFilters } = useUi()
+  const { app, setFilters, aiSummary, setAiSummary } = useUi()
   const status = useManualStatus(true)
   const dev = useDevice()
   const recording = !!status.data?.recording
@@ -73,7 +73,7 @@ export function ManualPage() {
     setErr(null)
     setBusy(true)
     try {
-      const r = await manualStop({ pkg: target })
+      const r = await manualStop({ pkg: target, ai_summary: aiSummary })
       setJobId(r.job_id)
       sessionStorage.removeItem(START_KEY)
       setSince(null)
@@ -130,6 +130,7 @@ export function ManualPage() {
                   Discard
                 </Button>
               </Row>
+              <Switch checked={aiSummary} onChange={setAiSummary} label="Write an AI summary when it's recorded" />
             </>
           ) : phase === 'analysing' ? (
             <>
@@ -176,6 +177,10 @@ export function ManualPage() {
                 )}
                 <Segmented label="Start" value={cold ? 'cold' : 'warm'} onChange={(v) => setCold(v === 'cold')} options={[{ value: 'cold', label: 'Cold' }, { value: 'warm', label: 'Warm' }]} />
               </Row>
+              <Stack gap={4}>
+                <Switch checked={aiSummary} onChange={setAiSummary} label="Write an AI summary when it's recorded" />
+                <Text variant="caption">After you stop, a model reads the run's numbers with your Claude session and writes a summary. The verdict stays the rules' verdict.</Text>
+              </Stack>
               <Button variant="primary" large onClick={start} disabled={busy || !target}>
                 Start tracing
               </Button>

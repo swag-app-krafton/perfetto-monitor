@@ -46,3 +46,33 @@ def merge(run, raw, app_name=None):
         "sources": [k for k in ("capture", "from_trace") if (raw or {}).get(k)],
         "trace_error": tr.get("error"),
     }
+
+
+# The app version a run measured, read the way the dashboard's versionOf and
+# versionKey read it (frontend/src/domain/versions.ts), so the top bar's
+# Version filter, summaries and the trend view group runs identically.
+NO_VERSION = "unknown"
+
+
+def version_of(run, raw):
+    """(version name, build): the merged app details' version_name (falling
+    back to the run's own app_version column) and version_code. None where
+    nothing recorded one."""
+    app = merge(run, raw)["app"]
+    code = app.get("version_code")
+    return (app.get("version_name") or run.get("app_version") or None,
+            code if code not in ("", None) else None)
+
+
+def version_key(name, build):
+    return NO_VERSION if name is None and build is None else f"{name or ''}|{'' if build is None else build}"
+
+
+def version_label(name, build):
+    if name and build is not None:
+        return f"{name} (build {build})"
+    if name:
+        return name
+    if build is not None:
+        return f"build {build}"
+    return "Version not recorded"

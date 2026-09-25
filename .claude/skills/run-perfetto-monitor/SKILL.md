@@ -156,6 +156,7 @@ Other sessions share this worktree, so a suite can go red partway through while 
 - **Model calls and PM review are on by default.**
   - `.env` sets `SWAGPERF_BACKEND=auto`, which tries the `claude` CLI. PM auto-review, which runs `claude` and edits `docs/`, defaults to on.
   - The driver exports `SWAGPERF_BACKEND=heuristic` and `SWAGPERF_PM_AUTOTRIAGE=0`, and passes `--no-llm --no-review`.
+  - AI summaries (Generate summary, `swagperf summary`) use model backends only, so under the driver they report "no model session". To drive one, start the driver with `SWAGPERF_RUN_BACKEND=cli SWAGPERF_CLAUDE_BIN=<a fake claude that prints fixed JSON>`; never point it at the real `claude` in a smoke test.
   - `.env` only fills variables that aren't already set, so exported values win.
 - **The app picker prefers Swag Pay (`com.swag.pay`).** If the DB holds even one Perfetto run for it, the default view is that run and every other series is hidden. That's why the screens demo run uses `com.example.app`. `seed` records no app, so its runs show as "unknown" / "Unknown app".
 - **A `gen_device_session` trace analysed as `com.swag.pay` prints "derived steps -- not instrumented".** This is expected. The trace has screen markers but no timed `step:` spans, so extraction falls back to derived steps.
@@ -169,6 +170,7 @@ Other sessions share this worktree, so a suite can go red partway through while 
 - **Each browser command is a fresh browser context.** Theme, profiler, app filter and Copilot state don't carry over between commands; chain steps inside one `do` to keep them.
 - **Capture, Stress, Manual and Run audit poll `adb` every 15 s.** With no phone they show "No device connected". With a phone plugged in they talk to it, and their Profile / Start buttons start real device jobs. Don't click those in a smoke test.
 - **Auto mode may ask for approval.** In auto mode, the permission check blocked the Copilot `do` flow and `up --dev` for an agent. It judged them as changes to shared resources, though both only touch the scratch workspace and ports 8787/5199. If that happens, ask the user to approve; don't work around the check.
+- **Every POST needs `X-Swagperf: 1`** (T-001). The dashboard's own buttons send it. A POST you write yourself, in `eval` or with curl, gets 403 `missing_x_swagperf_header` without it. The server also answers 403 to any `Host` other than `localhost`, `127.0.0.1` or `[::1]`.
 - **Some pages write to the scratch workspace.** Copilot has no model behind it, and asking it something saves the thread to the scratch DB. Opening Screens writes `.screens-cache/` beside the trace. Everything stays inside the workspace.
 
 ## Troubleshooting

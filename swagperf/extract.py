@@ -7,7 +7,8 @@ import re
 
 from perfetto.trace_processor import TraceProcessor
 from .budgets import (FRAME_NS, ORDERING_TOLERANCE_MS, STEP_BUDGETS_MS, GLOBAL_BUDGETS, DEFERRED_STEPS,
-                      CRITICAL_PATH_RETURNING, CRITICAL_PATH_FIRST_RUN)
+                      CRITICAL_PATH_RETURNING, CRITICAL_PATH_FIRST_RUN, startup_target,
+                      STARTUP_TARGET_REASONS)
 
 STEP_PREFIX = "step:"
 
@@ -57,7 +58,7 @@ def trace_source_of(trace_path):
 
 SIMULATOR_NOTE = ("iOS Simulator run: numbers come from the Mac's CPU with a warm cache, "
                   "so they compare only with other simulator runs and are never judged "
-                  "against budgets")
+                  "against North Star targets")
 
 
 def _with_stability(m, tp, pkg, platform):
@@ -81,6 +82,7 @@ def _apply_source(m, src):
     if m["simulator"]:
         m["breaches"] = []
         m["startup"]["budget_ms"] = None
+        m["startup"]["target_reason"] = STARTUP_TARGET_REASONS["simulator"]
         for st in m["steps"]:
             st["budget_ms"] = None
             st["over_budget"] = False
@@ -199,9 +201,13 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
         names = {s["step"] for s in d["steps"]}
         started = {"step:process_start", "step:pre_main", "step:to_first_frame"}
         kind = path_kind or ("cold" if names & started else "warm")
-        bud = catalogue.budgets_for(pkg, platform)
         ttid = d["ttid_ms"] or 0.0
-        ttid_budget = bud.get("ttid_ms")
+        # Only a target the catalogue actually states is asserted: inventing a
+        # startup target for someone else's app would be making up a number.
+        # Our own instrumented app's target is the camera-frame one, which a
+        # derived startup never reaches (B-010), so it gets none either.
+        ttid_budget, ttid_reason = startup_target(catalogue.get(pkg, platform), platform,
+                                                  derived=True, simulator=False)
 
         breaches = []
         checks = {"time_to_first_camera_frame_ms": ttid,
@@ -210,8 +216,6 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
                   "peak_rss_mb": mem.get("rss", {}).get("peak_mb", 0),
                   "rss_growth_mb": mem.get("rss", {}).get("growth_mb", 0),
                   "thermal_drift_pct": frames["thermal_drift_pct"]}
-        # Only budgets the catalogue actually states are asserted. Inventing a
-        # startup budget for someone else's app would be making up a number.
         if ttid_budget and ttid > ttid_budget:
             breaches.append({"metric": "time_to_first_camera_frame_ms", "value": ttid,
                              "budget": ttid_budget,
@@ -240,6 +244,7 @@ def extract_any(trace_path, *, app_pkg=None, path_kind=None, force_derive=False)
             "steps": d["steps"],
             "startup": {"time_to_first_camera_frame_ms": ttid,
                         "budget_ms": ttid_budget,
+                        "target_reason": ttid_reason,
                         "critical_path": [s["step"] for s in d["steps"]]},
             "ordering_violations": [],
             "frames": frames,
@@ -554,10 +559,17 @@ def _extract(tp, path_kind, pkg=None, platform="android"):
         "rss_growth_mb": mem.get("rss", {}).get("growth_mb", 0),
         "thermal_drift_pct": frames["thermal_drift_pct"],
     }
+    # Startup's target follows the one rule in budgets.startup_target (the
+    # global camera-frame target on Android; on iOS only what the catalogue
+    # states); the others are this architecture's own.
+    from . import catalogue
+    ttff_target, ttff_reason = startup_target(catalogue.get(pkg, platform) if pkg else None,
+                                              platform, derived=False, simulator=False)
+    targets = {**GLOBAL_BUDGETS, "time_to_first_camera_frame_ms": ttff_target}
     breaches = [
-        {"metric": k, "value": v, "budget": GLOBAL_BUDGETS[k],
-         "over_by_pct": round((v - GLOBAL_BUDGETS[k]) / GLOBAL_BUDGETS[k] * 100, 1)}
-        for k, v in checks.items() if v is not None and v > GLOBAL_BUDGETS[k]
+        {"metric": k, "value": v, "budget": targets[k],
+         "over_by_pct": round((v - targets[k]) / targets[k] * 100, 1)}
+        for k, v in checks.items() if v is not None and targets[k] and v > targets[k]
     ]
 
     return {
@@ -566,7 +578,8 @@ def _extract(tp, path_kind, pkg=None, platform="android"):
         "startup_metric": "time to first camera frame",
         "steps": step_metrics,
         "startup": {"time_to_first_camera_frame_ms": ttff,
-                    "budget_ms": GLOBAL_BUDGETS["time_to_first_camera_frame_ms"],
+                    "budget_ms": ttff_target,
+                    "target_reason": ttff_reason,
                     "critical_path": crit},
         "ordering_violations": violations,
         "frames": frames,

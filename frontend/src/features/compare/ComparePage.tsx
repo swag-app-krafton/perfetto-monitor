@@ -1,17 +1,12 @@
-import { Fragment, useEffect, useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useSearchParams } from 'react-router'
 import { useCompare } from '@/api/hooks'
-import type { DiffVerdict, Run } from '@/api/types'
-import { Badge, Banner, Card, DiffTag, EmptyState, Grid, Label, Row, Segmented, SelectField, Spinner, Stack, TableCard, Term, Text, numCell } from '@/design'
-import { fmt, pathLabel, shortDate, signed, stepName } from '@/domain/format'
-import { METRICS } from '@/domain/metrics'
+import type { Run } from '@/api/types'
+import { Badge, Banner, Card, EmptyState, Grid, Label, Row, Segmented, SelectField, Spinner, Stack, Text } from '@/design'
+import { pathLabel, shortDate } from '@/domain/format'
 import { useScope, useSelectRun } from '@/domain/scope'
+import { ComparisonTables } from '@/features/shared/ComparisonTables'
 import s from './Compare.module.css'
-
-const toDiff = (v: DiffVerdict | null) => (v === 'worse' ? 'worse' : v === 'better' ? 'better' : 'same')
-
-/** Stability rows in a compare (store.METRIC_DIRECTION): not headline gates. */
-const STABILITY_LABELS: Record<string, string> = { hang_count: 'Hangs', longest_hang_ms: 'Longest hang', js_errors: 'JS errors' }
 
 export function ComparePage() {
   const { scope, isLoading } = useScope()
@@ -54,7 +49,6 @@ export function ComparePage() {
   const opts = [...appRuns].reverse().map((r) => ({ value: String(r.id), label: `#${r.id} · ${shortDate(r.ts)} · ${pathLabel(r.path_kind)} · ${r.label ?? ''}` }))
   const d = q.data
   const descriptionOf = scope.history.startup_model.step_descriptions
-  const label = (m: string) => METRICS.find((x) => x.key === m || (m === 'ttff_ms' && x.key === 'ttff_ms'))?.label ?? STABILITY_LABELS[m] ?? m
 
   return (
     <Stack as="section" gap={20}>
@@ -119,97 +113,7 @@ export function ComparePage() {
         </EmptyState>
       )}
       {q.error && <EmptyState title="Could not compare">{q.error.message}</EmptyState>}
-      {d && (
-        <>
-          <TableCard
-            data-hl="compare"
-            title="Top-line metrics"
-            minWidth={720}
-            aside={
-              <Text variant="meta">
-                {d.summary.worse} worse · {d.summary.better} better · {d.summary.same} same
-              </Text>
-            }
-          >
-            <thead>
-              <tr>
-                <th>Metric</th>
-                <th className={numCell}>Run A #{d.run.id}</th>
-                <th className={numCell}>Run B #{d.base.id}</th>
-                <th className={numCell}>Δ</th>
-                <th className={numCell}>Δ %</th>
-                <th className={numCell}>Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.metrics.map((m) => {
-                const def = METRICS.find((x) => x.key === m.metric)
-                const dp = def?.dp ?? 1
-                return (
-                  <tr key={m.metric}>
-                    <td>
-                      <Text variant="body" tone="primary" weight={500}>
-                        {label(m.metric)}
-                      </Text>
-                    </td>
-                    <td className={numCell}>{m.value == null ? '–' : `${fmt(m.value, dp)} ${def?.unit ?? ''}`}</td>
-                    <td className={numCell}>
-                      <Text variant="body">{m.base_value == null ? '–' : `${fmt(m.base_value, dp)} ${def?.unit ?? ''}`}</Text>
-                    </td>
-                    <td className={numCell}>{m.delta == null ? '–' : signed(m.delta, dp, def?.deltaUnit ?? '')}</td>
-                    <td className={numCell}>{m.delta_pct == null ? '–' : signed(m.delta_pct, 1, '%')}</td>
-                    <td className={numCell}>{m.verdict ? <DiffTag diff={toDiff(m.verdict)} /> : '–'}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </TableCard>
-          <TableCard title="Steps diff" hint="Child slices are indented under the step they belong to." minWidth={720}>
-            <thead>
-              <tr>
-                <th>Step</th>
-                <th className={numCell}>Run A</th>
-                <th className={numCell}>Run B</th>
-                <th className={numCell}>Δ ms</th>
-                <th className={numCell}>Δ %</th>
-                <th className={numCell}>Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.steps.map((st) => (
-                <Fragment key={st.step}>
-                  <tr>
-                    <td>
-                      <Term description={descriptionOf[st.step]} weight={700}>
-                        {stepName(st.step)}
-                      </Term>
-                    </td>
-                    <td className={numCell}>{st.dur_ms == null ? '–' : `${fmt(st.dur_ms, 1)} ms`}</td>
-                    <td className={numCell}>
-                      <Text variant="body">{st.base_dur_ms == null ? '–' : `${fmt(st.base_dur_ms, 1)} ms`}</Text>
-                    </td>
-                    <td className={numCell}>{st.delta_ms == null ? '–' : signed(st.delta_ms, 1)}</td>
-                    <td className={numCell}>{st.delta_pct == null ? '–' : signed(st.delta_pct, 1, '%')}</td>
-                    <td className={numCell}>
-                      {st.only_in ? <DiffTag diff="same">{st.only_in === 'run' ? 'New' : 'Removed'}</DiffTag> : st.verdict ? <DiffTag diff={toDiff(st.verdict)} /> : '–'}
-                    </td>
-                  </tr>
-                  {st.children.map((c) => (
-                    <tr key={c.name} className={s.childRow}>
-                      <td>{c.name}</td>
-                      <td className={numCell}>{c.dur_ms == null ? '–' : `${fmt(c.dur_ms, 1)} ms`}</td>
-                      <td className={numCell}>{c.base_dur_ms == null ? '–' : `${fmt(c.base_dur_ms, 1)} ms`}</td>
-                      <td className={numCell}>{c.delta_ms == null ? '–' : signed(c.delta_ms, 1)}</td>
-                      <td className={numCell}>{c.delta_pct == null ? '–' : signed(c.delta_pct, 1, '%')}</td>
-                      <td />
-                    </tr>
-                  ))}
-                </Fragment>
-              ))}
-            </tbody>
-          </TableCard>
-        </>
-      )}
+      {d && <ComparisonTables data={d} runLabel={`Run A #${d.run.id}`} baseLabel={`Run B #${d.base.id}`} descriptions={descriptionOf} hl="compare" />}
     </Stack>
   )
 }

@@ -37,7 +37,7 @@ export function StartupPage() {
       <Card
         data-hl="ttidChart"
         title="TTID over runs"
-        hint={`Time to initial display${ttidMeaning(run)}.${budget ? ` Dashed line is the ${budget} ms budget.` : run.simulator ? ' A simulator run is never judged against a budget.' : ' No budget is set for this app.'}`}
+        hint={`Time to initial display${ttidMeaning(run)}.${budget ? ` Dashed line is its ${budget} ms North Star target.` : ` ${run.ttid_target_reason ?? 'No startup North Star target is set for this app.'}`}`}
         actions={
           ttid != null && (
             <Stack gap={4} align="end">

@@ -17,7 +17,7 @@ import glob, os, re, statistics
 from urllib.parse import quote
 
 from .analyst import METRIC_NAMES, NEXT_STEP
-from .budgets import RISK_MAP, STEP_RUNTIME
+from .budgets import RISK_MAP, STEP_RUNTIME, METRIC_UNITS as UNITS
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TRACKER = os.path.join(ROOT, "docs", "TRACKER.md")
@@ -27,8 +27,6 @@ DASHBOARD = os.environ.get("SWAGPERF_DASHBOARD_URL", "http://127.0.0.1:8787")
 MARKER = re.compile(r"(Runs reviewed through: #)(\d+)")
 OPEN = ("needs-review", "confirmed", "in-progress")
 RAM = ("peak_rss_mb", "rss_growth_mb")
-UNITS = {"peak_rss_mb": "MB", "rss_growth_mb": "MB", "time_to_first_camera_frame_ms": "ms",
-         "slow_frame_pct": "%", "janky_frame_pct": "%", "thermal_drift_pct": "%"}
 # Where a metric's chart lives on the dashboard, and the id that rings it.
 CHART = {"peak_rss_mb": ("/memory", "peakChart"), "rss_growth_mb": ("/memory", "peakChart"),
          "time_to_first_camera_frame_ms": ("/startup", "ttidChart"),
@@ -155,7 +153,7 @@ def signals_of(run, regs):
         m = b["metric"]
         over = b.get("over_by_pct")
         out.append({"key": f"budget:{m}:{app}:{path}", "kind": "budget_breach", "subject": m,
-                    "title": f"{METRIC_NAMES.get(m, m)} over budget", "unit": UNITS.get(m, ""),
+                    "title": f"{METRIC_NAMES.get(m, m)} over its North Star target", "unit": UNITS.get(m, ""),
                     "value": b.get("value"), "reference": b.get("budget"), "reference_kind": "budget",
                     "over_pct": over, "severity": "high" if (over or 0) > 25 else "medium"})
     for r in regs:
@@ -301,7 +299,7 @@ def review(history, *, after, regressions=None, issues=None, lookback=10, screen
     window = [_resolved(r) for r in runs if r["id"] > after]
     mine = [r for r in window if r.get("app_role") == "own" and not r.get("simulator")]
     skipped = [{"id": r["id"], "app": r.get("app_name") or r.get("app_pkg"),
-                "reason": "not an own app: no budgets to hold it to, nothing to fix here"}
+                "reason": "not an own app: no North Star targets to hold it to, nothing to fix here"}
                for r in window if r.get("app_role") != "own"]
     # A simulator run is indicative only: its numbers are the Mac's, so it
     # opens no performance issue.
@@ -401,7 +399,7 @@ def summary_line(t):
     ids = [r["id"] for r in t["runs"]]
     runs = (f"run #{ids[0]}" if len(ids) == 1 else f"runs #{ids[0]}–#{ids[-1]}") if ids else "no own-app runs"
     if not t["actionable"]:
-        return f"{runs}: nothing for the tracker (no budget breach, regression or ordering violation)"
+        return f"{runs}: nothing for the tracker (nothing over its North Star target, no regression, no ordering violation)"
     parts = [f"{len(t['signals'])} signal{'s' if len(t['signals']) != 1 else ''}"]
     if t["quiet"]:
         parts.append(f"{len(t['quiet'])} open issue{'s' if len(t['quiet']) != 1 else ''} quiet")

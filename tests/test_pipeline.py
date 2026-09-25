@@ -776,6 +776,9 @@ class TestHeuristic(unittest.TestCase):
         self.assertNotIn("pftrace", blob)
         self.assertIn("steps", payload)
         self.assertIn("global_budgets", payload)
+        # Nor a path to one: not the trace's own, not the traces/ folder.
+        for needle in ("trace_path", "traces/", tmp):
+            self.assertNotIn(needle, blob, needle)
 
 
 if __name__ == "__main__":
@@ -889,8 +892,10 @@ class TestBreachSeverity(unittest.TestCase):
             {"metric": "janky_frame_pct", "value": 0.52, "budget": 0.5, "over_by_pct": 4.0},
         ]), [])
         self.assertEqual(res["verdict"], "fail")
-        self.assertTrue(res["headline"].startswith("RAM growth over budget"))
-        self.assertIn("+1 more", res["headline"])
+        # B-001: units on both numbers, one bracket group, then the count.
+        self.assertEqual(res["headline"], "RAM growth over its North Star target: "
+                                          "256 MB vs 60 MB (+326.7%), and 1 more finding")
+        self.assertEqual(res["findings"][-1]["evidence"], "0.52% vs 0.5% (+4.0%)")
 
     def test_marginal_breach_only_warns(self):
         res = analyst.heuristic(self._m([
@@ -901,7 +906,8 @@ class TestBreachSeverity(unittest.TestCase):
     def test_clean_run_headline_says_so(self):
         res = analyst.heuristic(self._m([]), [])
         self.assertEqual(res["verdict"], "pass")
-        self.assertIn("within budget", res["headline"])
+        self.assertIn("within its North Star target", res["headline"])
+        self.assertNotIn("budget", res["headline"])
 
 
 class TestAppProcessResolution(unittest.TestCase):

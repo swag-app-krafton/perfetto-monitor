@@ -17,6 +17,9 @@ export interface ScreenDef {
   profiler: Profiler
   /** The page component, when it differs from `id` (the iOS lane reuses the trace pages). */
   page?: string
+  /** Top-bar controls that don't apply to the screen, so it hides them
+   *  (Trend spans every version, run and date). */
+  ignores?: ('version' | 'run' | 'range')[]
 }
 
 const TRACE_SCREENS: ScreenDef[] = [
@@ -26,6 +29,7 @@ const TRACE_SCREENS: ScreenDef[] = [
   { id: 'memory', path: '/memory', label: 'Memory', code: 'ME', group: 'ANALYSE', hint: 'Peak RAM and growth across the session.', profiler: 'perfetto' },
   { id: 'steps', path: '/steps', label: 'Steps', code: 'SP', group: 'ANALYSE', hint: 'Every startup step against its trailing baseline, with child slices.', profiler: 'perfetto' },
   { id: 'screens', path: '/screens', label: 'Screens', code: 'SC', group: 'ANALYSE', hint: "Per-screen CPU and RAM from the app's own screen markers.", profiler: 'perfetto' },
+  { id: 'trend', path: '/trend', label: 'Trend', code: 'TR', group: 'ANALYSE', hint: 'Each metric across app versions, a line per device, with its pinned benchmark dotted.', profiler: 'perfetto', ignores: ['version', 'run', 'range'] },
   { id: 'stability', path: '/stability', label: 'Stability', code: 'SB', group: 'ANALYSE', hint: 'Hangs, JS errors and crashes: when, on which screen, and the resolved stack.', profiler: 'perfetto' },
   { id: 'capture', path: '/capture', label: 'Capture', code: 'CA', group: 'RUN', hint: 'Profile an app installed on the connected device.', profiler: 'perfetto' },
   { id: 'stress', path: '/stress', label: 'Stress', code: 'SS', group: 'RUN', hint: 'Repeat cold starts to separate a real regression from noise.', profiler: 'perfetto' },

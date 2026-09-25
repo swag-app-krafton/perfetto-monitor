@@ -9,6 +9,7 @@ import { useUi } from '@/app/store'
 import { FindingCard } from '@/features/shared/FindingCard'
 import { findingArea, findingId, summariseSeverity } from '@/features/shared/findings'
 import { usePinMutations, usePins } from '@/features/copilot/api'
+import { RunSummary } from './RunSummary'
 import { VerdictHero } from './VerdictHero'
 import { VerdictStrip } from './VerdictStrip'
 
@@ -51,6 +52,8 @@ export function OverviewPage() {
         isLatest={scope.isLatest}
       />
 
+      <RunSummary run={run} descriptions={history.startup_model.step_descriptions} pinnedBenchmarkId={benchmarkRun?.id ?? null} />
+
       <Grid min={160} gap={12}>
         {METRICS.map((m) => {
           const v = valueOf(run, m.key)
@@ -78,7 +81,7 @@ export function OverviewPage() {
 
       <Stack gap={12}>
         <SectionTitle aside={summariseSeverity(findings) + (pinned.length ? ` · ${pinned.length} pinned from Copilot` : '')}>Findings</SectionTitle>
-        {findings.length === 0 && pinned.length === 0 && <EmptyState>No findings. Every measured metric is within budget and baseline.</EmptyState>}
+        {findings.length === 0 && pinned.length === 0 && <EmptyState>No findings. Every measured metric is within its North Star target and baseline.</EmptyState>}
         {findings.map((f, i) => (
           <FindingCard
             key={i}

@@ -2,11 +2,3 @@
 .pinnedRun {
   height: 36px;
 }
-
-/* A child slice's row in the steps diff: dimmed and indented under its step. */
-.childRow > td {
-  color: var(--tx2);
-}
-tr.childRow > td:first-child {
-  padding-left: 46px;
-}

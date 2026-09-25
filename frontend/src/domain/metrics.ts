@@ -45,7 +45,7 @@ const TABLE: MetricDef[] = [
     unit: '%',
     deltaUnit: ' pp',
     dp: 2,
-    help: 'Share of frames longer than three frame budgets: a stutter a user sees.',
+    help: 'Share of frames longer than three frame deadlines: a stutter a user sees.',
     budget: (_r, g) => g.janky_frame_pct,
   },
   {
@@ -98,7 +98,7 @@ export function valueOf(run: Run | null | undefined, key: MetricDef['key']): num
   return v
 }
 
-/** Gate status: over budget fails, within 10% of it warns. */
+/** Gate status: over the North Star target fails, within 10% of it warns. */
 export function gateTone(value: number | null, budget: number | null): Tone {
   if (value == null || budget == null) return 'neutral'
   if (value > budget) return 'fail'
