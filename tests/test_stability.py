@@ -361,5 +361,17 @@ class TestStabilityDownstream(unittest.TestCase):
             sourcemaps.add("ios", "com.example.ios", src, root=root)
 
 
+class TestDemoSession(unittest.TestCase):
+
+    def test_the_demo_session_carries_every_kind(self):
+        from swagperf.synth_android import gen_device_session
+        data, _ = gen_device_session(3, pkg="com.example.app", stability=True)
+        st = _stability(data, "com.example.app")
+        self.assertEqual((st["errors"]["js"], st["anrs"]["count"], st["crash"]["count"]), (2, 1, 2))
+        self.assertEqual({e["kind"] for e in st["crash"]["events"]}, {"java", "native"})
+        anr = st["anrs"]["events"][0]
+        self.assertEqual((anr["screen"], anr["main_thread"]["name"]), ("Store", "binder transaction"))
+
+
 if __name__ == "__main__":
     unittest.main()

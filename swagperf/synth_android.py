@@ -235,7 +235,7 @@ def _frame_timeline(cookie, token, pid, jank):
         _len(76, _len(5, _varint(1, cookie))), _len(76, _len(5, _varint(1, cookie + 1)))
 
 
-def gen_device_session(seed=0, *, pkg="com.swag.pay", process_name=None):
+def gen_device_session(seed=0, *, pkg="com.swag.pay", process_name=None, stability=False):
     """A manual session as a real device records it, with the answers.
 
     Flow: Home -> Send -> Home -> Store -> History, via push/pop/tab markers
@@ -247,6 +247,10 @@ def gen_device_session(seed=0, *, pkg="com.swag.pay", process_name=None):
     * Send misses app deadlines, History only buffer-stuffs
     * the first app frame after navigating into Home lands 90ms later,
       into anything else 30ms later
+    * with stability=True (synth_stability.Session): a non-fatal JS error
+      on Send; a 5 s main-thread stall from 2.9 s that Android declares an
+      ANR at its end, on Store; then on History a fatal JS error, the
+      Kotlin crash it causes, and a native crash
     """
     rnd = random.Random(seed)
     APP, SYS = 7100, 1500
@@ -321,6 +325,19 @@ def gen_device_session(seed=0, *, pkg="com.swag.pay", process_name=None):
     for ft in range(10 * MS, t, 50 * MS):
         out += slice_begin(ft, T_SYS, f"Choreographer#doFrame {ft}")
         out += slice_end(ft + 40 * MS, T_SYS)
+
+    if stability:
+        from .synth_stability import Session
+        s = Session(pkg, APP)
+        s.js_error(3500, "d1", name="TypeError", message="Cannot read property 'amount' of undefined")
+        s.slice(2900, 5000, "binder transaction")
+        s.anr(7900, "demo-anr", "Input dispatching timed out (demo "
+              f"{pkg}/.MainActivity is not responding. Waited 5001ms for MotionEvent)")
+        s.js_error(8600, "d2", name="RangeError", fatal=True, source="promise")
+        s.java_crash(8700, exc="com.facebook.react.common.JavascriptException",
+                     message="RangeError: amount out of range")
+        s.native_crash(9150)
+        out += s.bytes()
 
     expect.update({"pkg": pkg, "app_rss_peak_mb": round(rss, 1), "sys_rss_mb": 800.0,
                    "routes": [f[0] for f in flow]})

@@ -70,7 +70,7 @@ def seed(runs):
     # com.swag.pay: the app picker prefers Swag Pay's own package, and a Swag
     # Pay run here would hide the seeded builds from the default view.
     pyrun("from swagperf.synth_android import gen_device_session\n"
-          "b, _ = gen_device_session(3, pkg='com.example.app')\n"
+          "b, _ = gen_device_session(3, pkg='com.example.app', stability=True)\n"
           "open('traces/example_session.pftrace', 'wb').write(b)")
     swagperf("analyse", "traces/example_session.pftrace", "--app", "com.example.app",
              "--device", "pixel7", "--label", "derived-demo", "--no-llm", "--no-review")

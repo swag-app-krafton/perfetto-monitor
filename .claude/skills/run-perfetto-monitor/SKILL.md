@@ -63,7 +63,7 @@ What `up --fresh` seeds:
 
 | id | what | where it shows |
 |---|---|---|
-| #1 | `com.example.app` manual session: derived steps and SwagTrace screen markers | Screens (`--run 1`) |
+| #1 | `com.example.app` manual session: derived steps, SwagTrace screen markers, two JS exceptions, an ANR and two crashes | Screens, Crashes & ANRs, and Frame pacing's hangs (`--run 1`) |
 | #2–#17 | `seed` builds, app "unknown". #17 (the latest) regresses camera open and thermals, so its verdict is FAIL | default view of Overview, Startup, Frames, Memory, Steps, Compare, History |
 | A-1 | Flashlight audit from `tests/fixtures/flashlight_summary.json` | `/flashlight/*` |
 
