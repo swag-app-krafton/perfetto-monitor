@@ -29,6 +29,13 @@ convert_ios.py). Stacks are resolved against the build's source map later,
 when the run is read (sourcemaps.py), so a map registered after the run
 still applies.
 
+**ANRs** (Android only) are declared by the system, not the app: when
+ActivityManager declares one it writes two atrace counters from
+system_server under the `am` category, `ErrorId:<process> <pid>#<id>` and
+`Subject(for ErrorId <id>):<subject>`. The trace processor's android.anrs
+module joins them into `android_anrs`. Each ANR names the screen on display
+and the longest main-thread slice in the window before it.
+
 **Crashes:**
   - iOS: how xctrace saw the process end, carried in the trace's provenance.
   - Android: a fatal exception or signal in the crash log for the app's own
@@ -107,6 +114,24 @@ def _loads(text):
         return json.loads(text)
     except (TypeError, ValueError):
         return None
+
+
+def _q(s):
+    return (s or "").replace("'", "''")
+
+
+def _ids(upids):
+    return ",".join(str(int(u)) for u in upids)
+
+
+def _config(tp):
+    """The trace's own recorded config, or None: synthetic and converted
+    traces carry none."""
+    try:
+        r = _rows(tp, "select str_value as v from metadata where name = 'trace_config_pbtxt'")
+    except Exception:
+        return None
+    return (r[0].get("v") or None) if r else None
 
 
 # ------------------------------------------------------------------ helpers
@@ -203,6 +228,81 @@ def hangs(tp, upids, platform, wins=None):
     }
 
 
+# -------------------------------------------------------------------- ANRs
+
+# The trace processor's ANR types, for a reader. Timeouts are AOSP's
+# defaults; vendors may change them.
+ANR_TYPES = {
+    "INPUT_DISPATCHING_TIMEOUT": "A touch or key went unanswered",
+    "INPUT_DISPATCHING_TIMEOUT_NO_FOCUSED_WINDOW": "A touch or key arrived with no window to take it",
+    "BROADCAST_OF_INTENT": "A broadcast receiver ran too long",
+    "EXECUTING_SERVICE": "A service callback ran too long",
+    "START_FOREGROUND_SERVICE": "A foreground service didn't start in time",
+    "BIND_APPLICATION": "The app took too long to start",
+    "CONTENT_PROVIDER_NOT_RESPONDING": "A content provider didn't respond",
+    "APP_TRIGGERED": "The app reported an ANR itself",
+}
+# The window before an ANR searched for main-thread work when the module gives
+# no duration: the input-dispatch timeout.
+ANR_WINDOW_MS = 5000
+_NO_ANRS = {"measured": False, "count": None, "by_type": {}, "per_screen": {}, "events": []}
+
+
+def _main_thread_work(tp, upids, start, end):
+    """The longest top-level slice on the app's main thread overlapping
+    [start, end], or None when nothing was traced there."""
+    if not upids:
+        return None
+    r = _rows(tp, f"""
+        select s.name as name, s.dur as dur from slice s
+        join thread_track tt on s.track_id = tt.id
+        join thread t using (utid)
+        join process p on p.upid = t.upid
+        where t.upid in ({_ids(upids)}) and t.tid = p.pid and s.depth = 0 and s.dur > 0
+          and s.ts < {int(end)} and s.ts + s.dur > {int(start)}
+        order by s.dur desc limit 1""")
+    return {"name": r[0]["name"], "dur_ms": round(r[0]["dur"] / 1e6, 1)} if r else None
+
+
+def anrs(tp, pkg, upids, platform, wins=None):
+    """ANRs the system declared for the app. iOS has none; a trace recorded
+    without the `am` category measured none."""
+    if platform == "ios":
+        return dict(_NO_ANRS)
+    cfg = _config(tp)
+    if cfg is not None and 'atrace_categories: "am"' not in cfg:
+        return dict(_NO_ANRS)
+    wins = _screen_windows(tp) if wins is None else wins
+    where = f"process_name = '{_q(pkg)}'" if pkg else "0"
+    if upids:
+        where += f" or upid in ({_ids(upids)})"
+    try:
+        rows = _rows(tp, f"""include perfetto module android.anrs;
+            select error_id, ts, anr_type, subject, anr_dur_ms, default_anr_dur_ms
+            from android_anrs where {where} order by ts""")
+    except Exception:
+        rows = []   # a trace processor without the module
+    events = []
+    for r in rows:
+        dur = r.get("anr_dur_ms") or r.get("default_anr_dur_ms")
+        typ = r.get("anr_type") or "UNKNOWN_ANR_TYPE"
+        window = (dur or ANR_WINDOW_MS) * 1_000_000
+        events.append({
+            "id": r["error_id"], "start_ms": round(r["ts"] / 1e6, 2),
+            "type": typ, "type_label": ANR_TYPES.get(typ, typ.replace("_", " ").capitalize()),
+            "subject": r.get("subject"), "dur_ms": dur,
+            "screen": _screen_at(wins, r["ts"]),
+            "main_thread": _main_thread_work(tp, upids, r["ts"] - window, r["ts"]),
+        })
+    by_type, per_screen = {}, {}
+    for e in events:
+        by_type[e["type"]] = by_type.get(e["type"], 0) + 1
+        screen = e["screen"] or "(no screen)"
+        per_screen[screen] = per_screen.get(screen, 0) + 1
+    return {"measured": True, "count": len(events), "by_type": by_type,
+            "per_screen": per_screen, "events": events[:MAX_EVENTS]}
+
+
 def _by_screen(events, key):
     out = {}
     for e in events:
@@ -266,11 +366,12 @@ def crash(tp, upids, platform, src):
 
 
 def extract_stability(tp, pkg, platform=None):
-    """Hangs, JS errors and crash state for the app in one trace."""
+    """Hangs, JS errors, ANRs and crashes for the app in one trace."""
     src = trace_source(tp)
     platform = platform or src["platform"]
     upids = _app_upids(tp, pkg, platform) if pkg else []
     wins = _screen_windows(tp)
     return {"hangs": hangs(tp, upids, platform, wins),
             "errors": errors(tp, upids, platform, wins),
+            "anrs": anrs(tp, pkg, upids, platform, wins),
             "crash": crash(tp, upids, platform, src)}
