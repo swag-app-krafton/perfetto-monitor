@@ -144,6 +144,60 @@ class TestAndroidStability(unittest.TestCase):
         self.assertTrue(st["crash"]["crashed"])
 
 
+ANR_SUBJECT = ("Input dispatching timed out (1f2 com.swag.pay/com.swag.pay.MainActivity "
+               "is not responding. Waited 5001ms for MotionEvent)")
+
+
+def _session(build, pkg="com.swag.pay", **kw):
+    """A session with a first frame and a Home visit, then `build(s)`."""
+    s = Session(pkg, **kw)
+    s.slice(500, 20, "Choreographer#doFrame 1")
+    s.screen(600, 20_000, "Home#compose")
+    build(s)
+    return _stability(s.bytes(), pkg)
+
+
+class TestAnrs(unittest.TestCase):
+
+    def test_an_anr_names_its_type_screen_and_main_thread_work(self):
+        def build(s):
+            s.slice(3000, 5600, "binder transaction")    # the stall behind the ANR
+            s.anr(8500, "e1", ANR_SUBJECT)
+        a = _session(build)["anrs"]
+        self.assertEqual((a["measured"], a["count"]), (True, 1))
+        ev = a["events"][0]
+        self.assertEqual((ev["id"], ev["start_ms"]), ("e1", 8500.0))
+        self.assertEqual(ev["type"], "INPUT_DISPATCHING_TIMEOUT")
+        self.assertEqual(ev["type_label"], "A touch or key went unanswered")
+        self.assertEqual(ev["subject"], ANR_SUBJECT)
+        self.assertEqual(ev["dur_ms"], 5000)
+        self.assertEqual(ev["screen"], "Home")
+        self.assertEqual(ev["main_thread"], {"name": "binder transaction", "dur_ms": 5600.0})
+        self.assertEqual(a["by_type"], {"INPUT_DISPATCHING_TIMEOUT": 1})
+        self.assertEqual(a["per_screen"], {"Home": 1})
+
+    def test_an_anr_with_nothing_traced_on_the_main_thread(self):
+        a = _session(lambda s: s.anr(9000, "e1", ANR_SUBJECT))["anrs"]
+        self.assertIsNone(a["events"][0]["main_thread"])
+
+    def test_another_apps_anr_is_not_the_apps(self):
+        a = _session(lambda s: s.anr(8000, "e2", ANR_SUBJECT, pid=6000, process="com.other.app"),
+                     others=[(6000, "com.other.app")])["anrs"]
+        self.assertEqual((a["measured"], a["count"], a["events"]), (True, 0, []))
+
+    def test_a_trace_without_the_am_category_measures_no_anrs(self):
+        def build(s):
+            s.config(sources=["linux.ftrace", "android.log"], atrace=["view"])
+            s.anr(8000, "e3", ANR_SUBJECT)
+        a = _session(build)["anrs"]
+        self.assertEqual((a["measured"], a["count"]), (False, None))
+
+    def test_ios_has_no_anrs(self):
+        m, _ = _ios(lambda r: None)
+        a = m["stability"]["anrs"]
+        self.assertEqual((a["measured"], a["count"]), (False, None))
+
+
 class TestStabilityDownstream(unittest.TestCase):
 
     def test_stored_findings_and_signals(self):
