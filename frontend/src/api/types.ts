@@ -191,6 +191,9 @@ export interface Run {
   longest_hang_ms: number | null
   js_errors: number | null
   crashed: number | null
+  /** ANRs and crashes in the run (F-028). Null before F-028, and where the trace didn't measure them. */
+  anr_count?: number | null
+  crash_count?: number | null
   stability: Stability | null
   ttff_ms: number | null
   slow_pct: number | null
@@ -250,6 +253,35 @@ export interface JsErrorEvent {
   fingerprint?: string
 }
 
+export interface AnrEvent {
+  id: string
+  start_ms: number
+  /** The trace processor's type, e.g. INPUT_DISPATCHING_TIMEOUT. */
+  type: string
+  /** The type in plain words. */
+  type_label: string
+  /** The system's reason line. */
+  subject: string | null
+  /** The timeout behind it, in ms, when known. */
+  dur_ms: number | null
+  screen: string | null
+  /** The longest main-thread slice in the window before the ANR. */
+  main_thread: { name: string; dur_ms: number } | null
+}
+
+export interface CrashEvent {
+  /** Null on iOS, where the recording says only that the process crashed. */
+  start_ms: number | null
+  kind: 'java' | 'native' | 'ios' | 'unknown'
+  /** The exception class or signal name. */
+  signature: string
+  message: string | null
+  /** The whole crash log: stack or tombstone. */
+  log: string | null
+  screen: string | null
+  pid: number | null
+}
+
 export interface Stability {
   hangs: {
     count: number
@@ -273,7 +305,15 @@ export interface Stability {
     /** From /api/stability only: the map the stacks were resolved against. */
     source_map?: string | null
   }
-  crash: { crashed: boolean; reason: string | null }
+  /** Absent for runs recorded before F-028. */
+  anrs?: {
+    measured: boolean
+    count: number | null
+    by_type: Record<string, number>
+    per_screen: Record<string, number>
+    events: AnrEvent[]
+  }
+  crash: { crashed: boolean; reason: string | null; measured?: boolean; count?: number | null; events?: CrashEvent[] }
 }
 
 export interface Benchmark {
