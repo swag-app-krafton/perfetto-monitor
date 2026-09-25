@@ -30,7 +30,7 @@ const TRACE_SCREENS: ScreenDef[] = [
   { id: 'steps', path: '/steps', label: 'Steps', code: 'SP', group: 'ANALYSE', hint: 'Every startup step against its trailing baseline, with child slices.', profiler: 'perfetto' },
   { id: 'screens', path: '/screens', label: 'Screens', code: 'SC', group: 'ANALYSE', hint: "Per-screen CPU and RAM from the app's own screen markers.", profiler: 'perfetto' },
   { id: 'trend', path: '/trend', label: 'Trend', code: 'TR', group: 'ANALYSE', hint: 'Each metric across app versions, a line per device, with its pinned benchmark dotted.', profiler: 'perfetto', ignores: ['version', 'run', 'range'] },
-  { id: 'stability', path: '/stability', label: 'Stability', code: 'SB', group: 'ANALYSE', hint: 'Hangs, JS errors and crashes: when, on which screen, and the resolved stack.', profiler: 'perfetto' },
+  { id: 'crashes', path: '/crashes', label: 'Crashes & ANRs', code: 'CR', group: 'ANALYSE', hint: 'JS exceptions, ANRs and crashes: when, on which screen, with the stack or crash log.', profiler: 'perfetto' },
   { id: 'capture', path: '/capture', label: 'Capture', code: 'CA', group: 'RUN', hint: 'Profile an app installed on the connected device.', profiler: 'perfetto' },
   { id: 'stress', path: '/stress', label: 'Stress', code: 'SS', group: 'RUN', hint: 'Repeat cold starts to separate a real regression from noise.', profiler: 'perfetto' },
   { id: 'manual', path: '/manual', label: 'Manual', code: 'MA', group: 'RUN', hint: 'Drive the app by hand while it is traced, then analyse.', profiler: 'perfetto' },
@@ -62,6 +62,10 @@ const IOS_SCREENS: ScreenDef[] = TRACE_SCREENS.filter((x) => x.id !== 'manual').
 }))
 
 export const SCREENS: ScreenDef[] = [...TRACE_SCREENS, ...IOS_SCREENS, ...FLASHLIGHT_SCREENS]
+
+/** Old addresses of moved screens. Copilot answers, analyst findings and
+ *  issue files keep linking to them. */
+export const MOVED_PATHS: Record<string, string> = { '/stability': '/crashes', '/ios/stability': '/ios/crashes' }
 
 export const GROUPS: NavGroup[] = ['ANALYSE', 'RUN', 'DATA']
 

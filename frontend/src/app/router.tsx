@@ -4,7 +4,8 @@ import { Copilot } from '@/features/copilot/Copilot'
 import { AppShell } from './AppShell'
 import { Placeholder } from './Placeholder'
 import { HomeRedirect } from './HomeRedirect'
-import { SCREENS } from './routes'
+import { Moved } from './Moved'
+import { MOVED_PATHS, SCREENS } from './routes'
 
 /** Each screen is its own chunk, loaded on first visit. */
 const page = <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })))
@@ -16,7 +17,7 @@ const PAGES: Record<string, ComponentType> = {
   memory: page(() => import('@/features/memory/MemoryPage'), 'MemoryPage'),
   steps: page(() => import('@/features/steps/StepsPage'), 'StepsPage'),
   screens: page(() => import('@/features/screens/ScreensPage'), 'ScreensPage'),
-  stability: page(() => import('@/features/stability/StabilityPage'), 'StabilityPage'),
+  crashes: page(() => import('@/features/crashes/CrashesPage'), 'CrashesPage'),
   trend: page(() => import('@/features/trend/TrendPage'), 'TrendPage'),
   compare: page(() => import('@/features/compare/ComparePage'), 'ComparePage'),
   history: page(() => import('@/features/history/HistoryPage'), 'HistoryPage'),
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
         const Page = PAGES[sc.page ?? sc.id]
         return { path: sc.path.slice(1), element: Page ? <Page /> : <Placeholder id={sc.id} /> }
       }),
+      ...Object.entries(MOVED_PATHS).map(([from, to]) => ({ path: from.slice(1), element: <Moved to={to} /> })),
       { path: '*', element: <Navigate to="/overview" replace /> },
     ],
   },

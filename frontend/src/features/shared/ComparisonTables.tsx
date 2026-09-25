@@ -8,7 +8,7 @@ import s from './ComparisonTables.module.css'
 const toDiff = (v: DiffVerdict | null) => (v === 'worse' ? 'worse' : v === 'better' ? 'better' : 'same')
 
 /** Stability rows in a compare (store.METRIC_DIRECTION): not headline gates. */
-const STABILITY_LABELS: Record<string, string> = { hang_count: 'Hangs', longest_hang_ms: 'Longest hang', js_errors: 'JS errors' }
+const STABILITY_LABELS: Record<string, string> = { hang_count: 'Hangs', longest_hang_ms: 'Longest hang', js_errors: 'JS exceptions', anr_count: 'ANRs', crash_count: 'Crashes' }
 
 const metricLabel = (m: string) => METRICS.find((x) => x.key === m)?.label ?? STABILITY_LABELS[m] ?? m
 
