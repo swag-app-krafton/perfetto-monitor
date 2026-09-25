@@ -1,19 +1,16 @@
-"""Hangs, JS errors and crashes (stability.py), on both platforms.
+"""Hangs, JS errors, ANRs and crashes (stability.py), on both platforms.
 
 iOS recordings come from synth_ios (the Hangs instrument's rows, the app's
-error markers and os_log lines); the Android trace is built here with
-Perfetto's own trace builder, because it needs logcat packets the synthetic
-Android generator does not write.
+error markers and os_log lines); Android traces come from synth_stability,
+which writes the logcat lines, ANR counters and trace config the byte-level
+Android generator does not.
 """
 import json, os, sys, tempfile, unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from perfetto.protos.perfetto.trace.perfetto_trace_pb2 import Trace, TrackEvent
-
 from swagperf import analyst, extract as ex, sourcemaps, stability, store, triage
 from swagperf.synth_ios import Recording
-
-MS = 1_000_000
+from swagperf.synth_stability import Session
 
 
 def _write(data, name="t.pftrace"):
@@ -115,67 +112,29 @@ class TestCrash(unittest.TestCase):
 def _android_trace():
     """An Android app: a first frame, then main-thread stalls, a JS error's
     marker and record in logcat, and a crash."""
-    t = Trace()
-    pid = 4000
+    s = Session()
+    s.slice(100, 300, "bindApplication")               # startup
+    s.slice(500, 20, "Choreographer#doFrame 1")        # the first frame ends at 520 ms
+    s.slice(1000, 320, "Choreographer#doFrame 2")      # a hang
+    s.slice(2000, 180, "binder transaction")           # a microhang
+    s.js_error(3000, "k1", fatal=True)
+    s.java_crash(3001)
+    return s.bytes()
 
-    def pkt():
-        p = t.packet.add()
-        p.trusted_packet_sequence_id = 1
-        return p
-    # Log timestamps are on the realtime clock; a snapshot maps it onto the
-    # trace's boot clock, as every real device trace has.
-    p = pkt()
-    for clock_id in (6, 1):      # BUILTIN_CLOCK_BOOTTIME, BUILTIN_CLOCK_REALTIME
-        c = p.clock_snapshot.clocks.add()
-        c.clock_id, c.timestamp = clock_id, 0
-    p = pkt()
-    p.track_descriptor.uuid = 1
-    p.track_descriptor.process.pid = pid
-    p.track_descriptor.process.process_name = "com.swag.pay"
-    p = pkt()
-    p.track_descriptor.uuid = 2
-    p.track_descriptor.thread.pid = pid
-    p.track_descriptor.thread.tid = pid
-    p.track_descriptor.thread.thread_name = "com.swag.pay"
 
-    def sl(ts_ms, dur_ms, name):
-        for ts, kind in ((ts_ms, TrackEvent.TYPE_SLICE_BEGIN), (ts_ms + dur_ms, TrackEvent.TYPE_SLICE_END)):
-            p = pkt()
-            p.timestamp = int(ts * MS)
-            p.track_event.type = kind
-            p.track_event.track_uuid = 2
-            if kind == TrackEvent.TYPE_SLICE_BEGIN:
-                p.track_event.name = name
-    sl(100, 300, "bindApplication")                # startup
-    sl(500, 20, "Choreographer#doFrame 1")         # the first frame ends at 520 ms
-    sl(1000, 320, "Choreographer#doFrame 2")       # a hang
-    sl(2000, 180, "binder transaction")            # a microhang
-    p = pkt()
-    p.timestamp = 3000 * MS
-    p.track_event.type = TrackEvent.TYPE_INSTANT
-    p.track_event.track_uuid = 2
-    p.track_event.name = "error:js:global:TypeError#fatal@k1"
-    rec = json.dumps({"id": "k1", "name": "TypeError", "message": "x", "stack": "TypeError: x\n    at a (address at index.android.bundle:1:9)"})
-    p = pkt()
-    lp = p.android_log
-    for i, (tag, msg) in enumerate([("SwagPerfError", f"swagerr|k1|1/1|{rec}"),
-                                    ("AndroidRuntime", "FATAL EXCEPTION: main")]):
-        ev = lp.events.add()
-        ev.pid, ev.tid, ev.timestamp, ev.tag, ev.message = pid, pid, (3000 + i) * MS, tag, msg
-        ev.prio = 4 if tag == "SwagPerfError" else 6   # INFO, ERROR
-    return t.SerializeToString()
+def _stability(data, pkg="com.swag.pay"):
+    from perfetto.trace_processor import TraceProcessor
+    tp = TraceProcessor(trace=_write(data))
+    try:
+        return stability.extract_stability(tp, pkg, "android")
+    finally:
+        tp.close()
 
 
 class TestAndroidStability(unittest.TestCase):
 
     def test_main_thread_stalls_logcat_records_and_crash(self):
-        path = _write(_android_trace())
-        from perfetto.trace_processor import TraceProcessor
-        tp = TraceProcessor(trace=path)
-        try:
-            st = stability.extract_stability(tp, "com.swag.pay", "android")
-        finally:
-            tp.close()
+        st = _stability(_android_trace())
         h = st["hangs"]
         self.assertEqual((h["count"], h["microhangs"], h["startup"]["count"]), (1, 1, 1))
         self.assertEqual(h["source"], "the app's main-thread slices")
