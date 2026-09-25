@@ -10,9 +10,9 @@ This plan covers everything that changed in swagperf on 2026-09-24: three commit
 
 | Change | State | Risk | Environments | Section |
 |---|---|---|---|---|
-| T-003: pages built only from the design system | committed `9ca753a` | Medium. Every page was touched, and the charts were redrawn. | E0 | [4.1](#41-t-003-pages-built-only-from-the-design-system-9ca753a) |
-| Run skill | committed `1d6b4fb` | Low. Agent tooling only. | E0 | [4.2](#42-run-skill-1d6b4fb) |
-| F-012 parked; one product-manager skill | committed `0083bc9` (local) | Low. Docs and agent setup only. | E0 | [4.3](#43-shared-product-manager-skill-and-f-012-0083bc9) |
+| T-003: pages built only from the design system | committed `1be77cc` | Medium. Every page was touched, and the charts were redrawn. | E0 | [4.1](#41-t-003-pages-built-only-from-the-design-system-1be77cc) |
+| Run skill | committed `b6e429d` | Low. Agent tooling only. | E0 | [4.2](#42-run-skill-b6e429d) |
+| F-012 parked; one product-manager skill | committed `8b27552` (local) | Low. Docs and agent setup only. | E0 | [4.3](#43-shared-product-manager-skill-and-f-012-8b27552) |
 | F-013: iOS lane | uncommitted | **High.** It touches extraction, storage, triage, Copilot, the server and every dashboard page, and changes Android behaviour too. | E0, E2, E1 | [4.4](#44-f-013-ios-lane-uncommitted) |
 | B-006: per-screen CPU "not measured" | uncommitted | Medium | E0 | [4.5](#45-b-006-per-screen-cpu-not-measured-uncommitted) |
 | F-014: hangs, JS errors, crashes | uncommitted, still being written | **High.** It adds a new store schema, a new page and new triage signals. | E0, E1, E2 | [4.6](#46-f-014-stability-uncommitted-still-being-written) |
@@ -43,7 +43,7 @@ All of these must pass before manual testing starts.
 
 | ID | Check | How | Expected | Priority | Result |
 |---|---|---|---|---|---|
-| G-01 | Python suite | `./.venv/bin/python -m unittest discover -s tests` | OK. There were 263 tests in the working tree at the time of writing, including `test_ios`, `test_stability` and `test_symbolicate`; the last clean run at `1d6b4fb` had 167. It takes about 3 minutes. Two `test_symbolicate` tests skip unless local release builds of Swag Pay exist. | Must | |
+| G-01 | Python suite | `./.venv/bin/python -m unittest discover -s tests` | OK. There were 263 tests in the working tree at the time of writing, including `test_ios`, `test_stability` and `test_symbolicate`; the last clean run at `b6e429d` had 167. It takes about 3 minutes. Two `test_symbolicate` tests skip unless local release builds of Swag Pay exist. | Must | |
 | G-02 | Frontend tests | `cd frontend && npm test` | All pass, including `routes.test.ts` and the iOS cases in `runMeta`, `metrics` and `scope`. | Must | |
 | G-03 | Types and lint | `cd frontend && npm run typecheck && npm run lint` | Both exit 0. The lint rules forbid raw controls and inline styles in pages. | Must | |
 | G-04 | Flashlight summary | `cd flashlight && node summary.test.js` | Prints `summary.test.js: ok` | Must | |
@@ -52,7 +52,7 @@ All of these must pass before manual testing starts.
 
 ## 4. Test cases by change
 
-### 4.1 T-003: pages built only from the design system (`9ca753a`)
+### 4.1 T-003: pages built only from the design system (`1be77cc`)
 
 This was a refactor: nothing should look or behave differently. Compare the pages against the previous build, or against the screenshots in `.claude/handoffs/design_handoff_swag_pay_performance/screenshots/`.
 
@@ -69,16 +69,16 @@ This was a refactor: nothing should look or behave differently. Compare the page
 | DS-09 | Design-system page | `D shot /design-system --full` | Every component renders with no console error. | E0 | Should | |
 | DS-10 | Copilot highlight on the redrawn tables | Ask Copilot "which screen costs the most CPU?" on run 1, then click a Screens source. | The Screens page opens and rings the named row. | E0 | Should | |
 
-### 4.2 Run skill (`1d6b4fb`)
+### 4.2 Run skill (`b6e429d`)
 
 | ID | Check | How | Expected | Env | Priority | Result |
 |---|---|---|---|---|---|---|
 | RS-01 | Isolation | Note the time `history.db` was last modified, and list `traces/` and `docs/issues/`. Run `D up --fresh`, `D tour`, the Copilot flow from SKILL.md, then `D down`. Check again. | `history.db`, `traces/` and `docs/` are unchanged. | E0 | Must | |
 | RS-02 | Every command in SKILL.md | Follow SKILL.md line by line in a fresh shell. | Every block works as written. | E0 | Must | |
 | RS-03 | Dev mode | `D down; D up --dev; D tour; D down` | Tour is clean against live source, and both ports are free afterwards. | E0 | Should | |
-| RS-04 | Known gap: iOS pages | `D tour` | Doesn't visit `/ios/*`, because those routes are built in code, and seeds no iOS data. Until that's fixed, cover them with IOS-D*. Since `d21da60` the demo session (#1) carries JS exceptions, an ANR and two crashes, so Crashes & ANRs and Frame pacing's hangs have data (`--run 1`). | E0 | Should | |
+| RS-04 | Known gap: iOS pages | `D tour` | Doesn't visit `/ios/*`, because those routes are built in code, and seeds no iOS data. Until that's fixed, cover them with IOS-D*. Since `4e7ff5c` the demo session (#1) carries JS exceptions, an ANR and two crashes, so Crashes & ANRs and Frame pacing's hangs have data (`--run 1`). | E0 | Should | |
 
-### 4.3 Shared product-manager skill and F-012 (`0083bc9`)
+### 4.3 Shared product-manager skill and F-012 (`8b27552`)
 
 | ID | Check | How | Expected | Env | Priority | Result |
 |---|---|---|---|---|---|---|
@@ -203,12 +203,12 @@ Record it five or more times, so baselines exist.
 | STB-06 | Stack resolved with the right map | `swagperf maps add <map> --app <id> --platform ios --bundle <main.jsbundle>`, then open the error | The resolved frames match `metro-symbolicate`. The hint names the map. | E0/E2 | Must | |
 | STB-07 | A map from another build | Register a map from a different build. | Nothing is resolved and it says why. Never wrong frames. | E0 | Must | |
 | STB-08 | Stability API | `curl '…/api/stability?run=N'`, `?run=abc`, `?run=99999`, and a run recorded before F-014 | 200 with data; 400; 404; `{stability: null}`. | E0 | Must | |
-| STB-09 | Stability page (superseded by CR-01–CR-03: the page is Crashes & ANRs since `c3fcd22`, and hangs are on Frame pacing) | `D shot /stability --full` and `/ios/stability` on runs with and without stability data | Tiles with the change against the previous run, the chart per run, the hangs table, and the expandable JS error rows (resolved, raw and component stacks). An old run says "Not measured… run `swagperf reextract`". | E0 | Must | |
+| STB-09 | Stability page (superseded by CR-01–CR-03: the page is Crashes & ANRs since `5811c2c`, and hangs are on Frame pacing) | `D shot /stability --full` and `/ios/stability` on runs with and without stability data | Tiles with the change against the previous run, the chart per run, the hangs table, and the expandable JS error rows (resolved, raw and component stacks). An old run says "Not measured… run `swagperf reextract`". | E0 | Must | |
 | STB-10 | Compare shows stability | `/compare` between a clean run and a crashed one | Rows for hangs, longest hang, JS errors and crashed, with the right direction arrows. | E0 | Should | |
-| STB-11 | Triage signals | `triage --json` on a scratch history with an Android (not simulator) crash and a JS error | `crash:<exception or signal>:<app>:<path>` (since F-028; `crash:app:…` for runs recorded before), `anr:<type>:<app>:<path>` and `js_error:<Name>:<app>:<path>` keys. Their context links to Crashes & ANRs (S-02, fixed in `e70b2d9`). | E0 | Must | |
+| STB-11 | Triage signals | `triage --json` on a scratch history with an Android (not simulator) crash and a JS error | `crash:<exception or signal>:<app>:<path>` (since F-028; `crash:app:…` for runs recorded before), `anr:<type>:<app>:<path>` and `js_error:<Name>:<app>:<path>` keys. Their context links to Crashes & ANRs (S-02, fixed in `f1793f4`). | E0 | Must | |
 | STB-12 | `reextract` fills stability | On a copy of an older history: `swagperf reextract` | Old runs gain stability data where their traces exist. | E0 | Should | |
 | STB-13 | Real Android JS error | E1 with the instrumented build: trigger a fatal and a non-fatal JS error during a manual session. | Both appear, with screen, message and stack, and the fatal one is high severity. | E1 | Must | |
-| STB-14 | Real Android crash | E1: force a Java crash, and a native crash. | `crashed` is set. **Check tombstone lines:** they come from `crash_dump`, whose process isn't the app's. Since F-028 (`543fe68`) a tombstone is read by its header (`>>> <pkg> <<<`), not by process, and joined to the app's `Fatal signal` line; CR-07 checks it on the phone. | E1 | Must | |
+| STB-14 | Real Android crash | E1: force a Java crash, and a native crash. | `crashed` is set. **Check tombstone lines:** they come from `crash_dump`, whose process isn't the app's. Since F-028 (`1d51c1b`) a tombstone is read by its header (`>>> <pkg> <<<`), not by process, and joined to the app's `Fatal signal` line; CR-07 checks it on the phone. | E1 | Must | |
 | STB-15 | Android hangs are real hangs | E1 cold capture of Swag Pay; compare the hang list with the trace in Perfetto UI. | Each "hang" is a real main-thread stall. **Suspected defect S-07:** the app's own long `step:` spans may be counted as hangs. | E1 | Must | |
 | STB-16 | Log source cost | E1: capture size and stop time with and without the new Android log source | Size grows only slightly. `tracing_lost` still passes on a full capture. | E1 | Should | |
 | STB-17 | History payload size | `curl -s …/api/history \| wc -c` on a history with 100 runs that have stability data | Note the size and the page load time. If Overview is slow to load, log it. | E0 | Should | |
@@ -228,7 +228,7 @@ Record it five or more times, so baselines exist.
 | TRK-02 | B-008 repro | History where P-004's app and path ran without firing P-004 | Today: P-004 is missing from `quiet`. After a fix: it's listed. Note that a regression can't fire until the step has 5 runs of baseline, so right after a reset, "quiet" doesn't mean "fixed". | E0 | Should | |
 | TRK-03 | Review after a reset | Scratch copy: reset, record a failing run with the automatic review on | The agent adds one reset note to each open issue, and the marker moves back to the new run. | E0 | Should | |
 
-### 4.9 F-028: Crashes & ANRs (`58fe6fa`…`d21da60`)
+### 4.9 F-028: Crashes & ANRs (`a3428b4`…`4e7ff5c`)
 
 JS exceptions, ANRs and crashes on one tab, and hangs on Frame pacing. Spec: `docs/superpowers/specs/2026-09-25-crashes-anrs-tab-design.md`. `D` is the run skill's driver. CR-01–CR-06 were run headless on 2026-09-25 against the seeded scratch data.
 
@@ -267,7 +267,7 @@ These come from reading the code, not from running it, except S-01. Confirm each
 | ID | Suspected defect | Confirm with | Status |
 |---|---|---|---|
 | S-01 | `triage` never reports a step-based issue (`regression:step:…`, `ordering:step:…`) as quiet. The uncommitted change compares `parts[2:-1]` of the key with the app. | TRK-02 | **Confirmed:** today's review returned `quiet: []` although P-004 didn't fire in run #1. Logged as **B-008**. |
-| S-02 | Crash and JS error signals get the ordering-violation context: the wrong risk, the wrong next check, and a link to `/startup#order`. `triage._context` only knows budgets and regressions. | STB-11 | **Fixed** in `e70b2d9` (F-028): crash, ANR and JS-error signals get their own next check and a Crashes & ANRs link; pinned by `test_android_anrs_and_crashes_are_stored_found_and_signalled`. |
+| S-02 | Crash and JS error signals get the ordering-violation context: the wrong risk, the wrong next check, and a link to `/startup#order`. `triage._context` only knows budgets and regressions. | STB-11 | **Fixed** in `f1793f4` (F-028): crash, ANR and JS-error signals get their own next check and a Crashes & ANRs link; pinned by `test_android_anrs_and_crashes_are_stored_found_and_signalled`. |
 | S-03 | An iOS run that isn't on the simulator is judged against Android's global budgets (320 MB peak RAM usage, 60 MB RAM growth, frames), in both `extract_any` and the frontend `METRICS`. This contradicts "no iOS budgets until iOS budgets exist". | Made-up `gen_ios_trace(simulator=False)` run, then check Overview gates | to confirm |
 | S-04 | An iOS crash during launch may be rejected: `verify()` accepts it, but `capture_problems` treats "no slices from own process" as fatal. | IOS-C10 | to confirm |
 | S-05 | "Longest hang" includes microhangs, so a run with 0 hangs can show a longest hang of 150 ms. | STB-02 | to confirm |
@@ -278,7 +278,7 @@ These come from reading the code, not from running it, except S-01. Confirm each
 | S-10 | `sourcemaps/` wasn't in `.gitignore`, so registered maps would show up in `git status`. | STB-06, then `git status` | **Fixed** in the working tree while this plan was written: `.gitignore` now lists `sourcemaps/`. |
 | S-11 | An iOS stress test doesn't stream xctrace progress into its job log (`start_stress` passes no log callback). | IOS-C7 | to confirm |
 | S-12 | `derive_ios_steps` looks up the app's process without the platform. It works only because the converter names the process after the bundle id. | code review | to confirm |
-| S-13 | The run skill's `tour` skips `/ios/*` and seeds no iOS or stability data. | RS-04 | confirmed by reading; tooling gap. Stability data seeded since `d21da60`; iOS still not. |
+| S-13 | The run skill's `tour` skips `/ios/*` and seeds no iOS or stability data. | RS-04 | confirmed by reading; tooling gap. Stability data seeded since `4e7ff5c`; iOS still not. |
 | S-14 | README says "154 tests". `tests/test_pipeline.py` has `unittest.main()` partway through, so running that file directly skips 56 tests; `discover` is unaffected. | read | confirmed by reading; docs and tooling |
 
 ## 7. Automated tests worth adding

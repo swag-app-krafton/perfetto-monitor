@@ -1,8 +1,8 @@
 # Crashes & ANRs: ANR detection, a full crash list, and one tab for JS exceptions, ANRs and crashes
 
 - **Tracker:** F-028 (this spec). Serves F-025 (test-flow runs), which gets its own spec afterwards.
-- **Status:** implemented 2026-09-25 in `58fe6fa`…`d21da60` (plan: `docs/superpowers/plans/2026-09-25-crashes-anrs-tab.md`). The phone check (Order of work, step 1; TESTING-PLAN CR-07) is still open: the V2514 was disconnected all day.
-- **Builds on:** F-014 (`swagperf/stability.py`, the Stability page, commit `d007f5a`).
+- **Status:** implemented 2026-09-25 in `a3428b4`…`4e7ff5c` (plan: `docs/superpowers/plans/2026-09-25-crashes-anrs-tab.md`). The phone check (Order of work, step 1; TESTING-PLAN CR-07) is still open: the V2514 was disconnected all day.
+- **Builds on:** F-014 (`swagperf/stability.py`, the Stability page, commit `bacfa81`).
 
 ## What the user asked for
 

@@ -430,7 +430,7 @@ Taken in Killcam on 2026-09-24 (Killcam's BACKLOG, "The dashboard rebuilt on swa
 design system"). The user's answers to Q2 and Q7 are still open.
 - **Vendor, don't import.** swagperf's `frontend/src/design` is copied exactly into Killcam's
   `dashboard/src/design/` by `scripts/sync-design-system.sh` and pinned in
-  `dashboard/design-system.lock` (at `d007f5a`). Killcam wraps its own parts in
+  `dashboard/design-system.lock` (at `bacfa81`). Killcam wraps its own parts in
   `dashboard/src/kit/` and never edits `design/`, so "the later merge is a deletion". This
   replaces the recommendation under Shape of the work to build inside swagperf's
   `frontend/`. Both product managers now recommend keeping the vendored copy until Q7 is
@@ -654,7 +654,7 @@ numbers with swagperf's, so they are always prefixed "Killcam".
 
 | # | Owner | swagperf | Killcam | Title | Priority | Depends on | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 ⛔ | swagperf | B-009 | Other trackers (F-004) | A debuggable or Killcam build is never judged: refused unless the capture opts in, then labelled | P1; P0 once `killcam-integration` merges | Q3 | Refusing needs only the debuggable flag (d43fe8a). Naming Killcam needs step 3. Its own baseline. |
+| 1 ⛔ | swagperf | B-009 | Other trackers (F-004) | A debuggable or Killcam build is never judged: refused unless the capture opts in, then labelled | P1; P0 once `killcam-integration` merges | Q3 | Refusing needs only the debuggable flag (4a5100d). Naming Killcam needs step 3. Its own baseline. |
 | 2 ⛔ | swag-pay-killcam | — | T-007 | Swag Pay's `KillcamTraceBridge` out of release builds | P1 | — | **Killcam.** Whether it blocks the merge is the developer's call. |
 | 3 | Killcam | — | F-016 | Killcam names itself in every trace of its build | P1 | — | **No-op:** none. **Contract:** none. See "Killcam's trace marker" above. |
 | 4 | swag-pay | T-005 | T-014 | One `SwagTrace` and `SwagErrors` definition, one shared fixture | P2 | — | Pins the `error:js:` identity. Land it before the bridge is committed. |
