@@ -1,21 +1,29 @@
-import { Card, EmptyState, Grid, KpiTile, LineChart, Stack } from '@/design'
+import { Card, EmptyState, Grid, KpiTile, LineChart, Stack, Text } from '@/design'
 import { fmt, signed } from '@/domain/format'
 import { metricByKey, valueOf, type MetricDef } from '@/domain/metrics'
 import { useScope } from '@/domain/scope'
+import { HangsSection } from './HangsSection'
 
 export function FramesPage() {
   const { scope, isLoading } = useScope()
   if (isLoading || !scope) return <EmptyState>Loading runs…</EmptyState>
   const { run, runs, allRuns, benchmarkRun, history } = scope
   if (!run) return <EmptyState title="No runs yet">Capture a trace to see frame pacing.</EmptyState>
+  const prev = allRuns.filter((r) => r.id < run.id).pop() ?? null
   // Unmeasured is not perfect: a simulator run has no frames to show, and
-  // empty charts would read as a clean run.
+  // empty charts would read as a clean run. Its hangs are measured (the
+  // Hangs instrument), so they still show.
   if (run.simulator)
     return (
-      <EmptyState title="Not measured on the iOS Simulator">
-        The simulator supports none of Instruments' frame instruments (Hitches, Frame Lifetimes, Core Animation FPS). Slow and janky frames are measured on a
-        physical iPhone.
-      </EmptyState>
+      <Stack as="section" gap={20}>
+        <Card title="Frames not measured on the iOS Simulator">
+          <Text variant="body">
+            The simulator supports none of Instruments' frame instruments (Hitches, Frame Lifetimes, Core Animation FPS). Slow and janky frames are measured on a
+            physical iPhone.
+          </Text>
+        </Card>
+        <HangsSection run={run} runs={runs} prev={prev} />
+      </Stack>
     )
   const base = benchmarkRun ?? allRuns.filter((r) => r.id < run.id).pop() ?? null
   const labels = runs.map((r) => `#${r.id}`)
@@ -76,6 +84,7 @@ export function FramesPage() {
       >
         {chart('thermal_drift_pct', 'var(--c1)')}
       </Card>
+      <HangsSection run={run} runs={runs} prev={prev} />
     </Stack>
   )
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { lanePath, toLane } from './profiler'
-import { homeOf, screenByPath, screensFor } from './routes'
+import { homeOf, MOVED_PATHS, SCREENS, screenByPath, screensFor } from './routes'
 
 describe('lanes', () => {
   it('gives the iOS lane the trace screens under /ios, without manual sessions', () => {
@@ -19,5 +19,18 @@ describe('lanes', () => {
     expect(lanePath('perfetto', '/history')).toBe('/history')
     expect(toLane('/ios/memory', 'perfetto')).toBe('/memory')
     expect(toLane('/memory', 'ios')).toBe('/ios/memory')
+  })
+})
+
+describe('crashes & ANRs', () => {
+  it('replaces Stability in both trace lanes', () => {
+    expect(screenByPath('/crashes')).toMatchObject({ id: 'crashes', label: 'Crashes & ANRs', profiler: 'perfetto' })
+    expect(screenByPath('/ios/crashes')).toMatchObject({ page: 'crashes', profiler: 'ios' })
+    expect(SCREENS.some((x) => x.path.endsWith('/stability'))).toBe(false)
+  })
+
+  it('sends old Stability links to a screen that exists', () => {
+    expect(MOVED_PATHS).toEqual({ '/stability': '/crashes', '/ios/stability': '/ios/crashes' })
+    for (const to of Object.values(MOVED_PATHS)) expect(SCREENS.some((x) => x.path === to)).toBe(true)
   })
 })
