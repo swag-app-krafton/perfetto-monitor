@@ -38,8 +38,13 @@ and the longest main-thread slice in the window before it.
 
 **Crashes:**
   - iOS: how xctrace saw the process end, carried in the trace's provenance.
-  - Android: a fatal exception or signal in the crash log for the app's own
-    process.
+  - Android, every one in the run, with its crash log:
+    - Kotlin/Java: AndroidRuntime's report (`FATAL EXCEPTION`, `Process:
+      <pkg>, PID: <pid>`, the exception, a line per frame), reassembled;
+    - native: libc's `Fatal signal` line from the app, joined to the
+      tombstone crash_dump writes from its own process, whose header names
+      the app (`pid: N, … >>> <pkg> <<<`).
+  A trace recorded without the android.log source measured none.
 """
 import json, re
 
@@ -344,25 +349,120 @@ def errors(tp, upids, platform, wins=None):
 
 # ------------------------------------------------------------------ crashes
 
-_ANDROID_CRASH = ("FATAL EXCEPTION", "Fatal signal", "*** *** *** *** *** ***")
+_FATAL_SIGNAL = re.compile(r"^Fatal signal (?P<num>\d+) \((?P<sig>SIG[A-Z0-9]+)\).* pid (?P<pid>\d+) \(")
+_PROCESS_LINE = re.compile(r"^Process: (?P<pkg>[^,\s]+), PID: (?P<pid>\d+)")
+_TOMBSTONE_HEAD = re.compile(r"^pid: (?P<pid>\d+), tid: \d+, name: .*>>> (?P<pkg>\S+) <<<")
+_TOMBSTONE_START = "*** *** ***"
+_SIGNAL_NAME = re.compile(r"\((SIG[A-Z0-9]+)\)")
+# A report's lines arrive together; a longer gap ends it.
+_REPORT_GAP_NS = 1_000_000_000
 
 
-def crash(tp, upids, platform, src):
-    """Whether the app died on its own during the recording."""
-    if platform == "ios":
-        if src.get("crashed") in ("1", True):
-            return {"crashed": True, "reason": src.get("termination") or None}
-        return {"crashed": False, "reason": None}
+def _crash_lines(tp):
+    """Every crash-log line in the trace, with the pid of the process that
+    wrote it. Unscoped on purpose: crash_dump, not the app, writes a native
+    crash's tombstone, and every report names the app itself."""
     try:
-        scope = ""
-        if upids:
-            ids = ",".join(str(int(u)) for u in upids)
-            scope = f" and utid in (select utid from thread where upid in ({ids}))"
-        like = " or ".join(f"msg like '{m}%'" for m in _ANDROID_CRASH)
-        r = _rows(tp, f"select msg from android_logs where ({like}){scope} limit 1")
+        return _rows(tp, """
+            select l.ts as ts, l.utid as utid, p.pid as pid, l.tag as tag, l.msg as msg
+            from android_logs l
+            left join thread t using (utid) left join process p using (upid)
+            where l.tag in ('AndroidRuntime', 'libc', 'DEBUG') order by l.ts""")
     except Exception:
-        r = []
-    return {"crashed": bool(r), "reason": (r[0]["msg"][:200] if r else None)}
+        return []
+
+
+def _java_crashes(lines, pkg, pids):
+    blocks, cur = [], None
+    for ln in lines:
+        if ln["tag"] != "AndroidRuntime":
+            continue
+        msg = ln["msg"] or ""
+        if msg.startswith("FATAL EXCEPTION"):
+            cur = {"ts": ln["ts"], "last": ln["ts"], "utid": ln["utid"], "pid": ln["pid"],
+                   "pkg": None, "lines": [msg]}
+            blocks.append(cur)
+        elif cur and ln["utid"] == cur["utid"] and ln["ts"] - cur["last"] <= _REPORT_GAP_NS:
+            cur["lines"].append(msg)
+            cur["last"] = ln["ts"]
+            m = _PROCESS_LINE.match(msg)
+            if m:
+                cur["pkg"], cur["pid"] = m["pkg"], int(m["pid"])
+    out = []
+    for b in blocks:
+        if b["pkg"] != pkg and not (b["pkg"] is None and b["pid"] in pids):
+            continue
+        exc = next((x for x in b["lines"][1:]
+                    if not x.startswith("Process:") and not x.lstrip().startswith("at ")), "")
+        out.append({"ts": b["ts"], "kind": "java",
+                    "signature": exc.partition(": ")[0].strip() or "FATAL EXCEPTION",
+                    "message": exc or b["lines"][0], "log": "\n".join(b["lines"]), "pid": b["pid"]})
+    return out
+
+
+def _native_crashes(lines, pkg, pids):
+    tombs, writing = [], {}
+    for ln in lines:
+        if ln["tag"] != "DEBUG":
+            continue
+        msg = ln["msg"] or ""
+        if msg.startswith(_TOMBSTONE_START):
+            writing[ln["utid"]] = t = {"ts": ln["ts"], "lines": [msg], "pid": None, "pkg": None, "used": False}
+            tombs.append(t)
+            continue
+        t = writing.get(ln["utid"])
+        if t is None:
+            continue
+        t["lines"].append(msg)
+        m = _TOMBSTONE_HEAD.match(msg)
+        if m:
+            t["pid"], t["pkg"] = int(m["pid"]), m["pkg"]
+    mine = [t for t in tombs if t["pkg"] == pkg]
+    out = []
+    for ln in lines:
+        m = _FATAL_SIGNAL.match(ln["msg"] or "") if ln["tag"] == "libc" else None
+        if not m or int(m["pid"]) not in pids:
+            continue
+        pid = int(m["pid"])
+        t = next((t for t in mine if t["pid"] == pid and not t["used"] and t["ts"] >= ln["ts"]), None)
+        if t:
+            t["used"] = True
+        out.append({"ts": ln["ts"], "kind": "native", "signature": m["sig"], "message": ln["msg"],
+                    "log": "\n".join([ln["msg"]] + (t["lines"] if t else [])), "pid": pid})
+    # A tombstone whose libc line never reached the trace is still a crash.
+    for t in mine:
+        if t["used"]:
+            continue
+        sig = next((s.group(1) for s in map(_SIGNAL_NAME.search, t["lines"]) if s), "native crash")
+        out.append({"ts": t["ts"], "kind": "native", "signature": sig,
+                    "message": next((x for x in t["lines"] if x.startswith("signal ")), None),
+                    "log": "\n".join(t["lines"]), "pid": t["pid"]})
+    return out
+
+
+def crash(tp, upids, platform, src, pkg=None, wins=None):
+    """Every time the app died on its own during the recording."""
+    if platform == "ios":
+        died = src.get("crashed") in ("1", True)
+        reason = (src.get("termination") or None) if died else None
+        events = [{"start_ms": None, "kind": "ios", "signature": reason or "crash", "message": reason,
+                   "log": None, "screen": None, "pid": None}] if died else []
+        return {"measured": True, "crashed": died, "reason": reason, "count": len(events), "events": events}
+    cfg = _config(tp)
+    if cfg is not None and 'name: "android.log"' not in cfg:
+        return {"measured": False, "crashed": False, "reason": None, "count": None, "events": []}
+    wins = _screen_windows(tp) if wins is None else wins
+    pids = ({r["pid"] for r in _rows(tp, f"select pid from process where upid in ({_ids(upids)})")}
+            if upids else set())
+    lines = _crash_lines(tp)
+    found = sorted(_java_crashes(lines, pkg, pids) + _native_crashes(lines, pkg, pids),
+                   key=lambda c: c["ts"])
+    events = [{"start_ms": round(c["ts"] / 1e6, 2), "kind": c["kind"], "signature": c["signature"],
+               "message": c["message"], "log": c["log"], "screen": _screen_at(wins, c["ts"]),
+               "pid": c["pid"]} for c in found]
+    reason = (events[0]["message"] or events[0]["signature"])[:200] if events else None
+    return {"measured": True, "crashed": bool(events), "reason": reason,
+            "count": len(events), "events": events[:MAX_EVENTS]}
 
 
 def extract_stability(tp, pkg, platform=None):
@@ -374,4 +474,4 @@ def extract_stability(tp, pkg, platform=None):
     return {"hangs": hangs(tp, upids, platform, wins),
             "errors": errors(tp, upids, platform, wins),
             "anrs": anrs(tp, pkg, upids, platform, wins),
-            "crash": crash(tp, upids, platform, src)}
+            "crash": crash(tp, upids, platform, src, pkg, wins)}

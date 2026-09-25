@@ -96,10 +96,13 @@ class TestCrash(unittest.TestCase):
 
     def test_ios_crash_comes_from_the_provenance(self):
         m, _ = _ios(lambda r: r.js_error(3000, fatal=True), crashed="SIGABRT")
-        self.assertTrue(m["stability"]["crash"]["crashed"])
-        self.assertEqual(m["stability"]["crash"]["reason"], "SIGABRT")
+        c = m["stability"]["crash"]
+        self.assertTrue(c["crashed"])
+        self.assertEqual(c["reason"], "SIGABRT")
+        self.assertEqual((c["count"], c["events"][0]["kind"], c["events"][0]["signature"]), (1, "ios", "SIGABRT"))
         m, _ = _ios(lambda r: None)
         self.assertFalse(m["stability"]["crash"]["crashed"])
+        self.assertEqual(m["stability"]["crash"]["count"], 0)
 
     def test_how_xctrace_saw_the_process_end(self):
         from swagperf.capture_ios import crash_of
@@ -196,6 +199,65 @@ class TestAnrs(unittest.TestCase):
         m, _ = _ios(lambda r: None)
         a = m["stability"]["anrs"]
         self.assertEqual((a["measured"], a["count"]), (False, None))
+
+
+class TestCrashes(unittest.TestCase):
+
+    def test_a_java_crash_is_reassembled_from_its_log_lines(self):
+        c = _session(lambda s: s.java_crash(4000, frames=("a.B.c(B.kt:1)", "a.B.d(B.kt:2)")))["crash"]
+        self.assertEqual((c["measured"], c["crashed"], c["count"]), (True, True, 1))
+        ev = c["events"][0]
+        self.assertEqual((ev["kind"], ev["signature"]), ("java", "java.lang.IllegalStateException"))
+        self.assertEqual(ev["message"], "java.lang.IllegalStateException: boom")
+        self.assertEqual(ev["log"].splitlines(), ["FATAL EXCEPTION: main", "Process: com.swag.pay, PID: 4000",
+                                                  "java.lang.IllegalStateException: boom",
+                                                  "\tat a.B.c(B.kt:1)", "\tat a.B.d(B.kt:2)"])
+        self.assertEqual((ev["screen"], ev["pid"], ev["start_ms"]), ("Home", 4000, 4000.0))
+        self.assertEqual(c["reason"], "java.lang.IllegalStateException: boom")
+
+    def test_a_native_crash_carries_crash_dumps_tombstone(self):
+        c = _session(lambda s: s.native_crash(5000))["crash"]
+        self.assertEqual(c["count"], 1)
+        ev = c["events"][0]
+        self.assertEqual((ev["kind"], ev["signature"], ev["pid"]), ("native", "SIGSEGV", 4000))
+        self.assertTrue(ev["message"].startswith("Fatal signal 11 (SIGSEGV)"))
+        self.assertIn(">>> com.swag.pay <<<", ev["log"])
+        self.assertIn("backtrace:", ev["log"])
+
+    def test_a_tombstone_without_its_libc_line_is_still_a_crash(self):
+        c = _session(lambda s: s.native_crash(5000, libc=False))["crash"]
+        self.assertEqual((c["count"], c["events"][0]["signature"]), (1, "SIGSEGV"))
+
+    def test_another_apps_crash_is_ignored(self):
+        def build(s):
+            s.java_crash(3000, pid=6000, process="com.other.app")
+            s.native_crash(4000, pid=6000, process="com.other.app", writer=5001)
+        c = _session(build, others=[(6000, "com.other.app")])["crash"]
+        self.assertEqual((c["measured"], c["crashed"], c["count"]), (True, False, 0))
+
+    def test_a_restarted_app_crashes_twice(self):
+        def build(s):
+            s.java_crash(3000)
+            s.native_crash(9000, pid=4100, writer=5001)
+        c = _session(build, others=[(4100, "com.swag.pay")])["crash"]
+        self.assertEqual(c["count"], 2)
+        self.assertEqual([e["kind"] for e in c["events"]], ["java", "native"])
+        self.assertEqual([e["pid"] for e in c["events"]], [4000, 4100])
+
+    def test_a_trace_without_the_log_source_measures_no_crashes(self):
+        def build(s):
+            s.config(sources=["linux.ftrace"], atrace=["am"])
+            s.java_crash(3000)
+        c = _session(build)["crash"]
+        self.assertEqual((c["measured"], c["crashed"], c["count"]), (False, False, None))
+
+    def test_counts_stay_whole_past_the_event_cap(self):
+        def build(s):
+            for i in range(stability.MAX_EVENTS + 5):
+                s.java_crash(1000 + i * 20)
+        c = _session(build)["crash"]
+        self.assertEqual(c["count"], stability.MAX_EVENTS + 5)
+        self.assertEqual(len(c["events"]), stability.MAX_EVENTS)
 
 
 class TestStabilityDownstream(unittest.TestCase):
