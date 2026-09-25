@@ -17,6 +17,7 @@ const PAGES: Record<string, ComponentType> = {
   steps: page(() => import('@/features/steps/StepsPage'), 'StepsPage'),
   screens: page(() => import('@/features/screens/ScreensPage'), 'ScreensPage'),
   stability: page(() => import('@/features/stability/StabilityPage'), 'StabilityPage'),
+  trend: page(() => import('@/features/trend/TrendPage'), 'TrendPage'),
   compare: page(() => import('@/features/compare/ComparePage'), 'ComparePage'),
   history: page(() => import('@/features/history/HistoryPage'), 'HistoryPage'),
   capture: page(() => import('@/features/capture/CapturePage'), 'CapturePage'),

@@ -331,7 +331,7 @@ def over_time(ctx, emit_step, key="peak_rss_mb", n=10):
     lo, hi = min(vals), max(vals)
     text = f"{label} ranged {lo:,.0f}–{hi:,.0f} {unit} over the last {len(runs)} runs."
     if budget:
-        text += f" {len(over)} of {len(runs)} were over the {budget:g} {unit} budget."
+        text += f" {len(over)} of {len(runs)} were over the {budget:g} {unit} North Star target."
     return [{"type": "verdict", "tone": "fail" if over else "pass", "label": "OVER" if over else "WITHIN", "text": text},
             {"type": "bars", "title": f"{label} per run", "unit": unit, "labels": [f"#{r['id']}" for r in runs],
              "values": vals, "budget": budget},
@@ -340,18 +340,21 @@ def over_time(ctx, emit_step, key="peak_rss_mb", n=10):
 
 def first_over_budget(ctx, emit_step):
     runs = [r for r in ctx.scoped if _val(r, "ttff_ms") is not None and r.get("ttid_budget_ms")]
-    emit_step(f"Scanned {len(runs)} runs for TTID against the budget")
+    emit_step(f"Scanned {len(runs)} runs for TTID against its North Star target")
     if not runs:
-        # Simulator runs and uninstrumented apps have no budget: "never over"
-        # would be a verdict on nothing.
-        return [{"type": "para", "text": "No run in scope has a TTID budget to be over "
-                 "(simulator runs, and apps without one in the catalogue, are never judged)."}]
+        # Simulator runs, uninstrumented apps and derived runs of our own app
+        # (B-010) have no startup target: "never over" would be a verdict on
+        # nothing. Say why, in the payload's own words when it gives them.
+        why = next((r.get("ttid_target_reason") for r in reversed(ctx.scoped)
+                    if r.get("ttid_target_reason")), None)
+        return [{"type": "para", "text": "No run in scope has a startup North Star target to be over. " +
+                 (why or "Simulator runs, and apps without one in the catalogue, are never judged.")}]
     for r in runs:
         b = r.get("ttid_budget_ms")
         if b and r["ttff_ms"] > b:
-            return [{"type": "verdict", "tone": "fail", "label": "FIRST", "text": f"Run #{r['id']} was the first over budget: {r['ttff_ms']:.0f} ms against {b} ms."},
+            return [{"type": "verdict", "tone": "fail", "label": "FIRST", "text": f"Run #{r['id']} was the first over its North Star target: {r['ttff_ms']:.0f} ms against {b} ms."},
                     {"type": "cites", "items": [cite_run(r), cite_chart("ttid")]}]
-    return [{"type": "verdict", "tone": "pass", "label": "NEVER", "text": f"No run in scope has gone over its TTID budget ({len(runs)} checked)."},
+    return [{"type": "verdict", "tone": "pass", "label": "NEVER", "text": f"No run in scope has gone over its startup North Star target ({len(runs)} checked)."},
             {"type": "cites", "items": [cite_chart("ttid")]}]
 
 

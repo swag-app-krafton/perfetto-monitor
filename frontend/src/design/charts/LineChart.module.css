@@ -52,11 +52,48 @@
   color: var(--tx3);
   white-space: nowrap;
 }
-.budget {
+/* A reference line: dashed (a target) or dotted (a benchmark); its colour
+   comes from the reference, its label stays in text ink. */
+.ref {
   position: absolute;
   left: 0;
   right: 0;
   border-top: 1.5px dashed var(--accent);
+}
+.dotted {
+  border-top-width: 2px;
+  border-top-style: dotted;
+}
+/* The key naming each series' reference line, under the plot. */
+.refKey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin: 0 52px 0 44px;
+  padding: 0;
+  list-style: none;
+}
+.refKeyItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--tx2);
+}
+.refKeyValue {
+  font-weight: 600;
+  color: var(--tx);
+}
+.refSwatch {
+  width: 16px;
+  border-top: 1.5px dashed;
+}
+.refSwatchDotted {
+  border-top: 2px dotted;
+}
+.tipNote {
+  font-weight: 400;
+  color: var(--tx3);
 }
 .budgetLabel {
   position: absolute;

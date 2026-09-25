@@ -22,7 +22,7 @@ Items and IDs never change meaning, and IDs are never reused. There are four kin
 
 | Prefix | Kind | Example |
 |---|---|---|
-| `P-` | Performance issue in the app under test, found in runs | Peak RAM usage over budget on Swag Pay cold start |
+| `P-` | Performance issue in the app under test, found in runs | Peak RAM usage over its North Star target on Swag Pay cold start |
 | `B-` | Bug in swagperf or its dashboard | Verdict headline shows numbers without units |
 | `F-` | Feature for swagperf or its dashboard | Copilot answers from a local Claude session |
 | `T-` | Tech debt or security in swagperf | Server accepts POSTs from other websites |
@@ -69,7 +69,7 @@ New IDs are one above the highest existing ID of that kind. For P- issues, `tria
    - **Open issue** (`needs-review`, `confirmed`, `in-progress`):
      - add the new runs to its Evidence table
      - update `Last seen`
-     - add one Log line, e.g. "Seen again in #82 at 501.2 MB (+56.6% over the 320 MB budget)"
+     - add one Log line, e.g. "Seen again in #82 at 501.2 MB (+56.6% over the 320 MB North Star target)"
      - raise its priority if the new data meets a higher rule
      - update its row in TRACKER.md
 
@@ -109,7 +109,7 @@ This is the part a developer reads first. Make it specific, short and honest.
 The `Status:` and `Signal:` lines are machine-read. Keep them exactly in this form.
 
 ```markdown
-# P-001 · Peak RAM usage over budget · Swag Pay · cold
+# P-001 · Peak RAM usage over its North Star target · Swag Pay · cold
 
 - **Status:** needs-review
 - **Signal:** `budget:peak_rss_mb:com.swag.pay:cold`
@@ -126,7 +126,7 @@ One or two sentences: what is wrong, how often and how far off.
 
 | Run | Date | Device | Value | Reference | Off by |
 |---|---|---|---|---|---|
-| #81 | 2026-09-23 | V2514 | 493.3 MB | 320 MB budget | +54.2% |
+| #81 | 2026-09-23 | V2514 | 493.3 MB | 320 MB North Star target | +54.2% |
 
 Newest first. Past 12 rows, keep the newest 12 and summarise the older ones in one line under the table.
 
@@ -149,7 +149,7 @@ Newest first. Past 12 rows, keep the newest 12 and summarise the older ones in o
 
 - [ ] Confirm it is real (re-run it, or run a stress test for a one-run signal)
 - [ ] Owner: _unassigned_
-- [ ] Decision: fix · accept and change the budget · dismiss (write the reason and the value at the time in the Log)
+- [ ] Decision: fix · accept and change the North Star target · dismiss (write the reason and the value at the time in the Log)
 
 ## Log
 
@@ -158,7 +158,7 @@ Newest first. Past 12 rows, keep the newest 12 and summarise the older ones in o
 
 The Performance issues row in TRACKER.md:
 
-`| [P-001](issues/P-001.md) | Peak RAM usage over budget | Swag Pay · cold | P1 | needs-review | #72–#81 (10 of 10) |`
+`| [P-001](issues/P-001.md) | Peak RAM usage over its North Star target | Swag Pay · cold | P1 | needs-review | #72–#81 (10 of 10) |`
 
 # Logging tool bugs, features and tech debt
 
@@ -238,6 +238,7 @@ Parked, revisit?
 
 - **Numbers:** every number you write comes from the triage output, a trace, or the tracker itself. Don't compute new figures beyond a plain difference or percentage of two numbers you quote.
 - **RAM wording:** say "RAM usage" and "RAM growth" in all prose, never "RSS". The metric keys `peak_rss_mb` and `rss_growth_mb` appear only inside `Signal:` lines, because those are keys.
+- **Target wording:** a metric's threshold is its "North Star target", never its "budget"; the time one frame has to draw is the "frame deadline". `budget:` stays inside `Signal:` lines, because those are keys.
 - **Bash:** only `git log`, `git show`, `git status` and `.venv/bin/python -m swagperf.cli triage …`. The automatic review denies anything else.
 - **Automatic review:** nobody reads your questions there. Put questions into the issue ("Questions for the developer") and finish the review.
 - **Tables:** keep every table's columns aligned with its header row, and keep the Done section to the last 30 days. Move older Done rows to the "Archive" list at the bottom as `ID · title · commit`.

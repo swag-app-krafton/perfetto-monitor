@@ -3,10 +3,57 @@ import json, os, tempfile, threading, time
 from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from . import runmeta, store
-from .budgets import STEP_BUDGETS_MS, GLOBAL_BUDGETS, RISK_MAP
+from .budgets import STEP_BUDGETS_MS, GLOBAL_BUDGETS, RISK_MAP, startup_target
 
 WEB = os.path.join(os.path.dirname(__file__), "..", "web")
 DIST = os.path.join(WEB, "dist")  # the built dashboard; see frontend/README.md
+
+# Who may talk to this server (T-001). It binds to loopback, but any web page
+# open in the user's browser can still reach it: a cross-site POST with a
+# text/plain body needs no CORS preflight, and a DNS-rebinding page arrives
+# under its own host name. So, after Killcam's rules (KillcamServer.kt): the
+# Host must be a loopback name, a browser's Origin (when it sends one) must be
+# a loopback page, and every write must carry a header that no cross-site form
+# can send and no cross-site fetch can send without a preflight, which this
+# server never approves (it sends no CORS headers and has no do_OPTIONS).
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
+WRITE_HEADER = "X-Swagperf"
+
+
+def _host_name(value):
+    """The host part of a Host header or URL authority, lower-cased, without
+    its port: '127.0.0.1:8787' -> '127.0.0.1', '[::1]:5173' -> '[::1]'.
+    None when it is missing or malformed."""
+    v = (value or "").strip().lower()
+    if not v:
+        return None
+    if v.startswith("["):
+        end = v.find("]")
+        rest = v[end + 1:] if end > 0 else None
+        if rest is None or (rest and not (rest.startswith(":") and rest[1:].isdigit())):
+            return None
+        return v[:end + 1]
+    name, sep, port = v.partition(":")
+    if sep and not port.isdigit():
+        return None
+    return name
+
+
+def access_error(method, headers):
+    """Why a request must be refused, or None to serve it. Any port is fine:
+    `perfetto_init -p`, the Vite dev server and the run skill's driver all use
+    their own."""
+    if _host_name(headers.get("Host")) not in LOOPBACK_HOSTS:
+        return "host_not_allowed"
+    origin = headers.get("Origin")
+    if origin is not None:
+        # "null" (a sandboxed frame, a file:// page) parses to no scheme.
+        o = urlparse(origin.strip().lower())
+        if o.scheme != "http" or _host_name(o.netloc) not in LOOPBACK_HOSTS:
+            return "origin_not_allowed"
+    if method not in ("GET", "HEAD") and headers.get(WRITE_HEADER) != "1":
+        return "missing_x_swagperf_header"
+    return None
 
 
 def _ios_device_payload():
@@ -86,16 +133,16 @@ def _device_payload(platform="android"):
 def _payload(limit=100):
     from . import catalogue
     runs = store.history(limit)
-    c = store.connect()
+    # The verdict is the newest verdict row; an AI summary (F-023) is its own
+    # kind and never replaces it. Only the summary's metadata travels here, so
+    # /api/history doesn't grow with every summary: the body is /api/summary.
+    verdicts, summaries = store.latest_analyses("verdict"), store.latest_analyses("summary")
     an = {}
-    for r in c.execute("""select a.run_id, a.json, a.verdict, a.model from analyses a
-                          join (select run_id, max(id) mid from analyses group by run_id) m
-                          on a.id = m.mid"""):
+    for rid, r in verdicts.items():
         try:
-            an[r["run_id"]] = json.loads(r["json"])
+            an[rid] = json.loads(r["json"])
         except Exception:
             pass
-    c.close()
     out = []
     for r in runs:
         d = dict(r)
@@ -107,6 +154,18 @@ def _payload(limit=100):
         d["steps"] = [{**s, "children": json.loads(s.pop("children_json") or "[]")}
                       for s in d["steps"]]
         d["analysis"] = an.get(r["id"])
+        v = verdicts.get(r["id"])
+        d["analysis_meta"] = {"model": v["model"], "created": v["created"]} if v else None
+        sm = summaries.get(r["id"])
+        if sm:
+            try:
+                headline = (json.loads(sm["json"] or "{}") or {}).get("headline")
+            except ValueError:
+                headline = None
+            d["summary"] = {"model": sm["model"], "created": sm["created"], "headline": headline,
+                            "stale": bool(v and v["id"] > sm["id"])}
+        else:
+            d["summary"] = None
         # Resolve this run's own startup budget from the catalogue rather than
         # letting the client assume Swag Pay's global budget applies to every
         # app. A derived (competitor) run only gets a budget if one was
@@ -118,14 +177,18 @@ def _payload(limit=100):
         d["app_name"] = (app or {}).get("name") or d.get("app_pkg")
         d["app_role"] = (app or {}).get("role")
         d["meta"] = runmeta.merge(d, json.loads(d.pop("meta_json", None) or "{}"), (app or {}).get("name"))
-        # A simulator run has no budget (its numbers are the Mac's); an iOS run
-        # has only what its catalogue entry states, until iOS budgets exist.
-        if d["simulator"]:
-            d["ttid_budget_ms"] = None
-        elif d["platform"] == "android" and not d.get("derived"):
-            d["ttid_budget_ms"] = GLOBAL_BUDGETS["time_to_first_camera_frame_ms"]
-        else:
-            d["ttid_budget_ms"] = (app or {}).get("budgets", {}).get("ttid_ms")
+        # One rule for a run's startup target (budgets.startup_target): none on
+        # a simulator (its numbers are the Mac's), none for a derived run of our
+        # own app (B-010), and on iOS only what the catalogue states. When there
+        # is none, the reason goes to the page, which shows it in its place.
+        d["ttid_budget_ms"], d["ttid_target_reason"] = startup_target(
+            app, d["platform"], derived=bool(d.get("derived")), simulator=d["simulator"])
+        if d["ttid_budget_ms"] is None and d["breaches"]:
+            # A run recorded before the rule changed can still carry a startup
+            # breach it no longer has a target for. Drop it here, where the
+            # dashboard, triage and the Copilot all read breaches.
+            d["breaches"] = [b for b in d["breaches"]
+                             if b.get("metric") != "time_to_first_camera_frame_ms"]
         out.append(d)
     from .budgets import (CRITICAL_PATH_FIRST_RUN, CRITICAL_PATH_RETURNING, DEFERRED_STEPS,
                           STEP_DESCRIPTIONS, STEP_RUNTIME)
@@ -278,6 +341,25 @@ class H(SimpleHTTPRequestHandler):
                 del self.headers[h]
         return super().send_head()
 
+    def _refused(self):
+        """Answer 403 and return True when access_error() refuses the request.
+        Called first in every do_*, before a request body is read."""
+        err = access_error(self.command, self.headers)
+        if not err:
+            return False
+        if self.command == "HEAD":
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        else:
+            self._json({"error": err}, 403)
+        return True
+
+    def do_HEAD(self):
+        if self._refused():
+            return
+        super().do_HEAD()
+
     def _text(self, text, code=200):
         body = text.encode()
         self.send_response(code)
@@ -318,10 +400,27 @@ class H(SimpleHTTPRequestHandler):
             return False
 
     def do_GET(self):
+        if self._refused():
+            return
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path.startswith("/api/history"):
             return self._json(_payload())
+        if u.path == "/api/trend":
+            # F-026: every run of one app, path and platform, not the newest 100.
+            from . import trend
+            return self._json(trend.trend(q.get("app", [""])[0], q.get("path", [""])[0],
+                                          q.get("platform", ["android"])[0] or "android"))
+        if u.path == "/api/summary":
+            # The body of a run's AI summary; /api/history carries only its
+            # metadata, so it doesn't grow with every summary.
+            from . import jobs
+            try:
+                rid = int(q.get("run", [""])[0])
+            except ValueError:
+                return self._json({"error": "run is required"}, 400)
+            return self._json({"run_id": rid, "summary": store.summary_of(rid),
+                               "generating": jobs.summarising(rid)})
         if u.path.startswith("/api/compare"):
             try:
                 run = int(q.get("run", [""])[0])
@@ -433,15 +532,17 @@ class H(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
+        # Refused before the body is read: see access_error().
+        if self._refused():
+            return
         u = urlparse(self.path)
         n = int(self.headers.get("Content-Length") or 0)
         try:
             payload = json.loads(self.rfile.read(n) or b"{}")
         except json.JSONDecodeError:
             return self._json({"error": "invalid JSON body"}, 400)
-        # The dashboard is bound to loopback only, so these mutate local history
-        # without auth. That is deliberate for a dev/CI tool; do not expose the
-        # server on a routable interface.
+        # There is no login: the server binds to loopback, and access_error()
+        # refuses other sites' pages. Do not expose it on a routable interface.
         if u.path == "/api/copilot/ask":
             return self._copilot_ask(payload)
         if u.path == "/api/copilot/pin":
@@ -496,7 +597,7 @@ class H(SimpleHTTPRequestHandler):
             try:
                 jid = jobs.start_manual_stop(label=payload.get("label"),
                                              app_pkg=payload.get("pkg"),
-                                             use_llm=payload.get("use_llm", False))
+                                             ai_summary=bool(payload.get("ai_summary")))
             except RuntimeError as e:
                 return self._json({"error": str(e)}, 409)
             return self._json({"ok": True, "job_id": jid})
@@ -512,7 +613,7 @@ class H(SimpleHTTPRequestHandler):
                     cold=payload.get("cold", True),
                     duration_ms=payload.get("duration_ms", 8000),
                     label=payload.get("label"),
-                    use_llm=payload.get("use_llm", False),
+                    ai_summary=bool(payload.get("ai_summary")),
                     device=payload.get("device") or None,
                     platform=payload.get("platform") or "android")
             except ValueError as e:
@@ -537,11 +638,26 @@ class H(SimpleHTTPRequestHandler):
                     cold=payload.get("cold", True),
                     duration_ms=payload.get("duration_ms", 10000),
                     label=payload.get("label"),
-                    use_llm=payload.get("use_llm", False),
+                    ai_summary=bool(payload.get("ai_summary")),
                     device=payload.get("device") or None,
                     platform=payload.get("platform") or "android")
             except ValueError as e:
                 return self._json({"error": str(e)}, 400)
+            return self._json({"ok": True, "job_id": jid})
+        if u.path == "/api/summary/generate":
+            # F-023: an AI summary of a recorded run, as a background job. It
+            # never changes the run's verdict.
+            from . import jobs
+            try:
+                rid = int(payload["run_id"])
+            except (KeyError, TypeError, ValueError):
+                return self._json({"error": "run_id is required"}, 400)
+            if not store.run_exists(rid):
+                return self._json({"error": f"no run #{rid}"}, 404)
+            try:
+                jid = jobs.start_summary([rid])
+            except RuntimeError as e:
+                return self._json({"error": str(e)}, 409)
             return self._json({"ok": True, "job_id": jid})
         return self._json({"error": "unknown endpoint"}, 404)
 

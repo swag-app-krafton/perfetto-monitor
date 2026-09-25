@@ -85,6 +85,7 @@ import {
   TextAreaField,
   Toast,
   ToggleChip,
+  ChipGroup,
   Toolbar,
   numCell,
   selectedRow,
@@ -108,7 +109,7 @@ const TYPE: [TextVariant, string, string][] = [
   ['title', 'Expanded 800 · clamp 28–44/1.02', 'Startup'],
   ['stat', 'Expanded 700 · 34/1', '375 ms'],
   ['display-lg', 'Expanded 800 · 26/1.2', 'Three runtimes, one process'],
-  ['headline', 'Expanded 700 · clamp 18–24/1.3', 'Peak RAM usage over budget'],
+  ['headline', 'Expanded 700 · clamp 18–24/1.3', 'Peak RAM usage over its North Star target'],
   ['display', 'Expanded 800 · 22/1.2', 'Ask about this run.'],
   ['heading-lg', 'Expanded 700 · 20', 'Findings'],
   ['heading', 'Expanded 700 · 16', 'Critical-path composition'],
@@ -213,6 +214,7 @@ export function DesignSystemPage() {
   const [sel, setSel] = useState('30')
   const [q, setQ] = useState('')
   const [deep, setDeep] = useState(true)
+  const [devices, setDevices] = useState<string[]>(['V2514', 'Pixel 7'])
   const [chips, setChips] = useState(['Overview tab', 'Run #81', 'vs Benchmark #79'])
   const [active, setActive] = useState(0)
   const [kinds, setKinds] = useState({ screen: true, action: false })
@@ -382,7 +384,23 @@ export function DesignSystemPage() {
                 <ToggleChip pressed={kinds.action} onClick={() => setKinds({ ...kinds, action: !kinds.action })} color="var(--c2)" count={12}>
                   Actions
                 </ToggleChip>
+                <ToggleChip pressed={false} onClick={() => undefined} disabled description="Disabled: says why in its tooltip.">
+                  Disabled
+                </ToggleChip>
               </Row>
+              <ChipGroup
+                label="Devices"
+                value={devices}
+                onChange={setDevices}
+                max={2}
+                maxNote="Up to 2 devices at once in this example."
+                colorOf={(v) => ['var(--c1)', 'var(--c2)'][devices.indexOf(v)]}
+                options={[
+                  { value: 'V2514', label: 'vivo V2514', count: 12 },
+                  { value: 'Pixel 7', label: 'Google Pixel 7', count: 5 },
+                  { value: 'SM-S918', label: 'Samsung S23 Ultra', count: 2 },
+                ]}
+              />
               <div className={s.menuHost}>
                 <OptionList
                   id="ds-options"
@@ -486,7 +504,7 @@ export function DesignSystemPage() {
             </Specimen>
             <Specimen name="Banners and empty states">
               <Banner tone="pass" title="Run #81 saved">
-                Every measured metric is within budget.
+                Every measured metric is within its North Star target.
               </Banner>
               <Banner tone="warn" title="Different devices">
                 Run A is on V2514, Run B on Pixel 7a.
@@ -517,7 +535,7 @@ export function DesignSystemPage() {
             </Specimen>
             <Specimen name="Progress">
               <Progress pct={62} />
-              <Meter label="Time to initial display against its budget" value={375} max={420} tone="pass" height={3} />
+              <Meter label="Time to initial display against its North Star target" value={375} max={420} tone="pass" height={3} />
               <Meter label="bind_application against its baseline" value={190} max={210} marker={180} />
               <Stepper
                 steps={[
@@ -738,8 +756,24 @@ export function DesignSystemPage() {
 
         <Section id="ds-charts" title="Charts" intro="One axis per chart; a null is a gap, never zero; status colour only with a label or glyph beside it.">
           <Grid min={420}>
-            <Card title="LineChart" hint="Toggleable legend, nice ticks, a dashed budget line.">
-              <LineChart label="Example TTID per run" labels={EXAMPLE_RUNS} unit="ms" budget={420} budgetLabel="Budget 420 ms" series={[{ name: 'TTID', color: 'var(--c1)', values: EXAMPLE_TTID }]} />
+            <Card title="LineChart" hint="Toggleable legend, nice ticks, a dashed North Star target line.">
+              <LineChart label="Example TTID per run" labels={EXAMPLE_RUNS} unit="ms" budget={420} budgetLabel="North Star 420 ms" series={[{ name: 'TTID', color: 'var(--c1)', values: EXAMPLE_TTID }]} />
+            </Card>
+            <Card title="LineChart · references" hint="A line per series, each with its own dotted reference (a pinned benchmark) that hides with it; tooltip notes per point.">
+              <LineChart
+                label="Example startup per version"
+                labels={['2.1.0', '2.2.0', '2.3.0', '2.3.1']}
+                unit="ms"
+                budget={420}
+                series={[
+                  { name: 'vivo V2514', color: 'var(--c1)', values: [372, 381, null, 366], notes: ['median of 4 runs', 'median of 3 runs', null, 'median of 5 runs'] },
+                  { name: 'Google Pixel 7', color: 'var(--c2)', values: [318, 330, 344, 351], notes: ['median of 2 runs', 'median of 2 runs', 'median of 3 runs', 'median of 1 run'] },
+                ]}
+                references={[
+                  { value: 360, label: 'vivo V2514 benchmark #41 · 2.1.0', series: 'vivo V2514', color: 'var(--c1)', style: 'dotted' },
+                  { value: 312, label: 'Google Pixel 7 benchmark #44 · 2.1.0', series: 'Google Pixel 7', color: 'var(--c2)', style: 'dotted' },
+                ]}
+              />
             </Card>
             <Card title="BarSeries" hint="Ordered bars with a dashed mean; flagged bars in the fail colour.">
               <BarSeries label="Example session TTIDs" unit="ms" decimals={0} mean={374} bars={EXAMPLE_TTID.map((v, i) => ({ label: `${i + 1}`, value: v, flagged: v > 382 }))} />
@@ -759,7 +793,7 @@ export function DesignSystemPage() {
                 ]}
               />
             </Card>
-            <Card title="StackedBars" hint="Each row split into parts on one scale, with a budget marker. Size lg is the hero form, values inside the parts; a dim row is the reference.">
+            <Card title="StackedBars" hint="Each row split into parts on one scale, with a North Star target marker. Size lg is the hero form, values inside the parts; a dim row is the reference.">
               <Stack gap={24}>
                 <StackedBars
                   unit="ms"

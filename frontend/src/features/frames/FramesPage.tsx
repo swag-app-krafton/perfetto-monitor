@@ -53,7 +53,7 @@ export function FramesPage() {
     <Stack as="section" gap={20}>
       <Grid min={200} gap={12}>
         {tile('slow_pct', 'Slow frames · >16.67 ms')}
-        {tile('janky_pct', 'Janky frames · >3× budget')}
+        {tile('janky_pct', 'Janky frames · over 3× the frame deadline')}
         {tile('thermal_drift_pct', 'Thermal drift')}
         <KpiTile
           label="Frames analysed"
@@ -63,10 +63,10 @@ export function FramesPage() {
         />
       </Grid>
       <Grid min={440}>
-        <Card data-hl="framesChart" title="Slow frames" hint="Share of frames over the 16.67 ms budget, per run.">
+        <Card data-hl="framesChart" title="Slow frames" hint="Share of frames over the 16.67 ms frame deadline, per run.">
           {chart('slow_pct', 'var(--c2)')}
         </Card>
-        <Card title="Janky frames" hint="Share of frames over three budgets: a stutter a user sees.">
+        <Card title="Janky frames" hint="Share of frames longer than three frame deadlines: a stutter a user sees.">
           {chart('janky_pct', 'var(--c3)')}
         </Card>
       </Grid>

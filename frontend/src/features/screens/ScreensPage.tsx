@@ -320,7 +320,7 @@ function LaunchView({ run, descriptions }: { run: Run; descriptions: Record<stri
   return (
     <>
       <Grid min={200} gap={12}>
-        <KpiTile label="TTID" value={ttid == null ? null : fmt(ttid)} unit="ms" note={run.ttid_budget_ms ? `budget ${run.ttid_budget_ms} ms` : undefined} />
+        <KpiTile label="TTID" value={ttid == null ? null : fmt(ttid)} unit="ms" note={run.ttid_budget_ms ? `North Star ${run.ttid_budget_ms} ms` : undefined} />
         <KpiTile label="Startup steps" value={String(run.steps.length)} />
         <KpiTile label="Slowest step" value={run.steps.length ? fmt(Math.max(...run.steps.map((x) => x.dur_ms)), 1) : null} unit="ms" />
       </Grid>

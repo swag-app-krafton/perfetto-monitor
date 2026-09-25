@@ -161,6 +161,14 @@ MIGRATIONS = [
     ("runs", "js_errors", "int"),
     ("runs", "crashed", "int default 0"),
     ("runs", "stability_json", "text"),
+    # F-023: an analysis row is either the run's verdict (rules at capture, or
+    # the model through CLI `analyse`) or an AI summary written for it later.
+    # A summary never replaces the verdict: every verdict reader filters on
+    # kind = 'verdict', and existing rows are verdicts.
+    ("analyses", "kind", "text default 'verdict'"),
+    # The track a step: slice was on, so a run's metrics can be rebuilt for a
+    # summary without its trace (run_metrics). Null for runs recorded before.
+    ("step_metrics", "track", "text"),
 ]
 
 
@@ -208,17 +216,150 @@ def record(metrics, *, label=None, git_sha=None, app_version=None,
                  stability_json=? where id=?""", (*_stability_cols(metrics), rid))
     if meta:
         c.execute("update runs set meta_json=? where id=?", (json.dumps({"capture": meta}), rid))
-    for s in metrics["steps"]:
-        c.execute("""insert into step_metrics
-            (run_id,step,dur_ms,start_ms,budget_ms,over_budget,children_json)
-            values (?,?,?,?,?,?,?)""",
-            (rid, s["step"], s["dur_ms"], s["start_ms"], s["budget_ms"],
-             int(s["over_budget"]), json.dumps(s["children"])))
+    _insert_steps(c, rid, metrics["steps"])
     c.commit(); c.close()
     return rid
 
 
+def _insert_steps(c, rid, steps):
+    for s in steps:
+        c.execute("""insert into step_metrics
+            (run_id,step,dur_ms,start_ms,budget_ms,over_budget,children_json,track)
+            values (?,?,?,?,?,?,?,?)""",
+            (rid, s["step"], s["dur_ms"], s["start_ms"], s["budget_ms"],
+             int(s["over_budget"]), json.dumps(s["children"]), s.get("track")))
+
+
+# ---------------------------------------------------------------- analyses
+# A run has one verdict (the newest 'verdict' row) and at most one current AI
+# summary (the newest 'summary' row). Kept apart so a summary written later can
+# never change the verdict that triage, the Copilot and the gates read (Q-S2).
+
+def add_analysis(run_id, res, *, kind="verdict", db=None):
+    """Store an analyst result for a run. Returns the new row's id."""
+    c = connect(db)
+    cur = c.execute("""insert into analyses (run_id,created,model,verdict,json,kind)
+                       values (?,?,?,?,?,?)""",
+                    (run_id, datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                     res.get("_model", "heuristic"), res.get("verdict"), json.dumps(res), kind))
+    c.commit(); c.close()
+    return cur.lastrowid
+
+
+def latest_analyses(kind="verdict", *, run_id=None, db=None):
+    """{run_id: row} of each run's newest analysis of one kind. The kind is
+    filtered inside the max(id): otherwise a newer summary row would win it and
+    the run would lose its verdict."""
+    c = connect(db)
+    q = """select a.id, a.run_id, a.created, a.model, a.verdict, a.json from analyses a
+           join (select run_id, max(id) mid from analyses
+                 where coalesce(kind, 'verdict') = ? {and_run} group by run_id) m
+           on a.id = m.mid"""
+    args = [kind] + ([run_id] if run_id is not None else [])
+    rows = {r["run_id"]: dict(r) for r in c.execute(
+        q.format(and_run="and run_id = ?" if run_id is not None else ""), args)}
+    c.close()
+    return rows
+
+
+def summary_of(run_id, db=None):
+    """A run's current AI summary: the stored JSON plus who wrote it, when,
+    and whether a newer verdict (reextract writes one) has made it stale.
+    None when it has none."""
+    row = latest_analyses("summary", run_id=run_id, db=db).get(run_id)
+    if not row:
+        return None
+    verdict = latest_analyses("verdict", run_id=run_id, db=db).get(run_id)
+    try:
+        body = json.loads(row["json"] or "{}")
+    except ValueError:
+        body = {}
+    return {**body, "_id": row["id"], "_model": row["model"], "_created": row["created"],
+            "_stale": bool(verdict and verdict["id"] > row["id"])}
+
+
+def run_exists(run_id, db=None):
+    c = connect(db)
+    found = c.execute("select 1 from runs where id=?", (run_id,)).fetchone() is not None
+    c.close()
+    return found
+
+
+def run_metrics(run_id, db=None):
+    """The metrics dict analyst.build_payload reads, rebuilt from a recorded
+    run, so a summary can be written for any run in history without its trace
+    (which may be gone). Startup's target follows today's rule
+    (budgets.startup_target), so a breach recorded before B-010's guard is
+    dropped here as it is on the dashboard. None if there is no such run."""
+    from . import catalogue
+    from .budgets import CRITICAL_PATH_RETURNING, CRITICAL_PATH_FIRST_RUN, startup_target
+    c = connect(db)
+    r = c.execute("select * from runs where id=?", (run_id,)).fetchone()
+    if not r:
+        c.close()
+        return None
+    rows = list(c.execute("""select step, dur_ms, start_ms, budget_ms, over_budget, children_json,
+                                  track from step_metrics where run_id=? order by id""", (run_id,)))
+    c.close()
+
+    def js(v, empty):
+        try:
+            return json.loads(v) if v else empty
+        except ValueError:
+            return empty
+
+    platform = r["platform"] or "android"
+    simulator, derived = bool(r["simulator"]), bool(r["derived"])
+    app = catalogue.get(r["app_pkg"], platform) if r["app_pkg"] else None
+    target, reason = startup_target(app, platform, derived=derived, simulator=simulator)
+    steps = []
+    for s in rows:
+        budget = s["budget_ms"]
+        steps.append({"step": s["step"], "dur_ms": s["dur_ms"], "start_ms": s["start_ms"],
+                      "track": s["track"], "budget_ms": budget,
+                      "over_budget": bool(s["over_budget"]),
+                      "pct_of_budget": round(s["dur_ms"] / budget * 100, 1) if budget else None,
+                      "children": js(s["children_json"], []),
+                      # derive.py marks each step of a derived run.
+                      **({"derived": True} if derived else {})})
+    if derived:
+        critical = [s["step"] for s in steps]
+    else:
+        critical = (CRITICAL_PATH_RETURNING if r["path_kind"] == "returning_user"
+                    else CRITICAL_PATH_FIRST_RUN)
+    breaches = js(r["breaches_json"], [])
+    if target is None:
+        breaches = [b for b in breaches if b.get("metric") != "time_to_first_camera_frame_ms"]
+    stability = js(r["stability_json"], None)
+    return {
+        "run_id": r["id"], "label": r["label"], "device": r["device"],
+        "app_version": r["app_version"], "app_pkg": r["app_pkg"],
+        "path_kind": r["path_kind"], "platform": platform, "simulator": simulator,
+        "derived": derived,
+        "startup_metric": "time to initial display" if derived else "time to first camera frame",
+        "startup": {"time_to_first_camera_frame_ms": r["ttff_ms"], "budget_ms": target,
+                    "target_reason": reason, "critical_path": critical},
+        "steps": steps,
+        "ordering_violations": js(r["violations_json"], []),
+        "frames": js(r["frames_json"], {}),
+        "memory": js(r["memory_json"], {}),
+        "breaches": breaches,
+        **({"stability": stability} if stability else {}),
+        "meta": js(r["meta_json"], {}),
+    }
+
+
 from .budgets import MIN_BASELINE_RUNS
+
+
+def step_baselines(run_id, metrics, *, db=None):
+    """Each of a run's steps' trailing baseline, for the analyst. Scoped like
+    regressions(): the same app, platform and kind of device."""
+    out = {s["step"]: baseline(s["step"], exclude_run=run_id, app_pkg=metrics.get("app_pkg"),
+                               platform=metrics.get("platform") or "android",
+                               simulator=bool(metrics.get("simulator")), db=db)
+           for s in metrics["steps"]}
+    return {k: v for k, v in out.items() if v}
 
 
 def baseline(step, *, exclude_run=None, window=20, device=None, app_pkg=None,
@@ -555,12 +696,7 @@ def reextract(db=None, extractor=None):
             m.setdefault("app_pkg", r["app_pkg"])
             m.setdefault("derived", False)
         c.execute("delete from step_metrics where run_id=?", (r["id"],))
-        for s in m["steps"]:
-            c.execute("""insert into step_metrics
-                (run_id,step,dur_ms,start_ms,budget_ms,over_budget,children_json)
-                values (?,?,?,?,?,?,?)""",
-                (r["id"], s["step"], s["dur_ms"], s["start_ms"], s["budget_ms"],
-                 int(s["over_budget"]), json.dumps(s["children"])))
+        _insert_steps(c, r["id"], m["steps"])
         f, mem = m["frames"], m.get("memory", {})
         c.execute("""update runs set ttff_ms=?, slow_pct=?, janky_pct=?,
                      thermal_drift_pct=?, peak_rss_mb=?, rss_growth_mb=?,

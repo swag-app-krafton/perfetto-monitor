@@ -35,7 +35,7 @@ Then, in the dashboard:
 
 1. **Capture** → pick the app → **Cold** → **Profile**. The run is traced, analysed
    and saved; **View results** opens it.
-2. **Overview** shows its verdict against the budgets and the previous run.
+2. **Overview** shows its verdict against the North Star targets and the previous run.
 3. When you have a run you trust, **History** → **Pin as benchmark**. Every later run
    of that app, path and device is judged against it.
 
@@ -72,7 +72,7 @@ What an iOS run measures:
 | Per-screen CPU | **Not measured**: no scheduler data | Planned |
 
 **Simulator runs are indicative only.** They run on the Mac's CPU with a warm cache.
-They are compared only with other simulator runs, carry no budgets, never fail, can't be
+They are compared only with other simulator runs, carry no North Star targets, never fail, can't be
 pinned as a benchmark, and never open a performance issue. Their first launch after an
 install is much slower than the next ones, so compare stress-test medians, not single
 runs.
@@ -96,7 +96,7 @@ trace ──▶ extract.py ──▶ metrics JSON ──▶ store.py (SQLite his
 ```
 
 **The model never sees a raw trace.** It receives extracted metrics, trailing
-baselines and the budget table. Measuring is SQL's job; the model's job is deciding
+baselines and the North Star target table. Measuring is SQL's job; the model's job is deciding
 which runtime owns a regression and whether it deserves a human. A test asserts this
 boundary holds.
 
@@ -111,7 +111,7 @@ boundary holds.
 
 Each metric maps to a constraint or risk named in the shell architecture.
 
-| Metric | Budget | Architectural basis |
+| Metric | North Star target | Architectural basis |
 |---|---|---|
 | Time to initial display (TTID) — for Swag Pay, the first usable camera frame | 420 ms | *"Nothing before the first camera frame"* — the strongest decision on the board |
 | Deferred-work ordering | hard fail | RN / Cronet / analytics / remote config must not run before the camera is usable |
@@ -121,15 +121,15 @@ Each metric maps to a constraint or risk named in the shell architecture.
 | RAM growth | 60 MB | Orphaned RN surfaces — a Surface started and never stopped |
 | Per-step duration | see `budgets.py` | Trailing-baseline regression per step |
 
-**Two startup paths, two budgets.** A returning user puts the camera on the critical
+**Two startup paths, two North Star targets.** A returning user puts the camera on the critical
 path and defers Hermes. First-run inverts it — onboarding *is* an RN surface. Judging
-one by the other's budget produces nonsense, so `--path-kind` is explicit and the
+one by the other's North Star target produces nonsense, so `--path-kind` is explicit and the
 critical path differs per kind.
 
-The startup, memory and thermal budgets are Swag Pay's own targets, so they apply
-only to Swag Pay. Another app's run shows its numbers with no budget line (see
+The startup, memory and thermal North Star targets are Swag Pay's own, so they apply
+only to Swag Pay. Another app's run shows its numbers with no North Star target line (see
 [Analysing any app](#analysing-any-app-and-the-competitor-catalogue)). The frame
-budget (16.67 ms, 60 fps) applies to every app.
+deadline (16.67 ms, 60 fps) applies to every app.
 
 ## The dashboard: what to monitor on each screen
 
@@ -178,7 +178,7 @@ budget (16.67 ms, 60 fps) applies to every app.
   recorded says *not recorded*.
 - **Page header:** the screen's name and what it is for.
 - **Status is never colour alone.** ✓ pass, ! warn, ✕ fail. A metric warns within
-  10% of its budget and fails over it. ▲ is worse, ▼ is better, = is unchanged.
+  10% of its North Star target and fails over it. ▲ is worse, ▼ is better, = is unchanged.
   Moves under 5 ms on a step are treated as noise and are not coloured.
 - **Links land on the thing they name.** A citation, "Inspect step" or a History
   row opens the screen, scrolls to the chart, row or finding, and rings it
@@ -192,14 +192,14 @@ budget (16.67 ms, 60 fps) applies to every app.
 | **Overview** | a new run lands | the verdict, any ✕ release gate, the worst regression |
 | **Startup** | TTID moved, or deferred work is suspected | TTID trend against 420 ms; a step's share growing; ordering violations |
 | **Frame pacing** | the app feels janky or hot | janky frames above 0.5%; thermal drift rising run over run |
-| **Memory** | RAM is near 320 MB or growing | peak against budget; growth per run; Hermes heap |
+| **Memory** | RAM is near 320 MB or growing | peak against its North Star target; growth per run; Hermes heap |
 | **Steps** | you need to know *which* step moved | Δ ms against the baseline; the child slice that moved inside it |
 | **Screens** | the cost belongs to a screen or flow | RAM that steps up on the same screen and stays up; app jank per screen; slow transitions; deep stacks |
 | **Capture** | you need a run | device health before profiling; the job log if it fails |
 | **Stress** | one run is not proof | the spread of TTID; whether a shift is real or noise |
 | **Manual** | the flow cannot be scripted | live markers arriving; the screen currently open |
 | **Compare** | you need what changed between two builds | metrics and steps that got worse, and the child slices under them |
-| **History** | managing runs and benchmarks | TTID over budget across runs; which benchmark is active |
+| **History** | managing runs and benchmarks | TTID over its North Star target across runs; which benchmark is active |
 
 ### Overview
 
@@ -211,7 +211,7 @@ The latest run in scope, judged.
 - **Worst regression:** the step that grew most (5 ms or more), its share of the
   TTID change, and three ways in: **Inspect step** (Steps, drill-down open),
   **Open in Compare**, **Ask Copilot why**.
-- **Release gates:** every budgeted metric against its budget, as a bar.
+- **Release gates:** every metric that has a North Star target against it, as a bar.
 - **KPI tiles:** TTID, slow frames, janky frames, peak RAM, RAM growth and
   thermal drift. Each shows its change against the baseline and a 12-run trend.
 - **Verdict by run:** one cell per run in range, oldest to newest. The run in view
@@ -227,7 +227,7 @@ accounts for most of the TTID change.
 
 How long launch took, and what it was spent on.
 
-- **TTID over runs:** each run against the 420 ms budget, with this run's figure
+- **TTID over runs:** each run against the 420 ms North Star target, with this run's figure
   and its change.
 - **Critical-path composition:** the last runs, each split into its startup steps.
   Time no step accounts for is left as a visible gap. It is not spread over the
@@ -237,13 +237,13 @@ How long launch took, and what it was spent on.
   no stated constraint and says so.
 - **Startup findings:** the findings that concern launch.
 
-**Watch for:** TTID creeping towards the budget over several runs, one step's
+**Watch for:** TTID creeping towards its North Star target over several runs, one step's
 segment widening, any ordering violation.
 
 ### Frame pacing
 
 - **Slow frames:** the share of frames over 16.67 ms, per run.
-- **Janky frames:** the share over three frame budgets, the stutter a user sees.
+- **Janky frames:** the share over three frame deadlines, the stutter a user sees.
 - **Thermal drift:** mean frame time late in a run against early in it. It rises
   when the device throttles. A run that moved between screens shows a gap, because
   a change of screen, not heat, would move the number.
@@ -259,11 +259,11 @@ was late with from compositor and display misses.
   when the trace records each runtime's own heap. When it does not, the screen shows
   the app total and says which counter is missing.
 - **Peak RAM, RAM growth, Hermes heap:** one chart each, per run, with the 320 MB
-  and 60 MB budgets for Swag Pay.
+  and 60 MB North Star targets for Swag Pay.
 - **Where the growth happens:** links to Screens, which attributes growth to
   screens and to what was held open beneath them.
 
-**Watch for:** peak over budget, RAM growth trending up, Hermes heap rising. Growth is
+**Watch for:** peak over its North Star target, RAM growth trending up, Hermes heap rising. Growth is
 the orphaned-surface signature. Compare like with like: a long manual session peaks
 higher than a 10 s capture simply because it runs longer.
 
@@ -370,7 +370,7 @@ back.
   one to plot it.
 - **TTID distribution:** the selected test against the previous completed test of
   the same app: each session as a dot, the box as the middle half, the median line
-  and the budget. The shift between them is called **real** only when it is
+  and the North Star target. The shift between them is called **real** only when it is
   statistically significant (Mann–Whitney, p < 0.05) *and* larger than the earlier
   test's own spread; otherwise it is noise.
 
@@ -398,7 +398,7 @@ a flow that never reached a screen emits nothing for it.
   **against the benchmark** (default) or **with another run** (pick Run B: any run
   of the app, across paths).
 - **Banners:** *Same run*, *Different devices* (compare with care), *Not comparable*
-  (different app or path: different critical paths and budgets).
+  (different app or path: different critical paths and North Star targets).
 - **Top-line metrics:** each metric in both runs with Δ, Δ % and ▲ worse / ▼ better.
 - **Steps diff:** every step with its child slices indented under it, including steps
   only one run has.
@@ -409,7 +409,7 @@ them moved.
 ### History
 
 - **Runs:** every run of the app, searchable (run, label, device, build), filterable
-  by verdict, sortable on any column. TTID over budget is shown in the fail colour.
+  by verdict, sortable on any column. TTID over its North Star target is shown in the fail colour.
 - **Per row:** **Open** (puts the run in view on every screen, and opens Overview),
   **Compare** (with the run in view), **Pin as benchmark**. The run in view is
   highlighted.
@@ -439,7 +439,7 @@ them moved.
 
 **Benchmark a competitor**
 1. **Capture** the competitor's package (cold, several runs or a **Stress** test).
-2. Switch **App** in the top bar. Every screen scopes to it. No Swag Pay budget is
+2. Switch **App** in the top bar. Every screen scopes to it. No Swag Pay North Star target is
    applied to it.
 
 **Look back at an older run**
@@ -460,7 +460,7 @@ Press **⌘K** (Ctrl+K), or the **Ask** button, on any screen.
 
 - **Ask** in plain words: why a run failed, which step grew, whether a regression is
   real (it reads the stress tests), how peak RAM moved across builds, when TTID first
-  went over budget, which screen uses the most CPU or grows RAM, what changed
+  went over its North Star target, which screen uses the most CPU or grows RAM, what changed
   between two runs, or a finding explained. **Suggested for {screen}** offers
   questions that fit the screen you are on.
 - **Context** chips show what the question is about: the current screen, the run in
@@ -499,8 +499,8 @@ parked work, and says when each item is worth coming back to.
 
 **After every recorded run** (a capture, a manual session, the end of a stress
 test, or `analyse`), swagperf reviews what is new:
-- **The data half, with no model:** `swagperf triage` turns the new runs' budget
-  breaches, step regressions and ordering violations into signals. Each signal has a
+- **The data half, with no model:** `swagperf triage` turns the new runs' breaches of
+  their North Star targets, step regressions and ordering violations into signals. Each signal has a
   stable key, so the same problem in ten runs is one issue, not ten.
 - **A clean run** just moves the tracker's "Runs reviewed through" line on. No model
   starts.
@@ -683,7 +683,7 @@ only. A percentage change across zero is meaningless: −10.6% to +24.4% is not
 
 A cross-path comparison is not blocked, but it is flagged prominently in both the CLI
 and the dashboard, because the two startup paths have different critical paths and
-different budgets so the numbers do not mean the same thing.
+different North Star targets so the numbers do not mean the same thing.
 
 ## Regression detection
 
@@ -711,11 +711,11 @@ polls and streams the log, then records the run and offers a link to it.
 
 Two things this does not do, deliberately:
 
-- **It does not assert Swag Pay's budgets against another app.** Startup and
-  memory ceilings are our own product decisions. A derived run shows no budget
-  line and no red breach unless the catalogue states a budget for that package.
-  Frame budgets (16.67ms) are kept, since 60fps is an OS-level fact rather than
-  a product target.
+- **It does not assert Swag Pay's North Star targets against another app.** Startup and
+  memory ceilings are our own product decisions. A derived run shows no North Star
+  target line and no red breach unless the catalogue states a North Star target for
+  that package. Frame deadlines (16.67ms) are kept, since 60fps is an OS-level fact
+  rather than a product target.
 - **It does not report an empty capture as a pass.** A trace can pull and parse
   cleanly while containing nothing about the target app. `capture_problems()`
   checks whether the target package's own process contributed any slices at all;
@@ -1023,12 +1023,12 @@ slices that produced it is not trustworthy.
 ./.venv/bin/python -m swagperf.cli apps discover     # verify package names against a connected device
 ```
 
-**A derived run never gets an invented budget.** `budgets.py`'s numbers are Swag
+**A derived run never gets an invented North Star target.** `budgets.py`'s numbers are Swag
 Pay's own stated targets; asserting them against a competitor's app would be
 making up a number for a product whose architecture is undocumented here. A
 derived run's `budget_ms` is `None` unless the catalogue's `apps.json` (or a
 local `apps.local.json` override) explicitly states one for that package, and
-the dashboard does not draw a budget line or colour a breach when none exists.
+the dashboard does not draw a North Star target line or colour a breach when none exists.
 This was a real bug during development, twice over: the dashboard first drew
 Swag Pay's 420ms line against a competitor's trace, and separately the CLI's
 `--path-kind` flag defaulted to `"returning_user"` and was silently applied to
@@ -1096,7 +1096,7 @@ crimson and always carries ✕, so brand and status never read as the same thing
 
 ```
 swagperf/
-  budgets.py      architecture-derived budgets and risk map — start here
+  budgets.py      architecture-derived North Star targets and risk map — start here
   extract.py      TraceProcessor SQL → metrics (no LLM)
   derive.py       steps from an uninstrumented app's own slices
   screens.py      per-screen and per-action cost from SwagTrace markers
@@ -1134,7 +1134,7 @@ docs/             TRACKER.md (the live list), issues/ (perf issues from runs),
 
 ## Adapting it
 
-Editing `budgets.py` is the main thing you will do — the step names, budgets and
+Editing `budgets.py` is the main thing you will do — the step names, North Star targets and
 `RISK_MAP` are what make the output specific to Swag Pay rather than generic.
 
 Step names are matched by the `step:` prefix. Emit them from the app with
@@ -1150,7 +1150,7 @@ fails for a step without one.
 ## Known gaps
 
 - **iOS runs on the simulator only.** Its numbers are the Mac's, and frames and
-  per-screen CPU are not measured there. A physical iPhone, iOS budgets, manual
+  per-screen CPU are not measured there. A physical iPhone, iOS North Star targets, manual
   sessions and competitor apps are next: see
   [BACKLOG: iOS lane beyond the simulator](docs/BACKLOG.md#ios-lane-beyond-the-simulator).
   The CMP × RN seam, the highest risk in the architecture, needs frames from a real
@@ -1165,9 +1165,13 @@ fails for a step without one.
 - **The Copilot is rule-based.** It answers the questions listed under
   [Copilot](#copilot) from the data and says so for anything else. A language model
   is not wired in yet.
-- **The dashboard server has no auth and mutates local history** (pinning a
-  benchmark, the Copilot's threads). It binds to loopback only, which is fine for a
-  dev/CI tool — but do not expose it on a routable interface.
+- **The dashboard server has no login and mutates local history** (pinning a
+  benchmark, the Copilot's threads, starting captures). It binds to loopback only,
+  and it refuses other websites' pages: the `Host` must be `localhost`, `127.0.0.1`
+  or `[::1]`, a browser's `Origin` must be a loopback page, and every write must
+  send `X-Swagperf: 1` (T-001). A hand-written POST needs that header, e.g.
+  `curl -X POST -H 'X-Swagperf: 1' -d '{"run_id": 12}' http://127.0.0.1:8787/api/benchmark/set`.
+  Don't expose it on a routable interface.
 - **Dashboard verified with Playwright, not Chrome DevTools MCP.** Playwright drives
   real Chromium, so clicks, keyboard use, layout at phone width and console errors
   were checked against a live page. A DevTools pass would add performance-panel and

@@ -13,10 +13,10 @@ export function MiniBars({ title, labels, values, unit = '', budget, decimals = 
   return (
     <figure className={s.box}>
       <figcaption className={s.title}>{title}</figcaption>
-      <div className={s.plot} role="img" aria-label={`${title}. ${summary}${budget != null ? `. Budget ${f(budget)}` : ''}`}>
+      <div className={s.plot} role="img" aria-label={`${title}. ${summary}${budget != null ? `. North Star target ${f(budget)}` : ''}`}>
         {budget != null && (
           <div className={s.budget} style={{ bottom: pct(budget) }}>
-            <span className={s.budgetLabel}>Budget {f(budget)}</span>
+            <span className={s.budgetLabel}>North Star {f(budget)}</span>
           </div>
         )}
         {values.map((v, i) => (
@@ -24,7 +24,7 @@ export function MiniBars({ title, labels, values, unit = '', budget, decimals = 
             key={i}
             className={`${s.bar} ${over(v) ? s.over : ''}`}
             style={{ height: v == null ? 0 : pct(v) }}
-            title={`${labels[i]}: ${v == null ? 'no data' : f(v)}${over(v) ? ' (over budget)' : ''}`}
+            title={`${labels[i]}: ${v == null ? 'no data' : f(v)}${over(v) ? ' (over its North Star target)' : ''}`}
           />
         ))}
       </div>

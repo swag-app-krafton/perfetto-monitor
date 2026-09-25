@@ -8,13 +8,31 @@ export interface Series {
   color: string
   /** One value per label; null is a gap (an unmeasured run), not zero. */
   values: (number | null)[]
+  /** One note per label for the tooltip, e.g. "median of 3 runs". */
+  notes?: (string | null)[]
 }
+
+/** A horizontal reference line: a target, a benchmark, a baseline. */
+export interface Reference {
+  value: number
+  label: string
+  /** The series it belongs to: it hides when that series is toggled off. */
+  series?: string
+  /** The line's colour (its label stays in text ink). Default: the accent. */
+  color?: string
+  style?: 'dashed' | 'dotted'
+}
+
+// Reference labels closer than this (in % of the plot's height) would
+// overprint, so each one after the first is nudged down a line.
+const LABEL_GAP_PCT = 9
 
 export function LineChart({
   series,
   labels,
   budget,
   budgetLabel,
+  references,
   unit = '',
   height = 200,
   decimals = 0,
@@ -23,8 +41,11 @@ export function LineChart({
 }: {
   series: Series[]
   labels: string[]
+  /** The North Star target: a dashed accent line. */
   budget?: number | null
   budgetLabel?: string
+  /** More reference lines, such as a pinned benchmark per series. */
+  references?: Reference[]
   unit?: string
   height?: number
   decimals?: number
@@ -37,10 +58,17 @@ export function LineChart({
   const vis = series.filter((x) => !off[x.name])
   const n = labels.length || 1
   const fmt = (v: number | null | undefined) => (v == null ? '–' : v.toFixed(decimals))
+  const refs = useMemo<Reference[]>(
+    () => [
+      ...(budget != null ? [{ value: budget, label: budgetLabel ?? `North Star ${budget}${unit ? ' ' + unit : ''}`, style: 'dashed' as const }] : []),
+      ...(references ?? []).filter((r) => !r.series || !off[r.series]),
+    ],
+    [budget, budgetLabel, unit, references, off],
+  )
 
   const geo = useMemo(() => {
     const vals = vis.flatMap((x) => x.values).filter((v): v is number => v != null)
-    if (budget != null) vals.push(budget)
+    for (const r of refs) vals.push(r.value)
     let lo = vals.length ? Math.min(...vals) : 0
     let hi = vals.length ? Math.max(...vals) : 1
     const pad = (hi - lo) * 0.15 || Math.abs(hi) * 0.1 || 1
@@ -49,7 +77,7 @@ export function LineChart({
     const X = (i: number) => (n < 2 ? 50 : (i / (n - 1)) * 100)
     const Y = (v: number) => 100 - ((v - lo) / (hi - lo)) * 100
     return { lo, hi, X, Y }
-  }, [vis, budget, yMin, n])
+  }, [vis, refs, yMin, n])
   const { X, Y } = geo
 
   // A null starts a new sub-path, so a gap shows as a gap.
@@ -107,11 +135,21 @@ export function LineChart({
             <span className={s.tickLabel}>{Math.abs(geo.hi - geo.lo) < 5 ? v.toFixed(1) : Math.round(v)}</span>
           </div>
         ))}
-        {budget != null && (
-          <div className={s.budget} style={{ top: `${Y(budget)}%` }}>
-            <span className={s.budgetLabel}>{budgetLabel ?? `Budget ${budget}${unit ? ' ' + unit : ''}`}</span>
+        {placeLabels(refs, Y).map(({ r, shift }, i) => (
+          <div
+            key={`${r.label}-${i}`}
+            className={`${s.ref} ${r.style === 'dotted' ? s.dotted : ''}`}
+            style={{ top: `${Y(r.value)}%`, borderTopColor: r.color ?? 'var(--accent)' }}
+          >
+            {/* A series' own reference is named in the key below the plot:
+                beside its line it would sit on the data it is close to. */}
+            {!r.series && (
+              <span className={s.budgetLabel} style={{ top: -19 + shift }}>
+                {r.label}
+              </span>
+            )}
           </div>
-        )}
+        ))}
         <svg className={s.svg} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           {vis.map((x) => (
             <path key={x.name} d={pathFor(x.values)} fill="none" stroke={x.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
@@ -139,7 +177,10 @@ export function LineChart({
                 <div key={x.name} className={s.tipRow}>
                   <Swatch color={x.color} size={8} shape="circle" />
                   <span className={s.tipKey}>{x.name}</span>
-                  <span className={s.tipValue}>{x.values[hover] == null ? 'not measured' : `${fmt(x.values[hover])}${unit ? ' ' + unit : ''}`}</span>
+                  <span className={s.tipValue}>
+                    {x.values[hover] == null ? 'not measured' : `${fmt(x.values[hover])}${unit ? ' ' + unit : ''}`}
+                    {x.values[hover] != null && x.notes?.[hover] ? <span className={s.tipNote}> · {x.notes[hover]}</span> : null}
+                  </span>
                 </div>
               ))}
             </div>
@@ -158,6 +199,37 @@ export function LineChart({
           </span>
         ))}
       </div>
+      {refs.some((r) => r.series) && (
+        <ul className={s.refKey} aria-label="Reference lines">
+          {refs
+            .filter((r) => r.series)
+            .map((r, i) => (
+              <li key={`${r.label}-${i}`} className={s.refKeyItem}>
+                <span className={`${s.refSwatch} ${r.style === 'dotted' ? s.refSwatchDotted : ''}`} style={{ borderTopColor: r.color ?? 'var(--accent)' }} aria-hidden="true" />
+                <span>{r.label}</span>
+                <span className={s.refKeyValue}>
+                  {fmt(r.value)}
+                  {unit ? ' ' + unit : ''}
+                </span>
+              </li>
+            ))}
+        </ul>
+      )}
     </div>
   )
+}
+
+/** Where each reference label goes: above its line, nudged down a line when
+ *  it would overprint the label above it. */
+function placeLabels(refs: Reference[], Y: (v: number) => number) {
+  const order = refs.map((r, i) => ({ r, i, y: Y(r.value) })).sort((a, b) => a.y - b.y)
+  const shift = new Map<number, number>()
+  let prev = -Infinity
+  let stack = 0
+  for (const o of order) {
+    stack = o.y - prev < LABEL_GAP_PCT ? stack + 1 : 0
+    shift.set(o.i, stack * 16)
+    prev = o.y
+  }
+  return refs.map((r, i) => ({ r, shift: shift.get(i) ?? 0 }))
 }

@@ -36,9 +36,42 @@ export interface Analysis {
   verdict: Verdict
   headline: string
   findings: Finding[]
-  dismissed?: { title: string; reason?: string }[]
+  /** What the analyst looked at and set aside. The model writes plain strings. */
+  dismissed?: (string | { title: string; reason?: string })[]
   _model?: string
+  _backend?: 'cli' | 'api'
   _heuristic?: boolean
+}
+
+/** An AI summary of a run (F-023): the model's reading, stored beside the run's
+ *  verdict and never replacing it. */
+export interface RunSummary extends Analysis {
+  /** Three to five plain sentences. */
+  summary?: string
+  /** The model's words on the run against its pinned benchmark (F-024). */
+  benchmark_comparison?: string | null
+  /** The comparison it was written from, kept as it was then (the pin can move). */
+  _benchmark?: BenchmarkSnapshot | null
+  /** Numbers in the text that the run's data doesn't contain. */
+  _unverified?: string[]
+  _id: number
+  _created: string
+  /** A newer verdict (re-extraction) came after it. */
+  _stale: boolean
+}
+
+/** A run's summary as /api/history lists it; the body is /api/summary. */
+export interface SummaryMeta {
+  model: string | null
+  created: string
+  headline: string | null
+  stale: boolean
+}
+
+export interface BenchmarkSnapshot extends ComparePayload {
+  run: RunMeta & { version?: string | null }
+  base: RunMeta & { version?: string | null }
+  pinned_note?: string | null
 }
 
 export interface Breach {
@@ -166,12 +199,17 @@ export interface Run {
   peak_rss_mb: number | null
   rss_growth_mb: number | null
   ttid_budget_ms: number | null
+  /** Why there is no startup North Star target, when there is none (a simulator run, a derived run of our own app: B-010). */
+  ttid_target_reason?: string | null
   steps: StepRow[]
   breaches: Breach[]
   violations: { step: string; detail: string }[]
   frames: FrameStats | null
   memory: MemoryStats | null
   analysis: Analysis | null
+  /** Who wrote the verdict: "heuristic" (the rules) or a model's name. */
+  analysis_meta?: { model: string | null; created: string } | null
+  summary?: SummaryMeta | null
   meta: RunDetails
 }
 
@@ -336,6 +374,8 @@ export interface Job<R = Record<string, unknown>> {
   log: JobLogLine[]
   error?: string
   result?: R
+  /** The AI-summary job a capture started when its switch was on (F-023). */
+  summary_job?: string
 }
 
 export interface ManualStatus {
@@ -563,6 +603,47 @@ export interface ComparePayload {
   metrics: CompareMetric[]
   steps: CompareStep[]
   summary: Record<DiffVerdict, number>
+}
+
+// ---------------------------------------------------------------- Trend (F-026)
+/** One version on one device: the median of its runs, or a gap. */
+export interface TrendPoint {
+  version: string
+  value: number | null
+  n: number
+  run_ids: number[]
+}
+
+export interface TrendSeries {
+  device: string
+  /** A top-line metric key (ttff_ms, janky_pct, ...) or a launch step (step:...). */
+  metric: string
+  /** Set only when a device has both kinds of startup (derived and instrumented). */
+  kind: 'derived' | 'instrumented' | null
+  /** What startup measured on this line: time to initial display or to first camera frame. */
+  startup_metric: string | null
+  /** Its North Star target, when one applies. */
+  target: number | null
+  points: TrendPoint[]
+}
+
+export interface TrendPayload {
+  app: string | null
+  path: string
+  platform: Platform
+  /** Oldest first: by build number, else by version name. */
+  versions: { key: string; name: string | null; build: number | string | null; label: string; runs: number }[]
+  /** Runs with no app version recorded; not plotted. */
+  unversioned: number
+  /** Most runs first. */
+  devices: { name: string; label: string; simulator: boolean; runs: number }[]
+  /** Launch steps in the order they happen. */
+  steps: string[]
+  series: TrendSeries[]
+  /** Each device's pinned benchmark (never a simulator's). */
+  benchmarks: Record<string, { run_id: number; device: string | null; derived: boolean; version: string | null; values: Record<string, number> }>
+  /** Why a derived startup has no North Star target (B-010). */
+  startup_target_reason?: string | null
 }
 
 // ---------------------------------------------------------------- Flashlight

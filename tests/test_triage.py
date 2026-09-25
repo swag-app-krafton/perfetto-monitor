@@ -180,7 +180,7 @@ class TestPmRunner(unittest.TestCase):
         runs = [run(1, peak=480)]
         line, _ = self._request(runs)
         self.assertIn("PM agent reviewing in the background", line)
-        self.assertIn("Peak RAM usage over budget", line)
+        self.assertIn("Peak RAM usage over its North Star target", line)
         self.assertEqual(self._run(runs), 1)
         calls = self._calls()
         self.assertEqual(len(calls), 1)

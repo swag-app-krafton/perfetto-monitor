@@ -56,7 +56,7 @@ export function DotBoxPlot({ rows, budget, unit, label }: { rows: DotBoxRow[]; b
           ))}
           {budget != null && (
             <span className={`${s.tick} ${s.budgetTick}`} style={{ left: X(budget) }}>
-              budget {budget}
+              North Star {budget}
             </span>
           )}
         </div>

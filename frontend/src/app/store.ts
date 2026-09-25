@@ -34,6 +34,10 @@ interface UiState {
   /** A prompt a page asked the Copilot to send ("Ask Copilot why"). */
   copilotPrompt: { id: number; text: string } | null
   toast: { id: number; text: string } | null
+  /** Write an AI summary after each capture (F-023): Capture, Stress and Manual share it. */
+  aiSummary: boolean
+  /** The Trend page's picks, keyed "app|path" (F-026); none yet means the defaults. */
+  trend: Record<string, TrendPicks>
 
   setTheme: (t: Theme) => void
   toggleTheme: () => void
@@ -46,6 +50,16 @@ interface UiState {
   setCopilot: (c: Partial<UiState['copilot']>) => void
   showToast: (text: string) => void
   askCopilot: (text: string) => void
+  setAiSummary: (on: boolean) => void
+  setTrend: (key: string, picks: Partial<TrendPicks>) => void
+}
+
+/** What the Trend page plots for one app: device names, launch steps and
+ *  top-line metric keys. */
+export interface TrendPicks {
+  devices: string[]
+  steps: string[]
+  metrics: string[]
 }
 
 export const COPILOT_MIN = 340
@@ -67,6 +81,8 @@ export const useUi = create<UiState>()(
       copilot: { open: false, maximised: false, width: 400 },
       toast: null,
       copilotPrompt: null,
+      aiSummary: false,
+      trend: {},
 
       setTheme: (theme) => set({ theme }),
       toggleTheme: () => set((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
@@ -97,6 +113,12 @@ export const useUi = create<UiState>()(
       showToast: (text) => set({ toast: { id: Date.now(), text } }),
       askCopilot: (text) =>
         set((s) => ({ copilot: { ...s.copilot, open: true }, copilotPrompt: { id: Date.now(), text } })),
+      setAiSummary: (aiSummary) => set({ aiSummary }),
+      setTrend: (key, picks) =>
+        set((s) => {
+          const cur = s.trend[key] ?? { devices: [], steps: [], metrics: [] }
+          return { trend: { ...s.trend, [key]: { ...cur, ...picks } } }
+        }),
     }),
     {
       name: 'swagperf-ui',
@@ -109,6 +131,8 @@ export const useUi = create<UiState>()(
         path: s.path,
         range: s.range,
         copilot: { ...s.copilot, open: false },
+        aiSummary: s.aiSummary,
+        trend: s.trend,
       }),
     },
   ),

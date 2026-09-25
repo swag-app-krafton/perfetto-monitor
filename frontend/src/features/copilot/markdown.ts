@@ -27,7 +27,7 @@ export function toMarkdown(prompt: string, blocks: AnswerBlock[], origin = ''): 
         )
         break
       case 'bars':
-        parts.push(`${b.title}${b.budget != null ? ` (budget ${b.budget} ${b.unit})` : ''}: ${b.labels.map((l, i) => `${l} ${b.values[i] ?? '–'}`).join(', ')}`)
+        parts.push(`${b.title}${b.budget != null ? ` (North Star target ${b.budget} ${b.unit})` : ''}: ${b.labels.map((l, i) => `${l} ${b.values[i] ?? '–'}`).join(', ')}`)
         break
       case 'code':
         parts.push(`\`\`\`${b.lang === 'Markdown' ? 'md' : b.lang.toLowerCase().includes('sql') ? 'sql' : ''}\n${b.code}\n\`\`\``)

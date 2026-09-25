@@ -47,6 +47,53 @@ GLOBAL_BUDGETS = {
     "thermal_drift_pct": 15.0,
 }
 
+# The unit each targeted metric is shown in (breach keys, as extraction writes them).
+METRIC_UNITS = {"peak_rss_mb": "MB", "rss_growth_mb": "MB", "time_to_first_camera_frame_ms": "ms",
+                "slow_frame_pct": "%", "janky_frame_pct": "%", "thermal_drift_pct": "%"}
+
+
+def with_unit(value, unit):
+    """'493.3 MB', '0.84%', '357.31 ms'."""
+    v = f"{value:g}" if isinstance(value, (int, float)) else str(value)
+    return f"{v}{unit}" if unit == "%" else f"{v} {unit}".strip()
+
+
+# Why a run's startup has no North Star target, in the reader's words.
+STARTUP_TARGET_REASONS = {
+    "simulator": "A simulator run is never judged against North Star targets: its numbers "
+                 "come from the Mac's CPU.",
+    # B-010: the catalogue's startup target is the camera-frame target, and a
+    # startup derived from Android's launch slices ends at Android's first
+    # frame, before the camera delivers one. Judging one by the other shows a
+    # pass that was never measured.
+    "derived_own": "This startup is time to initial display, derived from Android's launch "
+                   "slices, and it ends before the camera frame. It isn't checked against the "
+                   "camera-frame North Star target until B-010 is fixed.",
+    "none": "No startup North Star target is set for this app.",
+}
+
+
+def startup_target(app, platform="android", *, derived, simulator):
+    """(target_ms, reason): the North Star target a run's startup is judged
+    against, or None and why not. The one rule for extraction, the dashboard,
+    triage and the trend view.
+
+    `app` is the run's catalogue entry (or None). An instrumented Android run
+    is judged against the global camera-frame target; any other run only
+    against a target its catalogue entry states, because inventing one for
+    someone else's app would be making up a number. A derived run of our own
+    instrumented app gets none (see STARTUP_TARGET_REASONS["derived_own"])."""
+    if simulator:
+        return None, STARTUP_TARGET_REASONS["simulator"]
+    app = app or {}
+    if (platform or "android") == "android" and not derived:
+        return GLOBAL_BUDGETS["time_to_first_camera_frame_ms"], None
+    if derived and app.get("instrumented") and app.get("role") == "own":
+        return None, STARTUP_TARGET_REASONS["derived_own"]
+    target = (app.get("budgets") or {}).get("ttid_ms")
+    return (target, None) if target else (None, STARTUP_TARGET_REASONS["none"])
+
+
 # Which architectural risk each metric speaks to.
 RISK_MAP = {
     "time_to_first_camera_frame_ms": "startup-routing / deferred-work ordering",

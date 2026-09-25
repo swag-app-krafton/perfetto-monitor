@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, startCapture, useDevice, useJob, useRecentJobs } from '@/api/hooks'
 import type { DevicePayload, Run } from '@/api/types'
-import { Banner, Button, Card, ChoiceList, EmptyState, Grid, LogConsole, Progress, Row, SearchInput, Segmented, Stack, Stat, StatGrid, Stepper, Swatch, Text } from '@/design'
+import { Banner, Button, Card, ChoiceList, EmptyState, Grid, LogConsole, Progress, Row, SearchInput, Segmented, Stack, Stat, StatGrid, Stepper, Swatch, Switch, Text } from '@/design'
 import { fmt } from '@/domain/format'
 import { runVerdict } from '@/domain/metrics'
 import { useLaneNavigate, useProfiler } from '@/app/profiler'
@@ -23,6 +23,8 @@ export function CapturePage() {
   const qc = useQueryClient()
   const navigate = useLaneNavigate()
   const setFilters = useUi((s) => s.setFilters)
+  const aiSummary = useUi((s) => s.aiSummary)
+  const setAiSummary = useUi((s) => s.setAiSummary)
   const recent = useRecentJobs()
   const [q, setQ] = useState('')
   const [pkg, setPkg] = useState<string | null>(null)
@@ -50,7 +52,7 @@ export function CapturePage() {
     if (!selected) return
     setStartErr(null)
     try {
-      const r = await startCapture({ pkg: selected, cold: ios || cold, duration_ms: duration, platform })
+      const r = await startCapture({ pkg: selected, cold: ios || cold, duration_ms: duration, platform, ai_summary: aiSummary })
       setJobId(r.job_id)
       qc.invalidateQueries({ queryKey: keys.jobs })
     } catch (e) {
@@ -169,12 +171,17 @@ export function CapturePage() {
                   )}
                   <Segmented label="Duration" value={duration} onChange={setDuration} options={[5000, 10000, 20000].map((v) => ({ value: v, label: `${v / 1000} s` }))} />
                 </Row>
+                <Stack gap={4}>
+                  <Switch checked={aiSummary} onChange={setAiSummary} label="Write an AI summary" />
+                  <Text variant="caption">After the capture, a model reads the run's numbers with your Claude session and writes a summary. The verdict stays the rules' verdict.</Text>
+                </Stack>
                 <Button variant="primary" large disabled={!d || !selected || running || debugBuild} onClick={profile}>
                   {running ? 'Profiling…' : job?.state === 'done' ? 'Profile again' : 'Profile'}
                 </Button>
               </Stack>
               <Text variant="meta">
                 {ios || cold ? 'Cold start' : 'Warm start'} · {duration / 1000} s {ios ? 'recording' : 'trace'} · {selected ?? 'no app selected'}
+                {aiSummary ? ' · AI summary' : ''}
               </Text>
             </Stack>
             {debugBuild && (
@@ -231,6 +238,7 @@ export function CapturePage() {
                   }
                 >
                   {result.headline}
+                  {job.summary_job ? ' The AI summary is being written and appears on Overview when it is ready.' : ''}
                 </Banner>
               )}
             </>

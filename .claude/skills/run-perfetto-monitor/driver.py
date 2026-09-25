@@ -28,10 +28,13 @@ ROUTES = os.path.join(REPO, "frontend", "src", "app", "routes.ts")
 
 
 def env():
-    """The environment every swagperf child runs in: scratch data, no model."""
+    """The environment every swagperf child runs in: scratch data, no model.
+    SWAGPERF_RUN_BACKEND opts a check into a model backend (e.g. `cli` with a
+    fake `claude` in SWAGPERF_CLAUDE_BIN, to drive AI summaries)."""
     e = dict(os.environ)
     e.update(SWAGPERF_DB=DB, SWAGPERF_APPS=os.path.join(WORK, "apps.json"),
-             SWAGPERF_BACKEND="heuristic", SWAGPERF_PM_AUTOTRIAGE="0",
+             SWAGPERF_BACKEND=os.environ.get("SWAGPERF_RUN_BACKEND") or "heuristic",
+             SWAGPERF_PM_AUTOTRIAGE="0",
              PYTHONUNBUFFERED="1",
              PYTHONPATH=os.pathsep.join(p for p in (REPO, e.get("PYTHONPATH")) if p))
     return e

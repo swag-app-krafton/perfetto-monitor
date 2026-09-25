@@ -1,3 +1,5 @@
+import { WRITE_HEADERS } from '@/api/client'
+
 /** Server-sent events over a POST (EventSource only does GET). Yields each
  *  `{event, data}` as it arrives; `data` is the parsed JSON. Aborting the
  *  request's signal ends the stream. */
@@ -37,7 +39,7 @@ export function parseSseChunk(buffer: string): { events: SseEvent[]; rest: strin
 export async function* postSse(url: string, body: unknown, signal?: AbortSignal): AsyncGenerator<SseEvent> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    headers: { ...WRITE_HEADERS, Accept: 'text/event-stream' },
     body: JSON.stringify(body),
     signal,
   })

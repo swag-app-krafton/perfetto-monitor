@@ -30,7 +30,7 @@ export function startersFor(tab: string, scope: Scope | null, compare?: { a: num
     stress: [noise, 'How many sessions do I need for a stable result?'],
     manual: [`What is causing slow frames in run #${run.id}?`, 'Summarise this session for a PR comment'],
     compare: b != null && b !== a ? [`Explain the differences between #${a} and #${b}`, `Summarise run #${a} for a PR comment`] : [pr],
-    history: [peak, 'When did TTID first go over budget?'],
+    history: [peak, 'When did TTID first go over its North Star target?'],
   }
   return byTab[tab] ?? [pr, why]
 }

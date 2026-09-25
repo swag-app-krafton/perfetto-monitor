@@ -95,11 +95,17 @@ export function AppShell({ copilot }: { copilot?: ReactNode }) {
                 aside={audits?.audit && screen.id !== 'audit-run' ? <AuditBox audit={audits.audit} following={audits.following} /> : undefined}
               />
             ) : (
-              <PageHeader group={screen.group} title={screen.label} hint={screen.hint} run={scope?.run ?? null} isLatest={scope?.isLatest ?? true} />
+              <PageHeader
+                group={screen.group}
+                title={screen.label}
+                hint={screen.hint}
+                run={screen.ignores?.includes('run') ? null : (scope?.run ?? null)}
+                isLatest={scope?.isLatest ?? true}
+              />
             )}
             {screen.profiler === 'ios' && scope?.run?.simulator && (
               <Banner tone="warn" title="Simulator run: indicative only">
-                Measured on the iOS Simulator, on this Mac's CPU with a warm cache. It compares only with other simulator runs, carries no budgets and
+                Measured on the iOS Simulator, on this Mac's CPU with a warm cache. It compares only with other simulator runs, carries no North Star targets and
                 can't be pinned as a benchmark. Frames are not measured on the simulator.
               </Banner>
             )}

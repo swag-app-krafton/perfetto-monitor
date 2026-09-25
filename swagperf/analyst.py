@@ -5,8 +5,8 @@ Its job is attribution and judgement against the Swag Pay shell architecture:
 which runtime owns the regression, which architectural risk it corresponds to,
 and whether it is worth a human's attention. Measurement is not its job.
 """
-import json, os, shutil, subprocess
-from .budgets import RISK_MAP, GLOBAL_BUDGETS
+import json, os, re, subprocess, tempfile
+from .budgets import RISK_MAP, GLOBAL_BUDGETS, METRIC_UNITS, with_unit
 
 MODEL = os.environ.get("SWAGPERF_MODEL", "claude-opus-5")
 
@@ -31,7 +31,7 @@ ARCHITECTURAL CONSTRAINTS THAT MATTER FOR PERFORMANCE:
   may run before the camera is usable. A deferred step starting before first camera
   frame is a CORRECTNESS violation of the architecture, not merely slow.
 * First-run inverts this: onboarding IS an RN surface, so Hermes is on the critical
-  path and the camera is not. Two paths, two budgets. Never judge one by the other.
+  path and the camera is not. Two paths, two North Star targets. Never judge one by the other.
 * Frame pacing at the interop seam: Compose and RN are two render loops. On iOS the
   RN surface is a UIKit hole punched through a Skia canvas. Jank clustered at surface
   boundaries points here.
@@ -49,19 +49,35 @@ ARCHITECTURAL CONSTRAINTS THAT MATTER FOR PERFORMANCE:
 HOW TO ANALYSE:
 - Attribute each finding to a runtime: compose | hermes_rn | native_camera | cross_runtime | unknown.
 - Distinguish a REGRESSION (worse than this step's own trailing baseline) from a
-  BUDGET BREACH (over the stated budget). A step can be either, both, or neither.
+  BREACH (over its stated North Star target; kind "budget_breach"). A step can be
+  either, both, or neither.
 - Use the child-slice breakdown to attribute within a step. Say which child moved.
 - If the evidence does not identify a cause, say so plainly. Do not invent one.
 - Be concrete and brief. An engineer reads this at the top of a CI log.
 - The payload says which platform the run measured. When "simulator" is true the
   run is on the iOS Simulator: its numbers come from the Mac's CPU with a warm
-  cache, it carries no budgets, and its regressions are against other simulator
+  cache, it carries no North Star targets, and its regressions are against other simulator
   runs only. Never return "fail" for a simulator run, and say the numbers are
   indicative. Frames are not measured on the simulator; do not read their
   absence as a finding.
 - Call the memory metric "RAM usage" (and its growth "RAM growth") in all prose.
   The payload keys are named peak_rss_mb / rss_growth_mb for schema stability, but
   "RSS" is jargon this dashboard does not show the reader -- never write it.
+- Call a metric's threshold its "North Star target", never its "budget" (the payload
+  keys keep "budget" for schema stability). The time one frame has to draw is the
+  "frame deadline".
+- The payload's "run" block says what startup measures here ("startup_metric").
+  A derived run's startup is time to initial display from Android's launch slices,
+  not time to first camera frame, whatever its key is called. When
+  "startup_target_reason" is set there is no startup North Star target: say so,
+  and never call the startup a pass or a fail against one.
+- Every number you write must come from the payload. Don't compute new figures
+  beyond a plain difference or percentage of two numbers you quote.
+- When the payload has "vs_benchmark", it is this run compared with the pinned
+  benchmark run for its app, start path and device ("benchmark" says which run).
+  Write "benchmark_comparison": two to four sentences on what moved against it and
+  by how much, citing only vs_benchmark's values. Without it, "benchmark_comparison"
+  is null.
 
 Return ONLY valid JSON, no markdown fence, matching exactly:
 {
@@ -74,7 +90,9 @@ Return ONLY valid JSON, no markdown fence, matching exactly:
      "architectural_risk": "which named risk this maps to, or null",
      "recommendation": "concrete next action"}
   ],
-  "dismissed": ["signals you looked at and judged benign, with the reason"]
+  "dismissed": ["signals you looked at and judged benign, with the reason"],
+  "summary": "three to five plain sentences for someone who wasn't watching the run: what it measured, what stands out, what to do next",
+  "benchmark_comparison": "two to four sentences, or null"
 }"""
 
 
@@ -88,8 +106,17 @@ def _stability_summary(st):
             "crashed": bool(cr.get("crashed"))}
 
 
-def build_payload(metrics, regs, baselines):
-    return {
+def build_payload(metrics, regs, baselines, *, run=None, vs_benchmark=None):
+    """What the model sees: extracted numbers and baselines, never a trace.
+    `run` names the run (id, label, device, app version) and `vs_benchmark` is
+    the run against its pinned benchmark (F-024, from store.compare)."""
+    derived = bool(metrics.get("derived"))
+    payload = {
+        "run": {**{k: v for k, v in (run or {}).items() if v is not None},
+                "derived": derived,
+                "startup_metric": metrics.get("startup_metric")
+                or ("time to initial display" if derived else "time to first camera frame"),
+                "startup_target_reason": (metrics.get("startup") or {}).get("target_reason")},
         "platform": metrics.get("platform") or "android",
         "simulator": bool(metrics.get("simulator")),
         "path_kind": metrics["path_kind"],
@@ -107,6 +134,9 @@ def build_payload(metrics, regs, baselines):
         "step_baselines": baselines,
         "risk_map": RISK_MAP,
     }
+    if vs_benchmark:
+        payload["vs_benchmark"] = vs_benchmark
+    return payload
 
 
 def _parse(text):
@@ -129,17 +159,26 @@ def analyse_via_cli(metrics, regs, baselines, *, model=MODEL, timeout=180):
     No API key required. Returns None if the CLI is unavailable or fails, so the
     caller can fall through to the next backend.
     """
-    exe = shutil.which("claude")
+    return _ask_cli(build_payload(metrics, regs, baselines), model=model, timeout=timeout)
+
+
+def _ask_cli(payload, *, model=MODEL, timeout=180):
+    from . import llm
+    exe = llm.claude_bin()   # SWAGPERF_CLAUDE_BIN, else PATH
     if not exe:
         return None
-    payload = build_payload(metrics, regs, baselines)
     prompt = (SYSTEM + "\n\n---\n\nAnalyse this Swag Pay trace run. "
               "Respond with the JSON object only.\n\n" + json.dumps(payload, indent=2))
-    cmd = [exe, "-p", prompt, "--output-format", "json"]
+    # A dashboard button can start this, so the session gets nothing it could
+    # act with: no tools, no MCP servers, nothing saved, and an empty working
+    # directory rather than the repository.
+    cmd = [exe, "-p", prompt, "--output-format", "json", "--tools", "",
+           "--strict-mcp-config", "--no-session-persistence"]
     if model:
         cmd += ["--model", model]
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        with tempfile.TemporaryDirectory(prefix="swagperf-analyst-") as cwd:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, cwd=cwd)
     except (subprocess.TimeoutExpired, OSError):
         return None
     if p.returncode != 0:
@@ -162,17 +201,25 @@ def analyse_via_cli(metrics, regs, baselines, *, model=MODEL, timeout=180):
 
 
 def analyse(metrics, regs, baselines, *, model=MODEL, api_key=None):
-    import anthropic
+    return _ask_api(build_payload(metrics, regs, baselines), model=model, api_key=api_key)
+
+
+def _ask_api(payload, *, model=MODEL, api_key=None):
     key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not key or key.startswith("sk-ant-REPLACE"):
         return {"verdict": "unknown", "headline": "No ANTHROPIC_API_KEY set; analysis skipped.",
                 "findings": [], "dismissed": [], "_skipped": True}
-    payload = build_payload(metrics, regs, baselines)
-    client = anthropic.Anthropic(api_key=key)
-    msg = client.messages.create(
-        model=model, max_tokens=2000, system=SYSTEM,
-        messages=[{"role": "user", "content":
-                   "Analyse this Swag Pay trace run.\n\n" + json.dumps(payload, indent=2)}])
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=key)
+        msg = client.messages.create(
+            model=model, max_tokens=3000, system=SYSTEM,
+            messages=[{"role": "user", "content":
+                       "Analyse this Swag Pay trace run.\n\n" + json.dumps(payload, indent=2)}])
+    except Exception:
+        # A network or API failure falls through to the next backend (or no
+        # summary) rather than failing the capture that asked for it.
+        return None
     text = "".join(b.text for b in msg.content if b.type == "text").strip()
     if text.startswith("```"):
         text = text.split("```")[1].removeprefix("json").strip()
@@ -201,6 +248,102 @@ def cap_for_simulator(res, metrics):
     if not head.startswith(SIMULATOR_PREFIX):
         res["headline"] = SIMULATOR_PREFIX + (head[:1].lower() + head[1:] if head else "")
     return res
+
+
+def summarise(metrics, regs, baselines, *, run=None, vs_benchmark=None, model=MODEL,
+              backend=None):
+    """An AI summary of a recorded run (F-023), or None when no model answered.
+
+    Model backends only: under the rules ("heuristic") there is no summary to
+    write, because the rules' verdict is already the run's verdict. The result
+    never becomes the verdict (store kind 'summary'). Numbers the model wrote
+    that aren't in the payload are listed in `_unverified` for the page to flag.
+    """
+    backend = backend or BACKEND
+    payload = build_payload(metrics, regs, baselines, run=run, vs_benchmark=vs_benchmark)
+    res = None
+    if backend in ("auto", "cli"):
+        res = _ask_cli(payload, model=model)
+    if res is None and backend in ("auto", "api"):
+        res = _ask_api(payload, model=model)
+        if res and (res.get("_skipped") or res.get("verdict") not in ("pass", "warn", "fail")):
+            res = None
+    if res is None:
+        return None
+    res = cap_for_simulator(res, metrics)
+    res["_unverified"] = unverified_numbers(res, payload)
+    if vs_benchmark:
+        res["_benchmark"] = vs_benchmark
+    return res
+
+
+# Numbers the prompt itself states, which the model may repeat: the three
+# runtimes, the 60 Hz frame deadline and its multiples.
+_PROMPT_NUMBERS = {16.67, 16.7, 60.0, 90.0, 120.0, 100.0}
+_NUMBER = re.compile(r"(?<![\w.])[-+−]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|(?<![\w.])[-+−]?\d+(?:\.\d+)?")
+_TEXT_FIELDS = ("headline", "summary", "benchmark_comparison")
+
+
+def _numbers_in(obj, out):
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, (int, float)):
+        out.add(abs(float(obj)))
+    elif isinstance(obj, str):
+        for tok in _NUMBER.findall(obj):
+            out.add(abs(float(tok.replace(",", "").replace("−", "-"))))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _numbers_in(v, out)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            _numbers_in(v, out)
+
+
+# Versions (2.3.1), dates and clock times are identifiers, not measurements.
+_NOT_A_NUMBER = re.compile(r"\b\d+(?:\.\d+){2,}\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}:\d{2}\b")
+
+
+def _tokens(text):
+    for tok in _NUMBER.findall(_NOT_A_NUMBER.sub(" ", text)):
+        yield tok, abs(float(tok.replace(",", "").replace("−", "-")))
+
+
+def _matches(v, dp, known):
+    """Written at `dp` decimals, `v` stands for a known number when rounding
+    it gives `v`, or cutting it off does (98.75 written as 98.7)."""
+    unit = 10 ** -dp
+    return any(round(k, dp) == round(v, dp) or 0 <= k - v < unit - 1e-9 for k in known)
+
+
+def unverified_numbers(res, payload):
+    """Numbers in the model's text that the payload doesn't contain, as
+    written. A number matches when a payload number rounds or truncates to it
+    at the precision it was written with (493.3 matches "493"). The prompt
+    allows a plain difference or percentage of two numbers it quotes, so one
+    worked out from two verified numbers anywhere in the summary also matches
+    (420 and 414.56 make 5.44 of headroom). Small whole numbers (0 to 10) are
+    counts more often than measurements; versions, dates and times are
+    identifiers. Neither is checked."""
+    known = set(_PROMPT_NUMBERS)
+    _numbers_in(payload, known)
+    texts = [res.get(k) for k in _TEXT_FIELDS]
+    for f in res.get("findings") or []:
+        texts += [f.get("title"), f.get("evidence"), f.get("recommendation")]
+    texts += [d if isinstance(d, str) else (d or {}).get("title") for d in res.get("dismissed") or []]
+    toks = [(tok, v, len(tok.split(".")[1]) if "." in tok else 0)
+            for text in texts if isinstance(text, str) for tok, v in _tokens(text)]
+    quoted = {v for _, v, dp in toks if _matches(v, dp, known)}
+    worked = {abs(a - b) for a in quoted for b in quoted if a != b}
+    worked |= {abs(a - b) / b * 100 for a in quoted for b in quoted if a != b and b}
+    out = []
+    for tok, v, dp in toks:
+        if (v == int(v) and v <= 10) or _matches(v, dp, known) or _matches(v, dp, worked):
+            continue
+        shown = tok.lstrip("+-−")
+        if shown not in out:
+            out.append(shown)
+    return out
 
 
 def run_analysis(metrics, regs, baselines, *, model=MODEL, backend=None):
@@ -303,30 +446,34 @@ def heuristic(metrics, regs):
     findings += stability_findings(metrics)
     for b in metrics["breaches"]:
         # Same threshold regressions use. Hard-coding every breach as "medium"
-        # meant no budget breach could ever fail a run: a session at 4x its RAM
-        # growth budget and 42% over its peak-RAM budget still read WARN.
+        # meant no breach could ever fail a run: a session at 4x its RAM growth
+        # target and 42% over its peak-RAM target still read WARN.
         sev = "high" if (b.get("over_by_pct") or 0) > 25 else "medium"
-        findings.append({"title": f"{METRIC_NAMES.get(b['metric'], b['metric'])} over budget",
+        unit = METRIC_UNITS.get(b["metric"], "")
+        findings.append({"title": f"{METRIC_NAMES.get(b['metric'], b['metric'])} over its North Star target",
                          "runtime": "unknown",
                          "severity": sev, "kind": "budget_breach",
-                         "evidence": f"{b['value']} vs budget {b['budget']} (+{b['over_by_pct']}%)",
+                         "evidence": f"{with_unit(b['value'], unit)} vs {with_unit(b['budget'], unit)} "
+                                     f"(+{b['over_by_pct']}%)",
                          "architectural_risk": RISK_MAP.get(b["metric"]),
                          "recommendation": NEXT_STEP.get(b["metric"],
-                                                         "Investigate or re-baseline the budget.")})
+                                                         "Investigate, or revisit the North Star target.")})
     verdict = "fail" if any(f["severity"] == "high" for f in findings) else ("warn" if findings else "pass")
     # Lead with the worst finding rather than a count: "3 finding(s)" makes the
     # reader open the list to learn anything, the top finding usually says it.
     order = {"high": 0, "medium": 1, "low": 2}
     top = sorted(findings, key=lambda f: order.get(f["severity"], 3))
     if not top and metrics.get("simulator"):
-        headline = ("No step moved against other simulator runs; no budgets apply on a "
-                    "simulator (rules only, no LLM).")
+        headline = ("No step moved against other simulator runs; no North Star targets apply "
+                    "on a simulator (rules only, no LLM).")
     elif not top:
-        headline = "Every measured metric is within budget and baseline (rules only, no LLM)."
+        headline = ("Every measured metric is within its North Star target and baseline "
+                    "(rules only, no LLM).")
     else:
         headline = f"{top[0]['title']}: {top[0]['evidence']}"
         if len(top) > 1:
-            headline += f" (+{len(top) - 1} more)"
+            more = len(top) - 1
+            headline += f", and {more} more finding{'s' if more > 1 else ''}"
     return cap_for_simulator({"verdict": verdict,
                               "headline": headline,
                               "findings": findings, "dismissed": [], "_heuristic": True}, metrics)

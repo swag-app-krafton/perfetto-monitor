@@ -9,10 +9,15 @@ export class ApiError extends Error {
   }
 }
 
+/** Sent on every request. The server refuses a write without it (T-001): a
+ *  page on another site can't send a custom header without a CORS preflight,
+ *  and the server never approves one. */
+export const WRITE_HEADERS = { 'Content-Type': 'application/json', 'X-Swagperf': '1' } as const
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: { ...WRITE_HEADERS, ...(init?.headers ?? {}) },
   })
   const body: unknown = await res.json().catch(() => null)
   if (!res.ok) {

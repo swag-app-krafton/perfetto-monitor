@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, startStress, useDevice, useJob, useRecentJobs, useStress, useStressList } from '@/api/hooks'
 import type { StressTest } from '@/api/types'
-import { Banner, Button, Card, DotBoxPlot, EmptyState, Progress, Row, Segmented, Spinner, Stack, StatusPill, TableCard, Text, numCell, selectedRow } from '@/design'
+import { Banner, Button, Card, DotBoxPlot, EmptyState, Progress, Row, Segmented, Spinner, Stack, StatusPill, Switch, TableCard, Text, numCell, selectedRow } from '@/design'
 import { fmt, shortDate, signed } from '@/domain/format'
 import { useScope } from '@/domain/scope'
 import { compareSamples, quartiles } from '@/domain/stats'
@@ -15,6 +15,8 @@ const values = (t: StressTest | undefined) => (t?.sessions ?? []).map((x) => x.t
 export function StressPage() {
   const { scope } = useScope()
   const app = useUi((st) => st.app)
+  const aiSummary = useUi((st) => st.aiSummary)
+  const setAiSummary = useUi((st) => st.setAiSummary)
   const qc = useQueryClient()
   const platform = platformOf(useProfiler())
   const dev = useDevice(platform)
@@ -43,7 +45,7 @@ export function StressPage() {
   const run = async () => {
     setErr(null)
     try {
-      const r = await startStress({ pkg: app, sessions: n, cold: true, duration_ms: 8000, platform })
+      const r = await startStress({ pkg: app, sessions: n, cold: true, duration_ms: 8000, platform, ai_summary: aiSummary })
       setJobId(r.job_id)
       setPick(null)
       qc.invalidateQueries({ queryKey: keys.jobs })
@@ -71,6 +73,12 @@ export function StressPage() {
                 Run {n} cold starts
               </Button>
             </Row>
+            <Stack gap={4}>
+              <Switch checked={aiSummary} onChange={setAiSummary} label="Write an AI summary of each session" />
+              <Text variant="caption">
+                One summary per session, written with your Claude session after the last cold start, so the model never runs between them. Verdicts stay the rules'.
+              </Text>
+            </Stack>
             {!dev.data?.connected && (
               <Text variant="meta">{platform === 'ios' ? 'Boot an iOS Simulator to run a stress test.' : 'Connect a device to run a stress test.'}</Text>
             )}

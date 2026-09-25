@@ -7,6 +7,7 @@ import type { worstRegression } from '@/domain/steps'
 import { focusHref } from '@/lib/highlight'
 import { useLaneNavigate, useLanePath } from '@/app/profiler'
 import { useUi } from '@/app/store'
+import { verdictAuthor } from './verdictAuthor'
 import s from './Overview.module.css'
 
 type Worst = ReturnType<typeof worstRegression>
@@ -43,6 +44,11 @@ export function VerdictHero({
             <Text variant="meta">
               Run #{run.id} vs {benchmark ? `Benchmark #${benchmark.id}` : baselineLabel}
             </Text>
+            {run.analysis_meta && (
+              <Text variant="meta" tone="muted">
+                · Verdict by {verdictAuthor(run.analysis_meta.model)}
+              </Text>
+            )}
           </Row>
           <Row gap={24} wrap>
             <StatusSquare tone={tone} size={88} fontSize={46} />
@@ -99,7 +105,7 @@ export function VerdictHero({
         <Stack gap={14} className={s.gates}>
           <Label>RELEASE GATES</Label>
           {gates.length === 0 && (
-            <Text variant="body">{run.simulator ? 'No budgets apply: a simulator run is never judged against them.' : 'No budgets apply to this app.'}</Text>
+            <Text variant="body">{run.simulator ? 'No North Star targets apply: a simulator run is never judged against them.' : 'No North Star targets apply to this app.'}</Text>
           )}
           {gates.map(({ m, value, budget }) => {
             const t = gateTone(value, budget)
@@ -117,10 +123,15 @@ export function VerdictHero({
                     ≤ {fmt(budget, m.dp)} {m.unit}
                   </Text>
                 </Row>
-                <Meter height={3} value={value ?? 0} max={budget ?? 0} color={toneColor(t)} label={`${m.label} against its budget`} />
+                <Meter height={3} value={value ?? 0} max={budget ?? 0} color={toneColor(t)} label={`${m.label} against its North Star target`} />
               </Stack>
             )
           })}
+          {gates.length > 0 && run.ttid_budget_ms == null && run.ttid_target_reason && !run.simulator && (
+            <Text variant="meta" tone="muted">
+              Startup: {run.ttid_target_reason}
+            </Text>
+          )}
         </Stack>
       </Stack>
     </Card>
