@@ -156,6 +156,47 @@ def _print_stress(t):
     print()
 
 
+def _maps_resolve(n, sourcemaps):
+    """`maps resolve`: pasted stacks or SwagErrors log lines, resolved."""
+    if n.map:
+        map_path = n.map
+    elif n.tag:
+        map_path = sourcemaps.find_by_tag(n.tag, n.platform, n.app)
+    elif not n.app:
+        print("  \033[31mERROR\033[0m --build and --hash need --app")
+        return 2
+    else:
+        map_path = sourcemaps.find(n.platform, n.app, source_hash=n.hash, build=n.build)
+    if not map_path or not os.path.isfile(map_path):
+        print("  \033[31mERROR\033[0m no source map registered for that build "
+              "(swagperf maps fetch --tag …, or maps list)")
+        return 2
+    text = open(n.file).read() if n.file else sys.stdin.read()
+    errors, incomplete = sourcemaps.resolve_text(text, map_path)
+    info = sourcemaps.release_info(map_path) or {}
+    rel = f" ({info.get('tag') or 'dry run'} · {info.get('versionName')})" if info else ""
+    print(f"\n  source map: {os.path.basename(map_path)}{rel}")
+    if not errors:
+        print("  no JS error found in the text")
+    for e in errors:
+        kind = ", ".join(x for x in ("fatal" if e.get("fatal") else "non-fatal" if "fatal" in e else "",
+                                     e.get("source") or "") if x)
+        print(f"\n  {e.get('name') or 'Error'}: {e.get('message') or ''}" + (f"   ({kind})" if kind else ""))
+        for f in e["frames"]:
+            if f["resolved"]:
+                where = f"{f['path'] or f['file']}:{f['line']}:{f['col']}"
+                indent = "    " if f["in_app"] else "      "
+                print(f"{indent}{(f['fn'] or '?'):<34} {where}")
+            else:
+                print(f"      \033[2m{f['raw'].strip()}\033[0m")
+        if e.get("frames") and not any(f["resolved"] for f in e["frames"]):
+            print("    (nothing resolved: this map is from another build)")
+    if incomplete:
+        print(f"\n  {incomplete} record(s) had a chunk missing and were skipped")
+    print()
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="swagperf", description="Swag Pay Perfetto monitor")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -325,6 +366,26 @@ def main(argv=None):
     mpa.add_argument("--bundle", help="the build's JS bundle (main.jsbundle / index.android.bundle): "
                      "keys the map by the bundle's own hash")
     mpa.add_argument("--build", help="the build number, when the bundle isn't to hand")
+    mpi = mpx.add_parser("import", help="register a release build's maps from a folder staged by "
+                         "Swag Pay's apps/mobile/scripts/release_build.py")
+    mpi.add_argument("folder", help="the folder holding its manifest.json")
+    mpf = mpx.add_parser("fetch", help="download release builds' maps from their GitHub Releases")
+    mpfw = mpf.add_mutually_exclusive_group(required=True)
+    mpfw.add_argument("--tag", help="one release, e.g. v1.2.0-42")
+    mpfw.add_argument("--all", action="store_true", help="every Release not imported yet")
+    mpf.add_argument("--repo", help="GitHub repository (default swag-app-krafton/swag-pay, "
+                     "or $SWAGPERF_RELEASE_REPO)")
+    mpr = mpx.add_parser("resolve", help="resolve JS error stacks from pasted text: a stack as "
+                         "Hermes printed it, or SwagErrors log lines "
+                         "(adb logcat -d -v raw -s SwagPerfError)")
+    mpr.add_argument("file", nargs="?", help="the text (default: stdin)")
+    mpr.add_argument("--app", help="package or bundle id (needed with --build or --hash)")
+    mpr.add_argument("--platform", choices=["android", "ios"], default="android")
+    mprw = mpr.add_mutually_exclusive_group(required=True)
+    mprw.add_argument("--tag", help="a release imported with maps fetch, e.g. v1.2.0-42")
+    mprw.add_argument("--build", help="the build number (version code)")
+    mprw.add_argument("--hash", help="the Hermes bundle's source hash")
+    mprw.add_argument("--map", help="a composed source map file")
     mpx.add_parser("list", help="registered source maps")
 
     io = sub.add_parser("ios", help="iOS tools: simulators, and reading Instruments traces")
@@ -743,9 +804,39 @@ def main(argv=None):
                 return 2
             print(f"  registered -> {dest}")
             return 0
+        if n.mcmd2 in ("import", "fetch"):
+            if n.mcmd2 == "import":
+                todo = [(n.folder, lambda: sourcemaps.import_release(n.folder))]
+            else:
+                try:
+                    tags = [n.tag] if n.tag else [
+                        t for t in sourcemaps.release_tags(n.repo) if t not in sourcemaps.imported_tags()]
+                except ValueError as e:
+                    print(f"  \033[31mERROR\033[0m {e}")
+                    return 2
+                if not tags:
+                    print("  every Release is already imported")
+                todo = [(t, lambda t=t: sourcemaps.fetch_release(t, repo=n.repo)) for t in tags]
+            failed = 0
+            for what, do in todo:
+                try:
+                    for platform, pkg, paths in do():
+                        print(f"  {what}  {platform:<8} {pkg:<28} "
+                              + ", ".join(os.path.basename(p) for p in paths))
+                except (OSError, ValueError) as e:
+                    failed += 1
+                    print(f"  \033[31mERROR\033[0m {what}: {e}")
+            return 2 if failed else 0
+        if n.mcmd2 == "resolve":
+            return _maps_resolve(n, sourcemaps)
         rows = sourcemaps.listed()
         for platform, pkg, key, path in rows:
-            print(f"  {platform:<8} {pkg:<36} {key}")
+            info = sourcemaps.release_info(path)
+            rel = ""
+            if info:
+                rel = (f"  {info.get('tag') or 'dry run'} · {info.get('versionName')} "
+                       f"({info.get('versionCode')})")
+            print(f"  {platform:<8} {pkg:<36} {key}{rel}")
         print(f"\n  {len(rows)} map(s) in {sourcemaps.ROOT}")
         return 0
 

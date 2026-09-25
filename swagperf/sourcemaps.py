@@ -14,13 +14,21 @@ Maps live under `sourcemaps/<platform>/<app>/<key>.map`, where the key is:
 An iOS run records its bundle's hash at capture (capture_ios.parse_app_bundle),
 so its map is found without any configuration.
 
+Release builds come from Swag Pay's apps/mobile/scripts/release_build.py,
+which tags each one (`v1.2.0-42`) and attaches its bundles, composed maps and
+a manifest to a GitHub Release on the tag. `import_release` registers such a
+build's maps, from the Release (`fetch_release`) or a staged folder, under
+the bundle's hash and under `build-<versionCode>`, which that script keeps
+unique; a `<key>.json` sidecar next to each map names the release.
+
 Resolution happens when a run is read, not when it is recorded, so a map added
 after the run still applies. A stack whose frames don't resolve against the
 map is reported as unsymbolicated, never as guessed frames.
 """
-import os, shutil
+import hashlib, json, os, shutil
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "sourcemaps"))
+RELEASE_REPO = os.environ.get("SWAGPERF_RELEASE_REPO", "swag-app-krafton/swag-pay")
 
 
 def _dir(platform, pkg, root=None):
@@ -106,11 +114,175 @@ def find(platform, pkg, *, source_hash=None, build=None, root=None):
 
 
 def map_for_run(run, meta, root=None):
-    """The map a recorded run's errors resolve against, or None."""
+    """The map a recorded run's errors resolve against, or None. A run that
+    recorded its bundle's hash is matched by it alone: a local build shares
+    its build number with others, and that fallback would pick their map."""
     app = (meta or {}).get("app") or {}
+    source_hash = app.get("hbc_source_hash")
     return find(run.get("platform") or "android", run.get("app_pkg") or "",
-                source_hash=app.get("hbc_source_hash"), build=app.get("version_code"),
-                root=root)
+                source_hash=source_hash,
+                build=None if source_hash else app.get("version_code"), root=root)
+
+
+# ------------------------------------------------------------------ releases
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def import_release(folder, root=None):
+    """Register the maps of one release build: a folder with the
+    manifest.json, bundles and composed maps release_build.py produced
+    (staged locally, or downloaded from the GitHub Release).
+
+    Every file must match the manifest's sha256, each bundle's header must
+    carry the manifest's Hermes source hash, and each map must be a composed
+    Hermes map with the bundle's function count. All builds are checked
+    before any is registered. A tagged release (version code 2 and up) is
+    also registered as `build-<versionCode>`; a dry run, or a code of 1 (a
+    local build), only by hash. Returns [(platform, app, [map paths])]."""
+    from . import symbolicate as sym
+    with open(os.path.join(folder, "manifest.json")) as fh:
+        manifest = json.load(fh)
+    checked = []
+    for b in manifest.get("builds") or []:
+        paths = {}
+        for part in ("bundle", "map"):
+            entry = b.get(part) or {}
+            p = os.path.join(folder, entry.get("file") or "")
+            if not entry.get("file") or not os.path.isfile(p):
+                raise ValueError(f"{b.get('platform')}: the {part} {entry.get('file')!r} is missing")
+            if _sha256(p) != entry.get("sha256"):
+                raise ValueError(f"{entry['file']} doesn't match the manifest's sha256")
+            paths[part] = p
+        source_hash = (b.get("hbc") or {}).get("sourceHash")
+        if bundle_key(paths["bundle"]) != f"hbc-{source_hash}":
+            raise ValueError(f"{b['bundle']['file']} doesn't carry the manifest's Hermes "
+                             f"source hash {source_hash}")
+        sm = sym.load_map(paths["map"])
+        if not sm.is_hermes:
+            raise ValueError(f"{b['map']['file']} isn't a composed Hermes map")
+        verdict = sym.map_matches([], sm, bundle=paths["bundle"])
+        if verdict["match"] is False:
+            raise ValueError(f"{b['map']['file']} doesn't belong to {b['bundle']['file']}: "
+                             f"{verdict['reason']}")
+        checked.append((b, paths["map"], source_hash))
+    if not checked:
+        raise ValueError(f"{folder}/manifest.json lists no builds")
+
+    release = {k: manifest.get(k) for k in ("tag", "versionName", "versionCode", "commit",
+                                            "builtAt", "dryRun")}
+    tagged = bool(manifest.get("tag")) and not manifest.get("dryRun")
+    out = []
+    for b, map_path, source_hash in checked:
+        platform, pkg, code = b["platform"], b["appId"], b.get("versionCode")
+        keys = [f"hbc-{source_hash}"]
+        if tagged and isinstance(code, int) and code >= 2:
+            keys.append(f"build-{code}")
+        d = _dir(platform, pkg, root)
+        os.makedirs(d, exist_ok=True)
+        written = []
+        for key in keys:
+            dest = os.path.join(d, f"{key}.map")
+            shutil.copyfile(map_path, dest)
+            with open(os.path.join(d, f"{key}.json"), "w") as fh:
+                json.dump(dict(release, platform=platform, app=pkg, hbcSourceHash=source_hash),
+                          fh, indent=2)
+            written.append(dest)
+        out.append((platform, pkg, written))
+    return out
+
+
+def find_by_tag(tag, platform, pkg=None, root=None):
+    """The map a release imported under `tag` registered for `platform`
+    (its hash key), or None."""
+    for p, app, key, path in listed(root):
+        info = release_info(path) or {}
+        if (p == platform and (pkg is None or app == pkg) and key.startswith("hbc-")
+                and info.get("tag") == tag):
+            return path
+    return None
+
+
+def resolve_text(text, map_path):
+    """JS errors in pasted text, resolved against one map.
+
+    The text is either SwagErrors log lines (`adb logcat -d -v raw -s
+    SwagPerfError`, or the simulator's os_log), whose chunked records are put
+    back together first, or one stack as Hermes printed it. Returns
+    (errors, incomplete): each error is its record ({name, message, stack,
+    component_stack, fatal, source}, as far as the text gives them) plus
+    `frames` from symbolicate.symbolicate; incomplete counts records with a
+    chunk missing."""
+    import re
+    from . import stability, symbolicate as sym
+    lines = [(i, line[line.index("swagerr|"):].rstrip())
+             for i, line in enumerate(text.splitlines()) if "swagerr|" in line]
+    if lines:
+        if any("\\134" in chunk for _, chunk in lines):
+            # `log show` prints a backslash as \134 (octal), and the JSON
+            # record escapes every newline with one.
+            octal = re.compile(r"\\([0-3][0-7]{2})")
+            lines = [(i, octal.sub(lambda m: chr(int(m.group(1), 8)), chunk)) for i, chunk in lines]
+        records, incomplete = stability.assemble_records(lines)
+        errors = [stability._loads(t) or {"name": "Unreadable record", "message": t[:120]}
+                  for _, t in sorted(records.values())]
+    else:
+        incomplete = 0
+        head = next((line for line in text.splitlines() if line.strip()), "")
+        name, _, message = head.strip().partition(": ")
+        errors = [{"name": name, "message": message, "stack": text}] if head else []
+    return [dict(e, frames=sym.symbolicate(e["stack"], map_path) if e.get("stack") else [])
+            for e in errors], incomplete
+
+
+def release_info(map_path):
+    """What release a registered map came from (its sidecar), or None for a
+    map added by hand."""
+    try:
+        with open(map_path[:-len(".map")] + ".json") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def imported_tags(root=None):
+    return {info["tag"] for *_, path in listed(root)
+            for info in [release_info(path)] if info and info.get("tag")}
+
+
+def _gh(args):
+    import subprocess
+    p = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if p.returncode:
+        raise ValueError(f"gh {' '.join(args)} failed: {(p.stderr or p.stdout).strip()}")
+    return p.stdout
+
+
+def release_tags(repo=None):
+    """Tags of the repository's published GitHub Releases, newest first."""
+    rows = json.loads(_gh(["release", "list", "-R", repo or RELEASE_REPO, "--limit", "1000",
+                           "--json", "tagName,isDraft"]))
+    return [r["tagName"] for r in rows if not r.get("isDraft")]
+
+
+def fetch_release(tag, *, repo=None, root=None, download=None):
+    """Download a GitHub Release's files and register its maps."""
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="swagperf-release-")
+    try:
+        (download or _download)(tag, repo or RELEASE_REPO, tmp)
+        return import_release(tmp, root=root)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _download(tag, repo, dest):
+    _gh(["release", "download", tag, "-R", repo, "-D", dest, "--clobber"])
 
 
 def _library_fingerprint(frames):

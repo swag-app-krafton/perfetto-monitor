@@ -420,8 +420,18 @@ F-014 is committed in `d007f5a`. F-028 is committed in `58fe6fa`…`d21da60` (20
 - **API:** `GET /api/stability?run=N`, and stability on every run in `/api/history`.
 - **CLI:** `swagperf maps add <map> --app <id> [--platform] (--bundle <jsbundle> | --build <n>)`, and `maps list`.
 
+**Release archive** (F-030):
+- **Swag Pay's release pipeline** builds both platforms at one commit, tags it `v1.2.0-42`, and attaches the Hermes bundles, composed maps, a manifest, the APK and the simulator app to a GitHub Release on the tag.
+  - It runs on GitHub Actions (`release.yml`, Release → Run workflow) or on this Mac (`yarn release`). The Bash scripts are in `apps/mobile/scripts/release/`, and the app now uses Yarn classic.
+  - A pull request touching the pipeline runs it as a dry run.
+- `swagperf maps fetch --tag v1.2.0-42` (or `--all`) downloads a Release and registers its maps, and `maps import <folder>` does the same for a staged build. Each map is registered under its bundle's hash and under `build-<versionCode>`.
+- A map is refused unless every file matches the manifest's sha256, the bundle carries the manifest's Hermes source hash, and the map has the bundle's function count.
+- A run that recorded its bundle's hash (iOS) is matched by that hash alone. Local builds share a build number, so falling back to it could pick another build's map.
+- `swagperf maps resolve` resolves JS errors without recording a trace. It takes pasted text: a Hermes stack, `adb logcat -d -v raw -s SwagPerfError` output, or the simulator's `log show` output. Pick the map with `--tag`, `--build`, `--hash` or `--map`. Records split across log lines are put back together first.
+- **Demo error:** in Swag Pay a long-press on the Contacts title throws a non-fatal `TypeError`. On 2026-09-25 one from the release build on the iOS simulator resolved to `src/contactsDirectory.ts:166` (see the swag-pay release README).
+
 **Tests:**
-- `tests/test_stability.py`: F-028 adds ANR, crash, run-data, triage and demo-session tests, built on `swagperf/synth_stability.py`.
+- `tests/test_stability.py`: F-028 adds ANR, crash, run-data, triage and demo-session tests, built on `swagperf/synth_stability.py`. The release-archive tests are F-030's.
 - `frontend/src/domain/incidents.test.ts` and `frontend/src/app/routes.test.ts` (F-028).
 - `tests/test_symbolicate.py`, 45 tests, checked against metro-symbolicate's own answers.
 

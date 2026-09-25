@@ -1182,9 +1182,7 @@ None open.
 ## Release archive: bundles and source maps per build
 
 **Tracker:** F-030
-**Status:** in progress since 2026-09-25. The swag-pay half is on branch `release-archive`
-(worktree `~/Documents/swag-pay-release-tooling`), committed and not pushed. The swagperf
-half is in the working tree.
+**Status:** in progress since 2026-09-25. The swag-pay half is draft PR [swag-pay#2](https://github.com/swag-app-krafton/swag-pay/pull/2) (branch `release-archive`); its CI dry run is the pull request's check. The swagperf half is in the working tree.
 **Raised:** 2026-09-25, when the user asked where JS exceptions should be resolved to "the
 exact site", then set the flow: "build generation (input versionNumber + versionCode) -> git
 tag -> store hbc file"
@@ -1236,8 +1234,28 @@ Settled in the plan the user approved:
 - **Asking first:** the script asks before it tags and pushes.
 - **Dry runs** build as `<name>-dryrun` / code 1 and never tag.
 
+Decided by the user on 2026-09-25, second round:
+- **Yarn classic 1.22 instead of npm.**
+  - `yarn.lock` pins exactly package-lock.json's versions (all 809 packages).
+  - `yarn import` can't read lockfile v3, so it was generated from an npm install, and 12 re-resolved entries were pinned back.
+  - The Hermes bundles built with yarn are byte-identical to npm's.
+- **Bash scripts instead of Python**, run through yarn (`yarn release`, `release:dry-run`, `release:resume`, `release:test`).
+- **GitHub Actions runs the pipeline** (`.github/workflows/release.yml`).
+  - `preflight` tests the scripts and checks the version.
+  - `android` runs on Ubuntu and `ios` on macOS, in parallel.
+  - `publish` tags, pushes and creates the Release.
+  - A pull request touching the pipeline runs it as a dry run.
+- **The demo error is a hidden gesture in every build.** A long-press on the Contacts title throws a non-fatal `TypeError` that SurfaceBoundary catches.
+  - On 2026-09-25 it was driven by Maestro in the dry-run release build on an iOS simulator.
+  - The os_log record resolved with `swagperf maps resolve` to `src/contactsDirectory.ts:166:27 buildContactList`, then `ContactsScreen.tsx:50`.
+- **`swagperf maps resolve`** reads a pasted stack, logcat, or the simulator's `log show` output (whose backslashes arrive as `\134`).
+
 ### Watch out for
 
+- **`workflow_dispatch` only runs from `main`,** so the first real release waits for swag-pay#2 to merge.
+- **Release APKs:** `main` signs release builds with the debug key since cb4a2cf. That's enough for the demo to install, but it isn't a store signing.
+- **Cost:** the iOS job runs on a macOS runner, which counts 10× against the Team plan's Actions minutes. Pull requests run it only when the release tooling changes.
+- **Xcode:** the `macos-26` runner's Xcode may lag this Mac's Xcode 27. The project's settings (Swift 5, iOS 15.5) build on older Xcode.
 - **The first real release has to wait for the merge.** `--ref origin/main` needs the
   `build.gradle.kts` hunk, and until `release-archive` is merged the script refuses to build
   a commit without it.

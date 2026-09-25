@@ -373,5 +373,148 @@ class TestDemoSession(unittest.TestCase):
         self.assertEqual((anr["screen"], anr["main_thread"]["name"]), ("Store", "binder transaction"))
 
 
+class TestReleaseArchive(unittest.TestCase):
+    """Maps from release builds archived by Swag Pay's release_build.py: a
+    manifest, and each platform's bundle and composed map."""
+    SYN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "sourcemaps", "synthetic")
+
+    def setUp(self):
+        import shutil
+        self.root = tempfile.mkdtemp()
+        self.folder = tempfile.mkdtemp()
+        self.bundle = os.path.join(self.folder, "android-index.android.bundle")
+        self.map = os.path.join(self.folder, "android-index.android.bundle.map")
+        shutil.copyfile(os.path.join(self.SYN, "v1", "index.android.bundle"), self.bundle)
+        shutil.copyfile(os.path.join(self.SYN, "v1", "index.android.bundle.map"), self.map)
+        from swagperf import symbolicate
+        self.hash = symbolicate.hbc_info(self.bundle)["source_hash"]
+        self.write_manifest()
+
+    def write_manifest(self, tag="v1.2.0-42", code=42, dry_run=False, **build):
+        entry = lambda p: {"file": os.path.basename(p), "sha256": sourcemaps._sha256(p),
+                           "bytes": os.path.getsize(p)}
+        b = {"platform": "android", "appId": "com.swag.pay", "versionName": "1.2.0",
+             "versionCode": code, "hbc": {"version": 98, "sourceHash": self.hash},
+             "bundle": entry(self.bundle), "map": entry(self.map), "packagerMap": None}
+        b.update(build)
+        with open(os.path.join(self.folder, "manifest.json"), "w") as f:
+            json.dump({"schema": 1, "tag": tag, "versionName": "1.2.0", "versionCode": code,
+                       "dryRun": dry_run, "commit": "a" * 40, "builtAt": "2026-09-25T12:00:00Z",
+                       "builds": [b]}, f)
+
+    def test_registers_by_hash_and_build_with_a_sidecar(self):
+        [(platform, pkg, paths)] = sourcemaps.import_release(self.folder, root=self.root)
+        self.assertEqual((platform, pkg), ("android", "com.swag.pay"))
+        self.assertEqual([os.path.basename(p) for p in paths], [f"hbc-{self.hash}.map", "build-42.map"])
+        self.assertEqual(sourcemaps.find("android", "com.swag.pay", source_hash=self.hash, root=self.root),
+                         paths[0])
+        self.assertEqual(sourcemaps.find("android", "com.swag.pay", build=42, root=self.root), paths[1])
+        # Sidecars sit beside the maps; listing still sees only maps.
+        self.assertEqual([r[2] for r in sourcemaps.listed(self.root)], ["build-42", f"hbc-{self.hash}"])
+        info = sourcemaps.release_info(paths[0])
+        self.assertEqual((info["tag"], info["versionCode"], info["hbcSourceHash"]),
+                         ("v1.2.0-42", 42, self.hash))
+        self.assertEqual(sourcemaps.imported_tags(self.root), {"v1.2.0-42"})
+
+    def test_dry_run_is_registered_by_hash_only(self):
+        self.write_manifest(tag=None, code=1, dry_run=True, versionName="1.2.0-dryrun")
+        [(_, _, paths)] = sourcemaps.import_release(self.folder, root=self.root)
+        self.assertEqual([os.path.basename(p) for p in paths], [f"hbc-{self.hash}.map"])
+        self.assertEqual(sourcemaps.imported_tags(self.root), set())
+
+    def test_refuses_a_file_that_isnt_the_manifests(self):
+        with open(self.map, "a") as f:
+            f.write(" ")
+        with self.assertRaisesRegex(ValueError, "sha256"):
+            sourcemaps.import_release(self.folder, root=self.root)
+        self.assertEqual(sourcemaps.listed(self.root), [])
+
+    def test_refuses_a_map_from_another_build(self):
+        import shutil
+        # v2 of the same program: 94 functions against the bundle's 90.
+        shutil.copyfile(os.path.join(self.SYN, "v2", "main.jsbundle.map"), self.map)
+        self.write_manifest()
+        with self.assertRaisesRegex(ValueError, "doesn't belong"):
+            sourcemaps.import_release(self.folder, root=self.root)
+        self.assertEqual(sourcemaps.listed(self.root), [])
+
+    def test_refuses_a_bundle_with_another_hash(self):
+        self.write_manifest(hbc={"version": 98, "sourceHash": "0" * 40})
+        with self.assertRaisesRegex(ValueError, "source hash"):
+            sourcemaps.import_release(self.folder, root=self.root)
+
+    def test_fetch_downloads_then_imports(self):
+        import shutil
+        calls = []
+
+        def download(tag, repo, dest):
+            calls.append((tag, repo))
+            for f in os.listdir(self.folder):
+                shutil.copyfile(os.path.join(self.folder, f), os.path.join(dest, f))
+
+        rows = sourcemaps.fetch_release("v1.2.0-42", repo="o/r", root=self.root, download=download)
+        self.assertEqual(calls, [("v1.2.0-42", "o/r")])
+        self.assertEqual(rows[0][0], "android")
+
+    def test_a_run_with_a_hash_never_falls_back_to_the_build_number(self):
+        sourcemaps.import_release(self.folder, root=self.root)
+        run = {"platform": "android", "app_pkg": "com.swag.pay"}
+        # A local build with the same number but other JS: no map, not build-42's.
+        self.assertIsNone(sourcemaps.map_for_run(
+            run, {"app": {"hbc_source_hash": "f" * 40, "version_code": 42}}, root=self.root))
+        self.assertTrue(sourcemaps.map_for_run(
+            run, {"app": {"version_code": 42}}, root=self.root).endswith("build-42.map"))
+        self.assertTrue(sourcemaps.map_for_run(
+            run, {"app": {"hbc_source_hash": self.hash, "version_code": 7}}, root=self.root)
+            .endswith(f"hbc-{self.hash}.map"))
+
+    def stack(self):
+        with open(os.path.join(self.SYN, "v1", "stacks.json")) as f:
+            return next(s["text"] for s in json.load(f) if s["id"] == "nested_function")
+
+    def records(self, stack, size=800):
+        """The SwagErrors lines the app writes for one error: its JSON record
+        in chunks (800 characters in the app), as `swagerr|<id>|<seq>/<total>|<chunk>`."""
+        rec = json.dumps({"id": "e1", "name": "RangeError", "message": "divide by zero",
+                          "stack": stack, "fatal": False, "source": "boundary"})
+        chunks = [rec[i:i + size] for i in range(0, len(rec), size)]
+        return [f"swagerr|e1|{n}/{len(chunks)}|{c}" for n, c in enumerate(chunks, 1)]
+
+    def test_resolves_a_pasted_stack(self):
+        from swagperf import symbolicate
+        [e], incomplete = sourcemaps.resolve_text(self.stack(), self.map)
+        self.assertEqual((e["name"], e["message"], incomplete), ("RangeError", "divide by zero", 0))
+        self.assertEqual(e["frames"], symbolicate.symbolicate(self.stack(), self.map))
+        self.assertTrue(e["frames"][0]["resolved"])
+
+    def test_resolves_logcat_records(self):
+        from swagperf import symbolicate
+        logcat = "\n".join(["--------- beginning of main"] + self.records(self.stack()))
+        [e], incomplete = sourcemaps.resolve_text(logcat, self.map)
+        self.assertEqual((e["name"], e["fatal"], e["source"], incomplete), ("RangeError", False, "boundary", 0))
+        self.assertEqual(e["frames"], symbolicate.symbolicate(self.stack(), self.map))
+
+    def test_resolves_the_simulators_os_log(self):
+        """`log show` prefixes each line and prints backslashes as \\134."""
+        from swagperf import symbolicate
+        lines = [f"2026-09-25 18:04:32.247 Df Swag Pay[24662:16cf3a] [com.swag.pay.trace:errors] "
+                 + r.replace("\\", "\\134") for r in self.records(self.stack())]
+        [e], _ = sourcemaps.resolve_text("\n".join(lines), self.map)
+        self.assertEqual(e["frames"], symbolicate.symbolicate(self.stack(), self.map))
+
+    def test_a_record_missing_a_chunk_is_counted_not_guessed(self):
+        lines = self.records(self.stack(), size=100)
+        self.assertGreater(len(lines), 2)
+        errors, incomplete = sourcemaps.resolve_text("\n".join(lines[:1] + lines[2:]), self.map)
+        self.assertEqual((errors, incomplete), ([], 1))
+
+    def test_finds_a_releases_map_by_tag(self):
+        sourcemaps.import_release(self.folder, root=self.root)
+        found = sourcemaps.find_by_tag("v1.2.0-42", "android", root=self.root)
+        self.assertTrue(found.endswith(f"hbc-{self.hash}.map"))
+        self.assertIsNone(sourcemaps.find_by_tag("v1.2.0-42", "ios", root=self.root))
+        self.assertIsNone(sourcemaps.find_by_tag("v9.9.9-99", "android", root=self.root))
+
+
 if __name__ == "__main__":
     unittest.main()
