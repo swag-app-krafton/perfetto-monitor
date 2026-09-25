@@ -17,6 +17,7 @@ import glob, os, re, statistics
 from urllib.parse import quote
 
 from .analyst import METRIC_NAMES, NEXT_STEP
+from .stability import ANR_TYPES
 from .budgets import RISK_MAP, STEP_RUNTIME, METRIC_UNITS as UNITS
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -171,23 +172,37 @@ def signals_of(run, regs):
                     "over_pct": pct, "severity": "high" if (pct or 0) > 25 else "medium"})
     st = run.get("stability") or {}
     cr = st.get("crash") or {}
-    crashes = cr.get("events")
-    if crashes is None and cr.get("crashed"):     # recorded before crash lists (F-028)
-        crashes = [{"signature": "app", "message": cr.get("reason")}]
+    # Counted over every crash (by_signature), not the capped event list.
+    by_sig = cr.get("by_signature")
+    if by_sig is None:
+        by_sig = {}
+        crashes = cr.get("events")
+        if crashes is None and cr.get("crashed"):     # recorded before crash lists (F-028)
+            crashes = [{"signature": "app", "message": cr.get("reason")}]
+        for c in crashes or []:
+            g = by_sig.setdefault(c.get("signature"), {"count": 0, "message": c.get("message")})
+            g["count"] += 1
     groups = {}
-    for c in crashes or []:
-        g = groups.setdefault(_slug(c.get("signature")), {"n": 0, "detail": c.get("message")})
-        g["n"] += 1
+    for s, c in by_sig.items():
+        g = groups.setdefault(_slug(s), {"n": 0, "detail": c.get("message")})
+        g["n"] += c.get("count") or 0
     for sig, g in sorted(groups.items()):
         out.append({"key": f"crash:{sig}:{app}:{path}", "kind": "crash", "subject": sig,
                     "title": "The app crashed during the run" if sig == "app" else f"The app crashed: {sig}",
                     "unit": "", "value": g["n"], "reference": None, "reference_kind": None,
                     "over_pct": None, "severity": "high", "detail": g["detail"]})
+    # ANR counts from by_type, which covers every ANR; the capped events only
+    # lend a label and a reason line.
+    anrs = st.get("anrs") or {}
+    first = {}
+    for a in anrs.get("events") or []:
+        first.setdefault(a.get("type"), a)
     anr_groups = {}
-    for a in (st.get("anrs") or {}).get("events") or []:
-        g = anr_groups.setdefault(_slug(a.get("type")), {"n": 0, "label": a.get("type_label"),
-                                                         "detail": a.get("subject")})
-        g["n"] += 1
+    for typ, n in (anrs.get("by_type") or {}).items():
+        a = first.get(typ) or {}
+        g = anr_groups.setdefault(_slug(typ), {"n": 0, "label": a.get("type_label") or ANR_TYPES.get(typ),
+                                               "detail": a.get("subject")})
+        g["n"] += n
     for typ, g in sorted(anr_groups.items()):
         out.append({"key": f"anr:{typ}:{app}:{path}", "kind": "anr", "subject": typ,
                     "title": f"ANR: {g['label'] or typ}", "unit": "", "value": g["n"],

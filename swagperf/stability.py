@@ -440,6 +440,17 @@ def _native_crashes(lines, pkg, pids):
     return out
 
 
+def _by_signature(crashes):
+    """{signature: {count, message}} over every crash, not only the listed
+    ones: triage opens one issue per signature, and a crash loop longer than
+    the list must not hide another kind."""
+    out = {}
+    for c in crashes:
+        g = out.setdefault(c["signature"], {"count": 0, "message": c["message"]})
+        g["count"] += 1
+    return out
+
+
 def crash(tp, upids, platform, src, pkg=None, wins=None):
     """Every time the app died on its own during the recording."""
     if platform == "ios":
@@ -447,10 +458,12 @@ def crash(tp, upids, platform, src, pkg=None, wins=None):
         reason = (src.get("termination") or None) if died else None
         events = [{"start_ms": None, "kind": "ios", "signature": reason or "crash", "message": reason,
                    "log": None, "screen": None, "pid": None}] if died else []
-        return {"measured": True, "crashed": died, "reason": reason, "count": len(events), "events": events}
+        return {"measured": True, "crashed": died, "reason": reason, "count": len(events),
+                "by_signature": _by_signature(events), "events": events}
     cfg = _config(tp)
     if cfg is not None and 'name: "android.log"' not in cfg:
-        return {"measured": False, "crashed": False, "reason": None, "count": None, "events": []}
+        return {"measured": False, "crashed": False, "reason": None, "count": None,
+                "by_signature": {}, "events": []}
     wins = _screen_windows(tp) if wins is None else wins
     pids = ({r["pid"] for r in _rows(tp, f"select pid from process where upid in ({_ids(upids)})")}
             if upids else set())
@@ -461,8 +474,8 @@ def crash(tp, upids, platform, src, pkg=None, wins=None):
                "message": c["message"], "log": c["log"], "screen": _screen_at(wins, c["ts"]),
                "pid": c["pid"]} for c in found]
     reason = (events[0]["message"] or events[0]["signature"])[:200] if events else None
-    return {"measured": True, "crashed": bool(events), "reason": reason,
-            "count": len(events), "events": events[:MAX_EVENTS]}
+    return {"measured": True, "crashed": bool(events), "reason": reason, "count": len(events),
+            "by_signature": _by_signature(events), "events": events[:MAX_EVENTS]}
 
 
 def extract_stability(tp, pkg, platform=None):

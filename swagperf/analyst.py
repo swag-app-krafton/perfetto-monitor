@@ -403,7 +403,8 @@ def stability_findings(metrics):
     cr = st.get("crash") or {}
     if cr.get("crashed"):
         n = cr.get("count") or 1
-        sigs = ", ".join(dict.fromkeys(c.get("signature") for c in (cr.get("events") or []) if c.get("signature")))
+        sigs = ", ".join(cr.get("by_signature") or dict.fromkeys(
+            c.get("signature") for c in (cr.get("events") or []) if c.get("signature")))
         out.append({"title": "The app crashed during the run" if n == 1 else f"The app crashed {n} times during the run",
                     "runtime": "unknown", "severity": "high", "kind": "crash",
                     "evidence": sigs or cr.get("reason") or "the process ended on its own",

@@ -314,6 +314,27 @@ class TestStabilityDownstream(unittest.TestCase):
         self.assertIn("crash:app:com.swag.pay:cold", keys)
         self.assertEqual([f["kind"] for f in analyst.stability_findings({"stability": st})], ["crash"])
 
+    def test_signals_count_every_crash_and_anr_past_the_event_cap(self):
+        """A crash loop longer than the event list must not hide another
+        crash kind, nor undercount the loop (review focus 5)."""
+        def build(s):
+            for i in range(stability.MAX_EVENTS + 5):
+                s.java_crash(1000 + i * 20)
+                s.anr(1005 + i * 20, f"a{i}", ANR_SUBJECT)
+            s.java_crash(9000, exc="java.lang.OutOfMemoryError", message="Failed to allocate")
+        st = _session(build)
+        self.assertEqual(len(st["crash"]["events"]), stability.MAX_EVENTS)
+        run = {"id": 1, "app_pkg": "com.swag.pay", "path_kind": "cold", "platform": "android",
+               "stability": st, "breaches": [], "violations": []}
+        sig = {s["key"]: s for s in triage.signals_of(run, [])}
+        self.assertEqual(sig["crash:java.lang.IllegalStateException:com.swag.pay:cold"]["value"], stability.MAX_EVENTS + 5)
+        self.assertEqual(sig["crash:java.lang.OutOfMemoryError:com.swag.pay:cold"]["value"], 1)
+        self.assertEqual(sig["crash:java.lang.OutOfMemoryError:com.swag.pay:cold"]["detail"],
+                         "java.lang.OutOfMemoryError: Failed to allocate")
+        self.assertEqual(sig["anr:INPUT_DISPATCHING_TIMEOUT:com.swag.pay:cold"]["value"], stability.MAX_EVENTS + 5)
+        crash = next(f for f in analyst.stability_findings({"stability": st}) if f["kind"] == "crash")
+        self.assertIn("java.lang.OutOfMemoryError", crash["evidence"])
+
     def test_compare_diffs_anrs_and_crashes(self):
         self.assertEqual(store.METRIC_DIRECTION["anr_count"], "lower")
         self.assertEqual(store.METRIC_DIRECTION["crash_count"], "lower")
