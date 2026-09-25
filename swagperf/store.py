@@ -161,6 +161,10 @@ MIGRATIONS = [
     ("runs", "js_errors", "int"),
     ("runs", "crashed", "int default 0"),
     ("runs", "stability_json", "text"),
+    # F-028: ANRs and every crash, counted for sorting and Compare. Null for
+    # runs recorded before, and where the trace didn't measure them.
+    ("runs", "anr_count", "int"),
+    ("runs", "crash_count", "int"),
     # F-023: an analysis row is either the run's verdict (rules at capture, or
     # the model through CLI `analyse`) or an AI summary written for it later.
     # A summary never replaces the verdict: every verdict reader filters on
@@ -174,9 +178,16 @@ MIGRATIONS = [
 
 def _stability_cols(metrics):
     st = metrics.get("stability") or {}
-    h, e, cr = st.get("hangs") or {}, st.get("errors") or {}, st.get("crash") or {}
+    h, e, cr, a = (st.get(k) or {} for k in ("hangs", "errors", "crash", "anrs"))
+    crashes = cr.get("count") if "count" in cr else (int(bool(cr.get("crashed"))) if cr else None)
     return (h.get("count"), h.get("longest_ms"), e.get("js"), int(bool(cr.get("crashed"))),
-            json.dumps(st) if st else None)
+            a.get("count"), crashes, json.dumps(st) if st else None)
+
+
+def _write_stability(c, rid, metrics):
+    c.execute("""update runs set hang_count=?, longest_hang_ms=?, js_errors=?, crashed=?,
+                 anr_count=?, crash_count=?, stability_json=? where id=?""",
+              (*_stability_cols(metrics), rid))
 
 
 def connect(db=None):
@@ -212,8 +223,7 @@ def record(metrics, *, label=None, git_sha=None, app_version=None,
     rid = cur.lastrowid
     c.execute("update runs set platform=?, simulator=? where id=?",
               (metrics.get("platform") or "android", int(bool(metrics.get("simulator"))), rid))
-    c.execute("""update runs set hang_count=?, longest_hang_ms=?, js_errors=?, crashed=?,
-                 stability_json=? where id=?""", (*_stability_cols(metrics), rid))
+    _write_stability(c, rid, metrics)
     if meta:
         c.execute("update runs set meta_json=? where id=?", (json.dumps({"capture": meta}), rid))
     _insert_steps(c, rid, metrics["steps"])
@@ -559,6 +569,7 @@ METRIC_DIRECTION = {
     "ttff_ms": "lower", "slow_pct": "lower", "janky_pct": "lower",
     "thermal_drift_pct": "lower", "peak_rss_mb": "lower", "rss_growth_mb": "lower",
     "hang_count": "lower", "longest_hang_ms": "lower", "js_errors": "lower",
+    "anr_count": "lower", "crash_count": "lower",
 }
 
 # Metrics that can legitimately be negative. A percentage change across zero is
@@ -709,8 +720,7 @@ def reextract(db=None, extractor=None):
                    json.dumps(m["breaches"]), json.dumps(m["ordering_violations"]),
                    json.dumps(f), json.dumps(mem),
                    m.get("platform") or "android", int(bool(m.get("simulator"))), r["id"]))
-        c.execute("""update runs set hang_count=?, longest_hang_ms=?, js_errors=?, crashed=?,
-                     stability_json=? where id=?""", (*_stability_cols(m), r["id"]))
+        _write_stability(c, r["id"], m)
         fresh[r["id"]] = m
         done += 1
     c.commit(); c.close()

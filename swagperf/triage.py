@@ -114,6 +114,11 @@ def _app_key(run):
     return app if platform == "android" else f"{platform}:{app}"
 
 
+def _slug(s):
+    """A signal key's subject: no whitespace, at most 80 characters."""
+    return re.sub(r"[^A-Za-z0-9_.$-]+", "_", s or "")[:80] or "app"
+
+
 def _where(error):
     """`fn (src/money.ts)` for the first resolved app frame of an error, if any."""
     f = next((f for f in error.get("frames") or [] if f.get("resolved") and f.get("in_app")), None)
@@ -165,12 +170,29 @@ def signals_of(run, regs):
                     "reference_kind": "benchmark" if r.get("reference") == "benchmark" else "baseline",
                     "over_pct": pct, "severity": "high" if (pct or 0) > 25 else "medium"})
     st = run.get("stability") or {}
-    if (st.get("crash") or {}).get("crashed"):
-        out.append({"key": f"crash:app:{app}:{path}", "kind": "crash", "subject": "crash",
-                    "title": "The app crashed during the run", "unit": "",
-                    "value": None, "reference": None, "reference_kind": None,
-                    "over_pct": None, "severity": "high",
-                    "detail": (st.get("crash") or {}).get("reason")})
+    cr = st.get("crash") or {}
+    crashes = cr.get("events")
+    if crashes is None and cr.get("crashed"):     # recorded before crash lists (F-028)
+        crashes = [{"signature": "app", "message": cr.get("reason")}]
+    groups = {}
+    for c in crashes or []:
+        g = groups.setdefault(_slug(c.get("signature")), {"n": 0, "detail": c.get("message")})
+        g["n"] += 1
+    for sig, g in sorted(groups.items()):
+        out.append({"key": f"crash:{sig}:{app}:{path}", "kind": "crash", "subject": sig,
+                    "title": "The app crashed during the run" if sig == "app" else f"The app crashed: {sig}",
+                    "unit": "", "value": g["n"], "reference": None, "reference_kind": None,
+                    "over_pct": None, "severity": "high", "detail": g["detail"]})
+    anr_groups = {}
+    for a in (st.get("anrs") or {}).get("events") or []:
+        g = anr_groups.setdefault(_slug(a.get("type")), {"n": 0, "label": a.get("type_label"),
+                                                         "detail": a.get("subject")})
+        g["n"] += 1
+    for typ, g in sorted(anr_groups.items()):
+        out.append({"key": f"anr:{typ}:{app}:{path}", "kind": "anr", "subject": typ,
+                    "title": f"ANR: {g['label'] or typ}", "unit": "", "value": g["n"],
+                    "reference": None, "reference_kind": None, "over_pct": None,
+                    "severity": "high", "detail": g["detail"]})
     # One signal per error, by its fingerprint: the resolved function it was
     # thrown in (sourcemaps.resolve), stable across builds where a raw Hermes
     # offset is not. Without a source map, by error class.
@@ -248,6 +270,13 @@ def _context(sig, run, prior, screens_of):
         links.append(_link("Step", "/steps", subj))
         if prior:
             links.append(_link(f"Compare #{rid} with #{prior[-1]['id']}", f"/compare?mode=run&a={rid}&b={prior[-1]['id']}"))
+    elif kind in ("crash", "anr", "js_error"):
+        ctx["next_check"] = {
+            "crash": "Open Crashes & ANRs and read the crash log; a fatal JS error just before it points at React Native.",
+            "anr": "Open Crashes & ANRs: the ANR names the screen and what the main thread was doing.",
+            "js_error": "Open Crashes & ANRs for the resolved stack and the screen it happened on.",
+        }[kind]
+        links.append(_link("Crashes & ANRs", f"/crashes?run={rid}"))
     else:
         ctx["runtime"] = STEP_RUNTIME.get(subj)
         ctx["risk"] = RISK_MAP.get("deferred_leak")

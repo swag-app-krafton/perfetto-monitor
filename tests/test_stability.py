@@ -269,13 +269,54 @@ class TestStabilityDownstream(unittest.TestCase):
         rid = store.record(m, device="iPhone 17", db=db)
         row = store.run_row(rid, db=db)
         self.assertEqual((row["hang_count"], row["js_errors"], row["crashed"]), (1, 1, 1))
+        self.assertEqual((row["crash_count"], row["anr_count"]), (1, None))   # iOS: no ANRs
         kinds = {f["kind"] for f in analyst.heuristic(m, [])["findings"]}
         self.assertTrue({"crash", "js_error", "hang"} <= kinds)
         run = {"id": rid, "app_pkg": "com.example.ios", "path_kind": "cold", "platform": "ios",
                "stability": json.loads(row["stability_json"]), "breaches": [], "violations": []}
         keys = {s["key"] for s in triage.signals_of(run, [])}
         self.assertIn("js_error:TypeError:ios:com.example.ios:cold", keys)
-        self.assertIn("crash:app:ios:com.example.ios:cold", keys)
+        self.assertIn("crash:SIGSEGV:ios:com.example.ios:cold", keys)
+
+    def test_android_anrs_and_crashes_are_stored_found_and_signalled(self):
+        def build(s):
+            s.anr(8500, "e1", ANR_SUBJECT)
+            s.java_crash(9000)
+            s.java_crash(15000)
+        st = _session(build)
+        m, _ = _ios(lambda r: None)
+        m["stability"] = st
+        db = os.path.join(tempfile.mkdtemp(), "h.db")
+        rid = store.record(m, device="V2514", db=db)
+        row = store.run_row(rid, db=db)
+        self.assertEqual((row["anr_count"], row["crash_count"], row["crashed"]), (1, 2, 1))
+        findings = {f["kind"]: f for f in analyst.stability_findings({"stability": st})}
+        self.assertEqual(findings["anr"]["severity"], "high")
+        self.assertIn("2 times", findings["crash"]["title"])
+        self.assertIn("Crashes & ANRs", findings["crash"]["recommendation"])
+        run = {"id": rid, "app_pkg": "com.swag.pay", "path_kind": "cold", "platform": "android",
+               "stability": st, "breaches": [], "violations": []}
+        sig = {s["key"]: s for s in triage.signals_of(run, [])}
+        self.assertEqual(sig["anr:INPUT_DISPATCHING_TIMEOUT:com.swag.pay:cold"]["value"], 1)
+        self.assertEqual(sig["crash:java.lang.IllegalStateException:com.swag.pay:cold"]["value"], 2)
+        self.assertEqual(triage._key_scope("anr:INPUT_DISPATCHING_TIMEOUT:com.swag.pay:cold"),
+                         ("com.swag.pay", "cold"))
+        ctx = triage._context(sig["anr:INPUT_DISPATCHING_TIMEOUT:com.swag.pay:cold"], run, [], None)
+        self.assertIn("/crashes", json.dumps(ctx["links"]))
+        self.assertNotIn("risk", ctx)   # not the ordering-violation advice (S-02)
+
+    def test_old_stability_still_signals(self):
+        """stability_json written before ANRs and crash lists (F-028)."""
+        st = {"hangs": {}, "errors": {"events": []}, "crash": {"crashed": True, "reason": "FATAL EXCEPTION: main"}}
+        run = {"id": 1, "app_pkg": "com.swag.pay", "path_kind": "cold", "platform": "android",
+               "stability": st, "breaches": [], "violations": []}
+        keys = {s["key"] for s in triage.signals_of(run, [])}
+        self.assertIn("crash:app:com.swag.pay:cold", keys)
+        self.assertEqual([f["kind"] for f in analyst.stability_findings({"stability": st})], ["crash"])
+
+    def test_compare_diffs_anrs_and_crashes(self):
+        self.assertEqual(store.METRIC_DIRECTION["anr_count"], "lower")
+        self.assertEqual(store.METRIC_DIRECTION["crash_count"], "lower")
 
     def test_unresolved_errors_fall_back_to_their_class(self):
         st = {"errors": {"events": [{"name": "TypeError", "stack": "TypeError: x\n    at a (address at main.jsbundle:1:9)"}]}}
