@@ -99,11 +99,14 @@ Return ONLY valid JSON, no markdown fence, matching exactly:
 def _stability_summary(st):
     if not st:
         return None
-    h, e, cr = st.get("hangs") or {}, st.get("errors") or {}, st.get("crash") or {}
+    h, e, cr, a = (st.get(k) or {} for k in ("hangs", "errors", "crash", "anrs"))
     return {"hangs": {k: h.get(k) for k in ("count", "microhangs", "longest_ms", "total_ms",
                                             "rate_s_per_hr", "startup", "per_screen")},
             "js_errors": {k: e.get(k) for k in ("js", "js_fatal", "by_name", "by_source", "per_screen")},
-            "crashed": bool(cr.get("crashed"))}
+            "anrs": {k: a.get(k) for k in ("measured", "count", "by_type", "per_screen")} if a else None,
+            "crashed": bool(cr.get("crashed")),
+            "crashes": {"count": cr.get("count"),
+                        "signatures": [c.get("signature") for c in (cr.get("events") or [])][:5]}}
 
 
 def build_payload(metrics, regs, baselines, *, run=None, vs_benchmark=None):
@@ -399,12 +402,14 @@ def stability_findings(metrics):
     out = []
     cr = st.get("crash") or {}
     if cr.get("crashed"):
-        out.append({"title": "The app crashed during the run", "runtime": "unknown",
-                    "severity": "high", "kind": "crash",
-                    "evidence": cr.get("reason") or "the process ended on its own",
+        n = cr.get("count") or 1
+        sigs = ", ".join(dict.fromkeys(c.get("signature") for c in (cr.get("events") or []) if c.get("signature")))
+        out.append({"title": "The app crashed during the run" if n == 1 else f"The app crashed {n} times during the run",
+                    "runtime": "unknown", "severity": "high", "kind": "crash",
+                    "evidence": sigs or cr.get("reason") or "the process ended on its own",
                     "architectural_risk": None,
-                    "recommendation": "Open Stability: a fatal JS error just before the end "
-                                      "points at React Native; none points at native code."})
+                    "recommendation": "Open Crashes & ANRs for the crash log. A fatal JS error just "
+                                      "before a crash points at React Native; none points at native code."})
     e = st.get("errors") or {}
     if e.get("js"):
         top = sorted((e.get("by_name") or {}).items(), key=lambda kv: -kv[1])[:3]
@@ -412,8 +417,18 @@ def stability_findings(metrics):
         out.append({"title": f"{e['js']} JS error(s), {e.get('js_fatal', 0)} fatal",
                     "runtime": "hermes_rn", "severity": "high" if e.get("js_fatal") else "medium",
                     "kind": "js_error", "evidence": names, "architectural_risk": None,
-                    "recommendation": "Open Stability for the resolved stack and the screen "
+                    "recommendation": "Open Crashes & ANRs for the resolved stack and the screen "
                                       "each error happened on."})
+    a = st.get("anrs") or {}
+    if a.get("count"):
+        types = ", ".join(f"{k} ×{v}" for k, v in sorted((a.get("by_type") or {}).items(), key=lambda kv: -kv[1]))
+        screens = ", ".join(sorted(a.get("per_screen") or {}))
+        out.append({"title": f"{a['count']} ANR(s): Android declared the app not responding",
+                    "runtime": "unknown", "severity": "high", "kind": "anr",
+                    "evidence": f"{types} on {screens}" if screens else types,
+                    "architectural_risk": None,
+                    "recommendation": "Open Crashes & ANRs: each ANR names the screen and what the "
+                                      "main thread was doing."})
     h = st.get("hangs") or {}
     if h.get("count"):
         out.append({"title": f"{h['count']} hang(s) after the first frame",
@@ -422,7 +437,7 @@ def stability_findings(metrics):
                     "kind": "hang",
                     "evidence": f"longest {h.get('longest_ms')} ms, {h.get('total_ms')} ms in all",
                     "architectural_risk": None,
-                    "recommendation": "Open Stability: each hang names the screen it happened on."})
+                    "recommendation": "Open Frame pacing: each hang names the screen it happened on."})
     return out
 
 
