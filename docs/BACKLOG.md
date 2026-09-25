@@ -394,6 +394,683 @@ phone, and frames can't be measured on it at all.
 
 ---
 
+## Killcam on the swagperf design system
+
+**Tracker:** F-015 (Killcam F-001)
+**Status:** Killcam's half possibly shipped in Killcam `44ec8e0` (2026-09-24, "Rebuild the
+dashboard on the swagperf design system"); a developer or the user confirms. What's left
+here is step 11 of the joint plan under "One tool": taking `kit/`'s generic parts upstream.
+**Raised:** 2026-09-24, when the user asked for Killcam to look and behave like swagperf
+**Killcam:** `~/Documents/killcam`. The dashboard is in `dashboard/`, the wire contract in
+`dashboard/src/api/types.ts` and the API in `docs/API.md`.
+
+### What
+
+Rebuild Killcam's web dashboard from swagperf's design system (`frontend/src/design`), so
+its pages look and behave like swagperf's: the same tokens, type, components, shell
+(sidebar, top bar, page header) and conventions. The panels stay the same, and so do the
+API and what Killcam captures. This is step 1 of F-016.
+
+### Why
+
+The user wants the two tools to become one product (F-016). Today they share nothing on
+screen:
+- Killcam's dashboard is one hand-written stylesheet (`dashboard/src/styles.css`) with its
+  own amber accent and system fonts.
+- It has a hash router and its own stores, and no tests or lint.
+- swagperf's pages are built only from the design system, and a lint rule and a showcase
+  test enforce it (T-003).
+
+If the UI is done first, on the same parts swagperf uses, the merge is wiring rather than
+a second redesign.
+
+### Decisions already taken
+
+Taken in Killcam on 2026-09-24 (Killcam's BACKLOG, "The dashboard rebuilt on swagperf's
+design system"). The user's answers to Q2 and Q7 are still open.
+- **Vendor, don't import.** swagperf's `frontend/src/design` is copied exactly into Killcam's
+  `dashboard/src/design/` by `scripts/sync-design-system.sh` and pinned in
+  `dashboard/design-system.lock` (at `d007f5a`). Killcam wraps its own parts in
+  `dashboard/src/kit/` and never edits `design/`, so "the later merge is a deletion". This
+  replaces the recommendation under Shape of the work to build inside swagperf's
+  `frontend/`. Both product managers now recommend keeping the vendored copy until Q7 is
+  answered.
+- **Fonts are bundled** (Poppins and Zalando Sans Expanded, about 140 KB), because the phone
+  may be offline.
+- **The shell follows swagperf's:** Analyse, Run and Data groups; a session picker with
+  "Follow live"; a Session details dialog in place of the Device page; a phone layout for
+  the in-app window (`?embed=1`).
+- **Wording follows swagperf's rules:** no playful copy, status never by colour alone, a unit
+  on every number.
+- **Two copies, one guard.** swagperf's T-003 lint rule and showcase test guard only
+  swagperf's copy. Killcam T-008 adds a check that flags local edits and drift from the
+  locked commit; swagperf takes `kit/`'s generic parts upstream into `frontend/src/design`,
+  each meeting T-003 (step 11 of the joint plan).
+
+### Shape of the work
+
+- **Where the code lives.** Decide this first (see Open questions).
+  - Recommended: build Killcam's pages inside swagperf's `frontend/` as a lane, with a
+    second build that outputs only the Killcam lane into
+    `killcam-core/src/main/resources/killcam-web`. The phone, Rozenite and
+    `adb forward` keep getting their dashboard from the device.
+  - Copying the design system into the Killcam repo makes two copies that drift, and
+    T-003's lint rule and showcase test would guard only one of them.
+- **Map Killcam's shell onto swagperf's:**
+
+  | Killcam today | swagperf's convention |
+  |---|---|
+  | KILLCAM wordmark, app name, version, build type and device in the top bar | Top-bar title and subtitle, and a session box in the page header, like the run box |
+  | Session selector: Live, saved and crash sessions | One picker, like Run: the one place a session is chosen, with "Follow live" in place of "Follow the latest run" |
+  | "Viewing saved session (read-only)" banner | The run box's "Older run · go to latest" |
+  | Sidebar groups "Session" and "Live app", with icons and count badges | Sidebar groups Analyse, Run and Data, numbered items, two-letter rail codes |
+  | Device panel | A "Session details" dialog like Run details, with "not recorded" gaps and Copy details |
+  | "Watch killcam" from a crash into Replay | Links land on the thing they name: Replay opens at that moment and rings it |
+
+- **Components the design system lacks.** Each goes into `frontend/src/design` as a
+  generic component and onto `/design-system`, as T-003 requires:
+  - a screenshot frame and a replay player (F-012's plan already names `ImageFrame`);
+  - a JSON tree and an HTTP body viewer;
+  - a split view: a list with a detail pane;
+  - a virtualised list, because logs run to thousands of rows;
+  - a stack trace view that highlights the app's own frames;
+  - a key-value editor for prefs, flags and MMKV, and a SQL query box;
+  - a PIN screen and a connection indicator.
+- **Three layouts.** Killcam is shown in a laptop browser, in the phone's in-app window
+  (`?embed=1`) and in the React Native DevTools panel (`?embed=devtools`). swagperf is
+  laptop-first. The design system needs a compact density and a phone layout for the
+  in-app window.
+- **Fonts.** swagperf loads its fonts from Google Fonts when the page opens
+  (`frontend/index.html`). Killcam is served from the phone and has to work without
+  internet, so the fonts must be bundled. That adds to the debug APK's size.
+- **Keep the API unchanged.** `dashboard/src/api/types.ts` stays the wire contract. This
+  step changes only the UI, so `./gradlew :killcam-core:demo` and `npm run mock` still
+  work as test data.
+- **Tests.** Add Killcam's pages to the run skill's `tour`
+  (`.claude/skills/run-perfetto-monitor/`), against Killcam's mock or demo server.
+
+### Watch out for
+
+- **Wording.** swagperf's rules apply to every page Killcam brings:
+  - status is never colour alone (✓ ! ✕);
+  - every number has its unit (B-001);
+  - unmeasured reads "not measured", and missing metadata reads "not recorded";
+  - two signals on one screen never contradict each other (B-002).
+
+  Killcam's playful strings need a decision: "No crashes. GG.", the upper-case "CRASH"
+  and "FATAL" badges, and "killcam" used as a verb.
+- **Colour.** Killcam's accent is amber and its errors are red. In swagperf, KRAFTON red
+  is only for titles and fail has its own crimson, so red can't also be Killcam's brand
+  colour.
+- **The phone window.** It's a WebView on a small screen. Check touch targets, and check
+  load time on a mid-range phone, not only on a laptop.
+
+### Open questions
+
+Merged with Killcam's questions under "One tool", in Killcam's numbering: Q2 and Q7 (where
+the code and the repository live) and Q5 (the name and brand).
+
+---
+
+## One tool: Killcam and swagperf combined
+
+**Tracker:** F-016 (Killcam F-003)
+**Status:** planned jointly with Killcam's product manager on 2026-09-24 (the joint plan
+below); no code yet. Waits on the user's answers to the open questions at the end.
+**Raised:** 2026-09-24, when the user asked to "club" the two tools
+**Killcam:** `~/Documents/killcam`. It is integrated into Swag Pay on an uncommitted
+branch in `~/Documents/swag-pay-killcam`
+(`apps/mobile/composeApp/src/androidMain/kotlin/com/swag/pay/debugtools/KillcamSetup.kt`).
+
+### What
+
+One product for Swag Pay's performance and debugging. swagperf's lanes (Perfetto ·
+Android, Instruments · iOS, Flashlight · Android) and Killcam's panels share one shell,
+with links between them where they describe the same screen or error. This is step 2,
+after F-015.
+
+### Why
+
+Both tools look at the same app through the same markers:
+- Killcam's replay gets its screens from the `SwagTrace` markers that swagperf reads.
+- Killcam's Crashes panel lists the same `SwagErrors` JS error records that swagperf's
+  Stability page reads.
+
+They answer different questions, though:
+- swagperf: is this build slower or heavier than the last? It measures and judges across
+  builds.
+- Killcam: what exactly happened in this session, live or in the moments before a crash?
+
+A developer who sees a JS error on Stability has no way to see what the user did before
+it. A tester who marks a slow screen in Killcam has no way to see what that screen costs.
+
+### Who uses each
+
+| | swagperf | Killcam |
+|---|---|---|
+| Who | A developer on a Mac, with an Android phone over USB or a booted iOS Simulator; the product-manager agent after every run; later CI (`analyse --fail-on`, ADR 0001) | QA on the phone alone (the bubble, a shake, the notification); developers over `adb forward`, Wi-Fi with a PIN, or React Native DevTools; PMs and backend engineers |
+| Build | Whatever is installed. The iOS lane refuses Debug builds. | Debug builds only. Release builds link the no-op. |
+| Unit | A run, kept in `history.db` and compared across builds | A session: live, saved, or saved at a crash, and kept on the phone |
+| Output | A verdict against budgets, a tracker issue, a PR summary | Evidence: a replay, a HAR file, a bug bundle zip |
+
+### Overlap
+
+| Area | swagperf | Killcam | In one tool |
+|---|---|---|---|
+| Crashes | Per run, from the crash log or a fatal signal, on both platforms (F-014) | Fatal and non-fatal JVM crashes with their stacks, and the session saved at the crash, with its replay | Keep both, linked by app version and error name |
+| JS errors | `error:js:` markers and `SwagErrors` records from the trace. Hermes stacks resolved against the build's source map, a fingerprint per crash site, fatal or non-fatal. | The same records, put back together in the app (`KillcamTraceBridge.errorLine`) and recorded with `Killcam.recordError(…, fatal)`, so the fatal flag is kept (fixed about 15:20 on 2026-09-24). The raw stack is kept verbatim and isn't resolved. | One record format tested on both sides (T-005, Killcam T-014). Linked by the `error:js:<source>:<Name>` identity and app version, labelled "same error", not by fingerprint: a debug build's JS comes from Metro, so a release source map never fits it |
+| Hangs | Microhangs and hangs (F-014) | None | swagperf only |
+| Screens and markers | Every screen visit with its duration, sub-screens, the navigation stack, timed `step:` and `action:` spans, counters | Screen starts, instant markers and async action starts only. The bridge skips `nav:` markers and doesn't forward timed spans (`platformTraceBegin`). | Screen names are the key that joins the two |
+| RAM usage per screen | Peak RAM usage and RAM growth per visit | None: its wire contract has no RAM, CPU, frame or hang data | swagperf only; Killcam's screen events link to it |
+| Screenshots | None. F-012 (parked) is a visual regression lane. | On screen changes, around taps and when the screen settles, as evidence | Kept apart. Screenshots cost CPU, so they must never run during a measured trace (F-012's own decision). None of F-012's revisit triggers has fired. |
+| Device and build | Run details: device, device state and app build, with "not recorded" gaps | Device panel: app, device, runtime, and rows the app adds | One details dialog |
+| Live feed | Manual: live markers while recording | Replay and Logs, live | Keep both: Manual traces, Killcam doesn't |
+| Copilot | Rule-based answers over the run history (F-001 adds a local model) | None | Open question Q6. Joint recommendation: nothing from Killcam in v1 |
+| Security | Loopback only. Since T-001 (2026-09-25): a loopback `Host` allow-list, a loopback `Origin` when one is sent, and `X-Swagperf: 1` on every write | Loopback by default, a `Host` allow-list, `X-Killcam: 1` on every write, and a PIN for Wi-Fi sharing | No combined server. The Killcam lane embeds Killcam's own dashboard, so Killcam's rules stay in charge of the phone. swagperf's server only reads link keys; T-001 copied Killcam's rules |
+
+### Shape of the work
+
+- **Navigation.**
+  - Killcam becomes a lane in the top bar's first control, next to Perfetto · Android,
+    Instruments · iOS and Flashlight · Android. swagperf's rule stays: everything to the
+    right of that control follows the lane.
+  - This follows the user's decision on F-008: lanes stay separate behind a switch, not
+    mixed in one view.
+  - In the Killcam lane, the sidebar keeps swagperf's three groups:
+    - **Analyse** (read the session in view): Replay, Network, Logs, Crashes.
+    - **Run** (act on the live app): Mocks, Flags, Remote Config, Actions.
+    - **Data:** Sessions (saved and crash sessions, like History) and Storage.
+    - Device moves into the session details dialog.
+- **Links between lanes.** These are the reason to combine:
+  - Stability → the Killcam sessions with the same JS error, matched by the
+    `error:js:<source>:<Name>` identity and app version.
+  - A Killcam screen event → the Screens page of the latest run that has that screen.
+  - A Screens row → "open a Killcam session on this screen".
+
+  Swag Pay can't be profiled and debugged in the same process (see Watch out for), so
+  links match by screen name, JS-error identity and app version, never by timestamp.
+- **Servers.** Two, and swagperf's never forwards to the phone (see "Agreed with
+  Killcam's product manager").
+  - The on-device server stays, because the phone window, Wi-Fi sharing and Rozenite
+    need it.
+  - The laptop reaches it through `adb forward`, and the Killcam lane embeds Killcam's
+    own dashboard from `127.0.0.1:8090`. Its writes stay on its own origin, so they keep
+    `X-Killcam`, and Killcam's server never has to approve a cross-origin write.
+  - swagperf's server only reads link keys (F-018).
+- **One launcher.** `perfetto_init` sets up the port forward, and `doctor` reports
+  whether Killcam is running in the app on the device by asking its `/api/status` (F-017).
+
+### Agreed with Killcam's product manager
+
+Agreed on 2026-09-24. These are recommendations to the user, not decisions: each waits on
+the open question it names.
+- **Debug builds (Q3, B-009).** swagperf never judges a debuggable build, or a build whose
+  trace carries Killcam's marker, so a build with Killcam's `allowNonDebuggable` is caught
+  too. Every capture refuses such a build unless the capture opts in. An opted-in run is its
+  own kind, *debug build*, and names Killcam when the marker is there. It follows ADR 0002's
+  simulator rules (no budgets, verdict capped at warn, no benchmark, skipped by triage) and
+  never shares a baseline with other runs. The kind is read from the build details recorded
+  at capture and from the trace, so `reextract` keeps it. Killcam's release no-op writes no
+  marker.
+- **Killcam's trace marker (Killcam F-016).** One fixed name, carrying Killcam's version,
+  the pause state, the capture switches, and network conditions as a preset name or
+  `custom`.
+  - It is written at install (`KillcamRuntime.start()`), on every foreground
+    (`onForeground()`), and on every change to pause or network conditions, so warm starts
+    and manual sessions carry it too.
+  - Pause and network conditions change in pure-JVM `killcam-core`, which can't call
+    `android.os.Trace`. So core gets an internal state-change callback that the Android
+    runtime registers. It isn't a `LiveListener`, which would encode every event (Killcam
+    T-005), and the same callback fixes Killcam B-005.
+  - It is a zero-length `beginSection`, with names under 127 characters. There is no public
+    API change.
+  - swagperf reads rule 13 (markers carry only fixed names and outcome classes) as allowing
+    this: build constants and states from a fixed set, never app data. If a developer reads
+    the rule strictly, the version comes out.
+- **Two servers: embed, never forward (Q1).** The Killcam lane shows Killcam's own dashboard
+  (F-017, Killcam F-017). A forwarder would hand Killcam's loopback trust (Killcam T-001) to
+  anything that reaches `:8787`, and forwarding `/api/live` would route payment bodies
+  through swagperf's server.
+- **Link keys (F-018).**
+  - swagperf's server may GET `/api/sessions`, `/api/crashes` and `/api/info` only, when a
+    page is viewed.
+  - It keeps session ids, screen names (`SessionSummary.screens`, added by Killcam F-018),
+    the JS-error identity and the app version, and drops the rest.
+  - It never calls `/api/timeline` or `/api/sessions/{id}`, which hold bodies, logs and tap
+    text. It never writes, stores nothing in `history.db`, and gives the Copilot nothing.
+- **Errors join on identity, not fingerprint.** The join is on `error:js:<source>:<Name>`
+  plus the app version, and the link reads "same error", never "same crash site". A debug
+  build loads its JS from Metro, so a release source map never fits it, and F-014 refuses a
+  map from another build.
+- **Killcam's cost (Killcam F-004).** It is measured as two states, without and with
+  Killcam, as opted-in stress tests (`-n 10`) that record network conditions from the
+  marker. Pausing isn't "off": it keeps starting logcat every 1 s, waking the main thread
+  every 2.5 s and serialising request bodies. So swagperf gets no pause switch (Q9).
+
+### Joint plan
+
+⛔ = must land before `killcam-integration` merges into Swag Pay. Killcam's IDs share
+numbers with swagperf's, so they are always prefixed "Killcam".
+
+| # | Owner | swagperf | Killcam | Title | Priority | Depends on | Notes |
+|---|---|---|---|---|---|---|---|
+| 1 ⛔ | swagperf | B-009 | Other trackers (F-004) | A debuggable or Killcam build is never judged: refused unless the capture opts in, then labelled | P1; P0 once `killcam-integration` merges | Q3 | Refusing needs only the debuggable flag (d43fe8a). Naming Killcam needs step 3. Its own baseline. |
+| 2 ⛔ | swag-pay-killcam | — | T-007 | Swag Pay's `KillcamTraceBridge` out of release builds | P1 | — | **Killcam.** Whether it blocks the merge is the developer's call. |
+| 3 | Killcam | — | F-016 | Killcam names itself in every trace of its build | P1 | — | **No-op:** none. **Contract:** none. See "Killcam's trace marker" above. |
+| 4 | swag-pay | T-005 | T-014 | One `SwagTrace` and `SwagErrors` definition, one shared fixture | P2 | — | Pins the `error:js:` identity. Land it before the bridge is committed. |
+| 5 | Killcam | — | F-004 | What Killcam costs Swag Pay: without and with it, as stress tests (`-n 10`) | P1 | 1, 3 | Each run records network conditions. The pause half is dropped (Q9). |
+| 6 | swagperf | T-001 | — | Origin and Host checks, copying Killcam's rules | P0 | — | Before step 9. |
+| 7 | Killcam | — | F-017 | Killcam's dashboard can be embedded in swagperf | P2 | Q1 | **Security:** `frame-ancestors` loopback only. |
+| 8 | swagperf | F-017 | Other trackers (F-003) | Killcam lane: the embed, `perfetto_init`'s port forward, and `doctor` via `/api/status` | P2 | 7; the lane-switch bug (TESTING-PLAN IOS-D7, S-09) | A fourth lane in the top bar's first control. |
+| 9 | swagperf | F-018 | Other trackers (F-003) | Links by screen name, JS-error identity and app version | P2 | 4, 6, 8, 10; Killcam T-001 | Read-only GET of three endpoints; nothing stored. |
+| 10 | Killcam | — | F-018 | Crashes and screens link out to swagperf; sessions list their screens | P2 | 4, 8 | **Contract:** `SessionSummary.screens`, empty for older sessions; `types.ts`, `Models.kt`, API.md and the mock server change together. |
+| 11 | both | F-015 | T-008 | One design system: a lock check in Killcam, and `kit/`'s generic parts upstream in swagperf | P2 | Q2, Q7 | Parts taken upstream meet T-003. |
+| 12 | swagperf | F-016 | F-003 | One tool | P2 | 1–11; Q5, Q7 | The umbrella. |
+
+### Watch out for
+
+- **T-001 before F-018.** swagperf's server reads Killcam's link keys. Until T-001 lands,
+  any website open in the browser could read them back through it. Forwarding was dropped
+  for a stronger form of the same reason: through a forwarder, any website could change
+  the phone (mocks, flags, prefs, SQL writes, file deletes and actions). Killcam blocks
+  this today. T-001 should copy Killcam's rules. Done 2026-09-25: T-001 copied them (a loopback
+  `Host`, a loopback `Origin` when sent, and `X-Swagperf: 1` on every write).
+- **Measuring Killcam by mistake (B-009).** Killcam installs first in
+  `Application.onCreate` and takes screenshots on screen changes and taps. A swagperf run
+  of that debug build would measure that work too.
+- **Two readers of one format.** `SwagTrace` and `SwagErrors` now have two readers.
+  Killcam's bridge sees only some of the markers, and until T-005 the `error:js:` identity
+  it passes to Killcam is whatever the uncommitted bridge sends. Keep one definition in
+  `swag-pay` and test both readers against it (T-005, Killcam T-014).
+- **Payment data.** Killcam captures request and response bodies, up to 128 KB each and
+  24 MB in total. Don't copy them into `history.db`. The Copilot, and any model, must
+  never see bodies or screenshots: the same boundary swagperf keeps for traces. swagperf
+  never calls `/api/timeline` or `/api/sessions/{id}`, which hold bodies, logs and tap
+  text (Killcam B-003).
+- **Nothing to show yet.** Swag Pay runs on `FakeMobileRepository`, and the integration
+  adds no `KillcamInterceptor`. Network and Mocks stay empty until the app makes real
+  HTTP calls through a client that has the interceptor. React Native `fetch` needs its
+  own client factory.
+- **Lane switching.** Switching lanes is suspected of losing the Android app filter
+  (TESTING-PLAN IOS-D7, S-09). A fourth lane would make that worse, so settle it first.
+
+### Open questions (the user's call)
+
+These are merged with Killcam's open questions and use Killcam's numbering. Killcam's Q8,
+the package name, is Killcam's alone. Both product managers agree on every recommendation
+below. When the user answers one, record the answer and its date in the items it blocks,
+in both trackers, and remove it here.
+
+| # | Question | Blocks | Joint recommendation |
+|---|---|---|---|
+| Q1 | One server or two? | F-016, F-017, F-018; Killcam F-003, F-017 | Two. The Killcam lane embeds Killcam's own dashboard; swagperf's server only reads link keys and never forwards. |
+| Q2 | Where does the shared dashboard code live? | F-015; Killcam F-001, F-003, T-008 | Keep Killcam's vendored copy until Q7 is answered. `kit/`'s generic parts go upstream into swagperf's design system. |
+| Q3 | May swagperf capture debug builds at all? | B-009; Killcam F-004 | Only when the capture opts in, as its own labelled kind that is never judged (see "Agreed with Killcam's product manager"). |
+| Q4 | Does the in-app window stay Killcam-only? | F-016; Killcam F-003 | Yes. The phone can't reach the laptop, so it can show only what the phone holds. |
+| Q5 | What is the combined product called, and whose brand does it wear? | F-016; Killcam F-003 | Decide once the links (F-018, Killcam F-018) are in use. |
+| Q6 | May the Copilot read Killcam sessions, and what may it see? | F-001, F-016; Killcam F-003 | Nothing in v1. Later, link keys only: never bodies, headers, logs or screenshots. |
+| Q7 | Does Killcam stay in its own repository? | F-015, F-016; Killcam F-003 | Decide once the links are in use. Until then it stays. |
+| Q9 | Drop "let swagperf pause Killcam during a capture" from Killcam F-004? | Killcam F-004 | Yes. Pausing isn't "off", and a pause switch would treat a Killcam build as a performance run. |
+
+For a developer, not the user:
+- Does Killcam T-007 (the bridge runs in release builds) block the `killcam-integration`
+  merge? Both product managers propose that it does.
+- How does Killcam T-001 close loopback trust? If it adds a per-install secret, F-018's
+  read must carry it.
+- Were the Android runs behind P-001–P-004 debuggable builds? Their Run details would say
+  (B-009).
+
+---
+
+## Camera performance: Swag Pay's scanner
+
+**Tracker:** B-010, F-019, F-020, F-021, F-022, and the `camera:` family in T-005. Killcam's
+side: Killcam F-019, Killcam F-020, Killcam T-015, and the `camera:` family in Killcam T-014.
+**Status:** planned jointly with Killcam's product manager on 2026-09-25; no code yet. The
+user answered Killcam Q10, Killcam Q11 and Q-D on 2026-09-25 (see "Answered by the user");
+the open questions at the end still wait on the user. **Parked by the user on 2026-09-25**
+(F-019–F-022 and the camera part of T-005 are `backlog`): "Just keep those as backlog tasks,
+to be done after we have another app which will be the focus". See "Decisions already
+taken" and "Revisit when". B-010 is not parked (see Joint order).
+**Raised:** 2026-09-25, when the user asked for camera-specific performance logs for Swag
+Pay's scanner, in Killcam and in swagperf: "camera first frame, time to process each frame,
+time to resolve a QR, memory consumption during camera, any memeory leaks".
+**App code:** `~/Documents/swag-pay/apps/mobile/composeApp/src/`: `commonMain/.../camera/`
+(`CameraHomeScreen.kt`, `CameraModels.kt`), `androidMain/.../camera/CameraPlatformSurface.android.kt`
+and `iosMain/.../camera/CameraPlatformSurface.ios.kt`.
+
+### What
+
+Five measurements of the QR scanner on Swag Pay's Home screen, on each lane where the
+platform allows them:
+
+| Metric | Android | iOS |
+|---|---|---|
+| Camera first frame | Each open, from Home's mount (the scanner's first composition) to the first analysed frame (`camera:open`), on every mount, as the user asked on 2026-09-25. At startup, see B-010. | Not measured on the Simulator, which has no camera (`extract.py:516`). On a physical iPhone, once that lane exists: `configureAndStart` to the first sample buffer. |
+| Time to process each frame | ML Kit's decode time per analysed frame (`camera:decode`): count, first decode, p50, p90 and max in ms. | Not measurable. `AVCaptureMetadataOutput` decodes inside AVFoundation, and the app sees only a detection. Changing the decoder is the user's call, not instrumentation. |
+| QR resolve time | Code found → validated (`camera:qr_found` → `action:qr_validate_*`), and found → Pay screen shown (→ `screen:Pay#compose`). Also, for every QR registered, as the user asked on 2026-09-25: first frame → QR found and Home's mount → QR found (`camera:open` end or start → `camera:qr_found`). Those two measure the tester's aim unless a test QR is in view from the start (Q-E). | The first two, on a physical iPhone, from the metadata callback. |
+| RAM usage while the camera is open | `mem.rss`, `mem.rss.anon` and `mem.rss.file` before `camera:open`, the peak while open, and after `camera:close`. | Not measured on the Simulator. On a physical iPhone, Activity Monitor ("iOS lane beyond the simulator", item 1). |
+| Leaks | A signal from RAM usage across N open/close cycles in one process (F-021); proof from Java heap dumps (F-022). | Not planned. Instruments' Leaks would be a later spike. |
+
+Killcam shows the scanner's events (camera states, failures, scan outcome classes) in its
+sessions and links to swagperf's Camera page. Every judged number and every RAM figure is
+swagperf's. Killcam also shows a timing summary per camera open and per QR registered,
+labelled as a debug-build figure, with no RAM usage figures and no budgets; swagperf never
+reads it. That is the user's answer to Killcam Q10 on 2026-09-25.
+
+### Why
+
+- **Home is the scanner, and startup ends on it, yet no real run has measured it.**
+  - The startup model ends at `step:camera_open` → `step:first_qr_decode` (`budgets.py:18-21`,
+    budgets of 180 ms and 120 ms at `:33-34`).
+  - The app emits only instant milestones, so every device run falls back to Android's
+    launch phases and is judged against the 420 ms camera-frame budget with a number that
+    ends before the camera frame (B-010).
+- **How the scanner works today** (read from the code on 2026-09-25):
+  - **Android.** CameraX 1.6.1 Preview and ImageAnalysis at 1280×720, 15–30 fps
+    (`CameraPlatformSurface.android.kt:203-229`), and ML Kit barcode scanning 17.3.0.
+    - The analyser decodes at most one frame per 250 ms and closes the rest unread
+      (`:240-246`, `:337`).
+    - A repeated value is ignored for 1,500 ms (`:262`, `:338`).
+    - The value is posted to the main thread (`:265`), where `QrValidator.validate` emits
+      `action:qr_validate_<class>` without the value (`CameraModels.kt:26-43`).
+  - **iOS.** `AVCaptureMetadataOutput` decodes QR codes (`CameraPlatformSurface.ios.kt:212-218`).
+    The video output is used only for the first frame and then unhooked (`:269-277`).
+  - **The 10 s "closed" scanner state is visual only.** The camera and the decoder stay on
+    (`CameraHomeScreen.kt:112-116`; `enabled = true` at `:239`).
+- **A trace already shows the camera without new markers.** Run #1 was recorded with the
+  manual config, which has no `camera` atrace category, yet CameraX's own slices arrive
+  through `atrace_apps`. Across 5 Home visits it has:
+  - 5 × `CameraId-0#openCamera` (average 32.59 ms);
+  - 5 × `CameraDevice-0#createCaptureSession` (average 143.35 ms);
+  - 5 × `CX:bindToLifecycle`;
+  - 242 `android.media.ImageReader#postEventFromNative` frame events.
+- **Perfetto has no camera module in the version swagperf uses.** In the trace processor
+  swagperf uses (v49), `INCLUDE PERFETTO MODULE android.camera` fails. It has
+  `android.memory.heap_graph.*`, `android.memory.dmabuf`, `android.memory.process` and
+  `android.gpu.memory`.
+
+### Shape of the work
+
+- **Markers (F-019, built by Swag Pay).** Fixed names and outcome classes only.
+
+  | Marker | Shape | Notes |
+  |---|---|---|
+  | `camera:open` | Async, new cookie | From Home's mount, on every mount, to the first analysed frame, as the user asked on 2026-09-25. The mount is the scanner's first composition, where `session.start()` is called from the `AndroidView` update block (`:123-128`); that block is composed only once camera permission is granted (`:123`), so a permission prompt is never inside an open. Also from CameraX's restart after background, where Home doesn't remount (agreed earlier). Async because it runs from the main thread to the analysis executor. `start()` returns early while `binding` is true (`:184`), and `firstFrameDelivered` never resets today (`:156`, `:236-239`), so both need handling. |
+  | `camera:decode` | Async, its own cookie | From `scanner.process` to `addOnCompleteListener` (`:258-274`). At most one in flight (`STRATEGY_KEEP_ONLY_LATEST`, closed on complete) and at most one per 250 ms. |
+  | `camera:qr_found` | Instant, no value | When a value is accepted (`:262-265`). |
+  | `camera:open_failed#denied\|unavailable\|closed` | Instant | `denied` and `unavailable`: `:72`, `:108`, `:196`. `closed`: the camera closed before its first frame; the app ends `camera:open` at close and emits this, and both tools read that open as "no first frame", never as a duration. Proposed by swagperf and agreed with Killcam's product manager on 2026-09-25: an unfinished `camera:open` followed by the next open, with the same name and cookie, can't be paired reliably. |
+  | `camera:close#dispose\|background\|permission` | Instant, once per open | From `stop()`/`close()` and on ON_STOP / `applicationWillResignActive`. Added by Killcam's product manager: Killcam's bridge needs an end to summarise an open, and swagperf reads "RAM usage after" from it, because the camera stops on background while Home stays the screen. |
+  | Existing `action:qr_validate_<class>`, `screen:Pay#compose`, `step:first_usable_camera_frame` | Unchanged | |
+
+  - **Why a new prefix.**
+    - `_extract` reads every `step:%` slice as a budgeted startup step (`extract.py:461-507`).
+    - `action:` feeds the Screens action table and its 200-row action timeline
+      (`screens.py:344-395`), and Killcam's bridge forwards action starts.
+    - Four decodes a second would flood both tools.
+  - **iOS later.** `camera:open` needs a new async signpost family in `swagsignpost.def`
+    and `convert_ios.ASYNC_FAMILIES` (`convert_ios.py:39`). Instants and counters already
+    convert (`:271-279`).
+- **Metrics (F-020, swagperf).** A module like `stability.py`, stored with the run.
+  - **Opens and decodes:** `select s.ts, s.dur from slice s join process_track pt on
+    s.track_id = pt.id where s.name = 'camera:open' and pt.upid in (<app upids>)`.
+    - Async slices sit on process tracks, as screen visits do (`screens.py:95-107`).
+    - A slice that never closed (`dur = -1`) counts as "no first frame", never as a
+      duration.
+    - So does a `camera:open` that ends with a `camera:open_failed#closed` instant.
+    - Percentiles are computed in Python, as `store.stress_stats` does.
+  - **RAM usage:** the `mem.rss` and `mem.rss.anon`/`.file` counters from
+    `process_counter_track`, scoped to the app's process as `screens.py:156-162` does, over
+    `camera:open` → `camera:close`.
+  - **Frames delivered:** `ImageReader#postEventFromNative` in the app's threads, set
+    against `camera:decode`.
+  - **Per scan.** The user asked on 2026-09-25: "when it registers a QR, it should log the
+    metrics". For swagperf, that is one row per `camera:qr_found` in the run's camera data,
+    shown on the Camera page and printed by the CLI. Each row has:
+    - Home's mount → first frame for its open;
+    - first frame → QR found;
+    - Home's mount → QR found;
+    - QR found → validated;
+    - QR found → Pay screen shown;
+    - decodes so far in the open, and decode p50, p90 and max so far, in ms;
+    - the outcome class.
+  - **Dashboard:** a Camera page in both lanes, plus Compare rows and the CLI.
+- **Cycle test (F-021, swagperf).** One trace across N open/close cycles in one process.
+  - The phone is driven over adb: raw taps, as the Maestro proof of concept does on the
+    vivo, or background/foreground (Q-C).
+  - RAM usage is read at the same point in every cycle, the first cycle is skipped as a
+    warm-up, and the result is a trend in MB per cycle.
+  - A sustained-scan mode on Home only reuses thermal drift (`extract.py:383-409`: 1 s
+    skipped, at least 120 frames, one screen). It also records decodes and RAM usage while
+    the scanner looks closed, since the camera stays on then.
+- **Heap dumps (F-022, swagperf, with Swag Pay's manifest change).**
+  - A separate config with `android.java_hprof` for `com.swag.pay`.
+  - After the first and last cycle, count reachable camera classes: `select c.name,
+    o.graph_sample_ts, count(*), sum(o.self_size) from heap_graph_object o join
+    heap_graph_class c on o.type_id = c.id where o.upid in (…) and o.reachable group by 1, 2`.
+  - The class summary tree comes from `android.memory.heap_graph.class_summary_tree`.
+  - **The build (Q-D, answered 2026-09-25).** Swag Pay builds a separate profileable
+    variant of the release build (`<profileable android:shell="true"/>`); the store release
+    stays unchanged. Killcam's constraints on it, also recorded in Killcam T-007:
+    - it depends on `killcam-no-op` like release. `releaseImplementation` doesn't apply to
+      a new build type, so the variant needs its own no-op dependency or it won't compile;
+    - it gets T-007's release stub of the bridge;
+    - it carries no LeakCanary.
+  - swagperf tells the variant apart from the trace: `package_list.profileable_from_shell`
+    (in trace processor v49; run #1's `com.swag.pay` reads 0). A heap-dump run refuses a
+    build that isn't profileable. Whether every other run also uses the variant is Q-H.
+- **Capture config.**
+  - **Cold capture** (`capture.py:9-32`): unchanged. It already has the `camera` category
+    and a 131,072 KB buffer.
+  - **Manual capture:** don't add `camera` back. It produced 2.2M camera-hardware slices in
+    a 4-minute session, and removing it along with other unused sources cut the file from
+    ~230 to ~53 MB a minute (`capture.py:388-395`).
+  - **Spike before adopting either:** event-driven RAM usage (`kmem/rss_stat`) and the
+    dmabuf events for camera buffers. Measure each on the V2514 first: MB per minute, and
+    `tracing_lost` still passing.
+- **Derived runs (competitors).** Run #2 (`money.super.payments`, cold, 5.0 s, V2514) shows:
+  - the app's own CameraX slices (`CX:bindToLifecycle-internal`, `CX:unbindAll`) and 53
+    `ImageReader` events, but none of Swag Pay's `CXCP#…` or `CameraId-0#…` names;
+  - camera service and vendor HAL slices (`CameraHal::openSession` 8.85 ms,
+    `CameraHal::configureStreams` 2 × 79.5 ms average), and vivo-only QR modules in
+    `camerahalserver`.
+
+  What that gives a derived run:
+  - **Derived, labelled so:** camera open, from `CX:bindToLifecycle*` to the first
+    `ImageReader` event in the app's own threads, and RAM usage over it. `ImageReader`
+    isn't camera-only, so the figure is an estimate. An app on raw Camera2 or its own
+    camera stack gets "not measured".
+  - **Not measured:** decode time and QR resolve, because the decoder's work isn't named
+    in the trace. Leak proof isn't possible either, because another app can't be
+    heap-dumped.
+  - **Never attributed:** camera service slices can't be tied to a client app by name.
+  - **Budgets:** Swag Pay's budgets are never applied to another app (design rule 2;
+    `extract.py:213-225`).
+- **Budgets.** Existing, never checked on a device: time to first camera frame 420 ms,
+  `step:camera_open` 180 ms and `step:first_qr_decode` 120 ms. Candidates, for the user to
+  set (Q-B):
+  - first frame when the camera reopens on a visit;
+  - decode p90 per frame;
+  - QR found → Pay screen shown;
+  - RAM added while the camera is open;
+  - RAM kept per cycle.
+
+  None until a 10-session baseline exists on the V2514. Until then, camera metrics show
+  values and raise no triage signals.
+
+### Agreed with Killcam's product manager
+
+Agreed on 2026-09-25. These are recommendations to the user, not decisions.
+
+1. **The `camera:` family**, built by Swag Pay (F-019), including Killcam's
+   `camera:close#dispose|background|permission`.
+2. **Ownership.** B-010 (P0), F-020, F-021 and F-022 are swagperf's. There are no camera
+   budgets until a 10-session baseline exists.
+3. **The decoded QR value is never recorded** in markers, in Killcam or in swagperf. Only
+   the outcome class is.
+4. **Killcam shows no RAM usage figures for the camera.** Its Java and native heap row is
+   never camera evidence, because it includes Killcam's own buffers.
+5. **`camera:decode` is never forwarded to Killcam as one event per frame.** T-005 (Killcam
+   T-014) gains the `camera:` family and its fixture, and says so.
+6. **Links.** Camera events in Killcam link to swagperf's Camera page by screen and app
+   version, never by timestamp. This is a later extension of F-018 and Killcam F-018, not
+   a new item.
+
+Killcam's own items:
+- **Killcam F-019.** The bridge forwards the `camera:` family to Killcam's timeline, plus a
+  per-open summary if Q10 is yes. It also flags "camera still delivering frames after
+  `camera:close`". Confirmed on 2026-09-25 (Killcam Q10 answered): for every QR
+  registered, a timeline summary and a Logs line (tag `camera`), and a final summary at
+  `camera:close`, labelled as a debug-build figure, with no RAM usage figures.
+- **Killcam F-020.** Confirmed on 2026-09-25 (Killcam Q11 answered yes). LeakCanary in Swag Pay's debug build only (Killcam Q11), shown as a
+  non-fatal `leak:<class>` with class and field names only. It never touches swagperf's
+  runs.
+- **Killcam T-015.** Whether Home's replay frames contain the live preview.
+
+None of these clashes with swagperf's items.
+
+### Joint order
+
+Nothing here has to land before `killcam-integration` merges. Killcam's IDs share numbers
+with swagperf's (F-019 and F-020 exist in both), so they are always prefixed "Killcam".
+
+| # | Owner | swagperf | Killcam | Title | Depends on |
+|---|---|---|---|---|---|
+| 1 | swagperf | B-010 | — | Startup judged against the camera-frame budget with a number that ends before the camera frame (P0) | Q-A for the fix; independent |
+| 2 | swag-pay | T-005 | T-014 | The `camera:` family and fixture in the one `SwagTrace` definition | — |
+| 3 | swag-pay | F-019 | — | Camera markers, Android first; the iOS `camera:open` signpost family later | 2 |
+| 4 | swagperf | F-020 | — | Camera metrics and the Camera page | 3, B-009, B-010 |
+| 5 | Killcam | — | F-019 | The bridge forwards the `camera:` family, with a summary per open and per QR registered (Q10 answered 2026-09-25) | 2, 3, Killcam T-007 |
+| 6 | swagperf | F-021 | — | Camera cycle test and the leak signal | 4, Q-C |
+| 7 | Killcam | — | F-020 | Leaks in debug builds through LeakCanary | Killcam Q11 answered yes on 2026-09-25; independent of 4–6 |
+| 8 | swagperf | F-022 | — | Heap-dump runs in a profileable release variant | 6; Swag Pay's profileable variant (Q-D answered 2026-09-25) |
+
+Killcam T-015 is independent.
+
+Parked on 2026-09-25: steps 2 (the camera part only) to 8 wait for the user to bring the
+camera work back. Step 1, B-010, stays open: it is wrong data shown as right today, not
+camera work the user set aside. Killcam T-015 also stays open on Killcam's side.
+
+### Decisions already taken
+
+Settled before the work was parked, so it doesn't restart from zero:
+- **Prefix and markers.** The `camera:` prefix, not `action:` or `step:`, with the markers
+  in the table above:
+  - `camera:open` from Home's mount on every mount, and from CameraX's restart after
+    background, to the first analysed frame;
+  - `camera:decode`, `camera:qr_found` and `camera:open_failed#denied|unavailable|closed`;
+  - `camera:close#dispose|background|permission`, once per open.
+- **Payment data.** The decoded QR value is never recorded anywhere; only its outcome
+  class is.
+- **Killcam's side** (the user's answers to Killcam Q10 and Q11):
+  - Killcam shows timing summaries per open and per QR registered, labelled as debug-build
+    figures. It shows no RAM usage figures and no budgets, and swagperf never reads them.
+  - LeakCanary goes in the debug build only.
+  - `camera:decode` is never forwarded to Killcam as one event per frame.
+- **Links.** Camera events link between the tools by screen and app version, never by
+  timestamp.
+- **Heap dumps.** They run on a separate profileable variant of the release build (Q-D),
+  with Killcam's three constraints on it.
+- **Per-scan metrics.** swagperf gives one row per QR registered (F-020).
+- **Budgets.** None until a 10-session baseline exists.
+
+### Revisit when
+
+- another app is integrated with Killcam and the user makes it the focus (the trigger
+  agreed with Killcam's product manager, who parked Killcam F-019 and Killcam F-020 on
+  the same trigger). The user then decides which app the camera work targets (Swag Pay's
+  scanner, the new app's, or both), and the scanner code is read again first: the line
+  references here are from 2026-09-25;
+- the user asks.
+
+### Watch out for
+
+- **A leak is never claimed from one trace.**
+  - Run #1's RAM growth (414.4 MB) covers startup and every screen of a manual session.
+  - Per-visit growth on the Screens page is the highest reading minus the lowest inside
+    one visit, not what the visit left behind (`screens.py:171-176`).
+  - One cycle's before and after moves with garbage collection, ML Kit's first load,
+    CameraX's process-wide provider and the file cache.
+  - Stress tests can't show a leak, because each session is a new cold process.
+- **RAM sampling is coarse.** process_stats polls every 1,000 ms on cold captures and
+  500 ms on manual ones (`capture.py:27`, `:429`); run #1 has 39 `mem.rss` samples over
+  19.0 s. RAM usage for the open itself is "not measured" at that resolution. Camera
+  buffers (gralloc/dmabuf) may not show in the app's RSS at all.
+- **Preview smoothness isn't measured.** The camera preview (PreviewView in PERFORMANCE
+  mode, `:164`) is drawn outside `Choreographer#doFrame`. Frame metrics cover the Compose
+  UI around it.
+- **Heap dumps need the right build.**
+  - The V2514 runs a user build (`user/release-keys`), so a dump needs a profileable or
+    debuggable app. Swag Pay's manifest has neither, and a debuggable build is never
+    judged (Q3).
+  - Class names are readable only while release keeps `isMinifyEnabled = false`
+    (`composeApp/build.gradle.kts:102`).
+  - LeakCanary (Killcam F-020) must stay in the debug build only, so it is never in a
+    measured build.
+- **The profileable variant's application id.** swagperf keys the catalogue, budgets,
+  baselines and the instrumented flag on the package name. Keeping `com.swag.pay` puts the
+  variant's runs in Swag Pay's series; a new id needs a catalogue entry, and its runs form
+  a series of their own.
+- **Run #1 was a debuggable build.** Its trace's `package_list` has `debuggable = 1` for
+  `com.swag.pay` (Run details had not recorded it). So the only Swag Pay run in the history
+  is a debug build's numbers (B-009). The B-010 fault is in the extraction logic and holds
+  for any build.
+- **Payment data.** A decoded QR is a UPI payload (payee VPA, name, amount). Markers carry
+  none of it (`CameraModels.kt:31-32`), and route names must stay fixed, like `Pay`
+  (`AppRoute.kt:91`). `onPayScanned` opens a hard-coded payee today (`AppShell.kt:233`);
+  keep the trace name fixed when it's wired to the scanned value.
+- **Killcam builds.** A camera run of a Killcam build would include Killcam's screenshots
+  on screen changes and its logcat polling. F-021 and F-022 inherit B-009's refusal.
+
+### Answered by the user
+
+On 2026-09-25, to Killcam's product manager. The user's words, verbatim: "With Q10: I agree
+with your recommendation / Q11: Yes, do it / Create a flavor for the release build that
+remains profilable / On home page mount/render, the camera should auto start, and the time
+to first frame should be captured / Also when it registers a QR, it should log the metrics"
+(line breaks shown as " / ").
+
+- **Killcam Q10** (does Killcam show camera timings from debug builds?): Killcam's
+  recommendation. Killcam shows a summary per camera open and per QR registered,
+  labelled as a debug-build figure, with no RAM usage figures and no budgets, and swagperf
+  never reads it. swagperf's recommendation (events only) was not taken. Killcam F-019 is
+  confirmed.
+- **Killcam Q11** (LeakCanary in Swag Pay's debug build?): yes. Killcam F-020 is confirmed.
+- **Q-D** (a profileable build for heap dumps?): yes, as a separate profileable variant
+  of the release build, built by Swag Pay; the store release stays unchanged. It unblocks
+  F-022.
+- **Home's mount → first frame, on every mount, and metrics on every QR registered:**
+  new requirements, recorded in F-019 and F-020 and above.
+- **Q-A stays open.** The words ask for time to first frame on every Home mount. They
+  don't say where swagperf's startup ends, and the product-manager skill doesn't let a
+  question be answered by inference.
+
+### Open questions (the user's call)
+
+Q-F from swagperf's draft became Killcam Q10. When the user answers one, record the answer and
+its date in the items it blocks, in both trackers, and remove it here.
+
+Parked with the camera work on 2026-09-25: Q-B, Q-C, Q-E, Q-G and Q-H stay recorded but wait
+until the user brings the work back. Q-A stays live, because B-010's full fix needs it.
+
+| # | Question | Blocks | Recommendation |
+|---|---|---|---|
+| Q-A | Should Swag Pay's startup end at the first usable camera frame, which is what the 420 ms metric is named after? Or at the first QR decode, as `budgets.py:18-21` says? The second can't be measured on a cold start without a QR in view. The user's 2026-09-25 words ask for Home's mount → first frame on every mount, but don't say where startup ends. | B-010 | The first usable camera frame. First QR decode becomes a camera metric (F-020). |
+| Q-B | What budget numbers do the camera candidates get? Do 180 ms (`camera_open`) and 120 ms (`first_qr_decode`) stay, and do they apply when the camera reopens? | F-020 | Set after a 10-session baseline on the V2514; none before. |
+| Q-C | What is one cycle? Tab away from Home and back (runs `close()`, the path most likely to leak) or background and foreground (the session is kept)? How many cycles? Raw adb taps per device, or Maestro (F-012, parked)? | F-021 | Both kinds of cycle, raw adb taps, as the Maestro proof of concept does on the vivo. F-012 stays parked unless the user brings it back. |
+| Q-E | Should there be a fixed rig with a printed test UPI QR (a fake VPA) for QR-resolve runs? | F-020, F-021 | Yes, for camera ready → first code found. Hand-held, that figure measures the tester's aim. |
+| Q-G | Is "not measured" on iOS acceptable until the physical-iPhone lane exists, with no per-frame decode timing on iOS unless the app changes its decoder? | F-019 (iOS half), F-020 | Yes. |
+| Q-H | Should every swagperf run of Swag Pay use the profileable release variant, or only heap-dump runs (F-022)? | F-020, F-021, F-022 | Heap-dump runs only, until a 10-session stress test of each build on the V2514 shows the variant starts and runs like the store release. Then the user decides. |
+
+For a developer, not the user:
+- Is the scanner meant to keep the camera and decoder running while it looks closed
+  (`CameraHomeScreen.kt:112-116`, `:239`)? F-021's sustained-scan mode measures it; neither
+  tracker owns Swag Pay's own bugs.
+- Was run #1's build debuggable? Run details doesn't record it (B-009). Answered from the
+  trace on 2026-09-25: yes (`package_list.debuggable = 1`).
+
+---
+
 ## AI run summary, and a benchmark comparison
 
 **Tracker:** F-023, F-024

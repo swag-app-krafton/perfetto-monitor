@@ -195,6 +195,7 @@ Parked work is a tool item the user deliberately set aside after deciding what i
 | ID | Item | Parked | Write-up |
 |---|---|---|---|
 | F-012 | Screenshot testing with Maestro: a visual regression lane | 2026-09-24, by the user, after the design was agreed | `docs/BACKLOG.md`, section "Screenshot testing with Maestro (visual regression lane)"; shareable plan `docs/screenshot-testing-plan.html` |
+| F-019–F-022 | Camera performance for Swag Pay's scanner: markers, metrics, cycle test, heap-dump runs (and the `camera:` family in T-005) | 2026-09-25, by the user, after the plan was agreed with Killcam's product manager | `docs/BACKLOG.md`, section "Camera performance: Swag Pay's scanner" |
 
 - **When the user parks something:** add a row here, and give its BACKLOG entry a **Decisions already taken** section and a **Revisit when** section.
 - **When the user brings it back:** remove its row.
