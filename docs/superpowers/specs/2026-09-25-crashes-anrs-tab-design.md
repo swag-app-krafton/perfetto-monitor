@@ -180,4 +180,3 @@ Run on the V2514 (vivo, Android 16, user build, Perfetto v49) with Swag Pay 1.0.
   - `I am_anr: [0,26491,com.swag.pay,552091462,Input dispatching timed out (…)]`.
 
   Logged as B-011 (P0), with a proposed fix: append the session's logcat window to the trace, plus a canary line that tells "no crash" from "no log".
-

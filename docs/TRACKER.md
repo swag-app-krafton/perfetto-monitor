@@ -95,6 +95,7 @@ Problems in the app under test, opened from runs by the automatic review. Each h
 
 | ID | Title | Commit | Date |
 |---|---|---|---|
+| F-031 | App names from the phone on every app list and run, and search on the Manual screen. Asked for by the user on 2026-09-28: "Manual Run screen should give search option as well" and "if instead of the packageName if the published app name can be shown, that would be helpful in the searches as well". Names come from Android's PackageManager through `swagperf/android/Labels.java`, run with app_process; all 141 apps on the V2514 named. Catalogue names win. Capture and Manual share one searchable picker. | de0e1ef | 2026-09-28 |
 | T-001 | Dashboard server refuses other websites: a loopback `Host`, a loopback `Origin` when one is sent, and `X-Swagperf: 1` on every write (P0) | e428d0b | 2026-09-25 |
 | F-023 | AI summary for every run: Overview's Generate summary, a switch on Capture, Stress and Manual, `swagperf summary RUN`; it never changes the verdict | e428d0b | 2026-09-25 |
 | F-024 | The AI summary compares the run with its pinned benchmark: the model's words and Compare's tables, kept as written | e428d0b | 2026-09-25 |
