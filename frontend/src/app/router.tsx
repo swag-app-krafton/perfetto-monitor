@@ -6,9 +6,11 @@ import { Placeholder } from './Placeholder'
 import { HomeRedirect } from './HomeRedirect'
 import { Moved } from './Moved'
 import { MOVED_PATHS, SCREENS } from './routes'
+import { withNewBuild } from './staleBuild'
 
-/** Each screen is its own chunk, loaded on first visit. */
-const page = <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })))
+/** Each screen is its own chunk, loaded on first visit; a tab older than the
+ *  build reloads instead of failing (staleBuild.ts). */
+const page = <K extends string>(load: () => Promise<Record<K, ComponentType>>, name: K) => lazy(() => withNewBuild(load)().then((m) => ({ default: m[name] })))
 
 const PAGES: Record<string, ComponentType> = {
   overview: page(() => import('@/features/overview/OverviewPage'), 'OverviewPage'),
