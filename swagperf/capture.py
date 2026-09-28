@@ -1,6 +1,8 @@
 """Optional on-device capture via adb. Analysis never depends on this."""
 import os, re, shlex, subprocess, time
 
+from . import logcat
+
 # android.packages_list records installed packages' version codes in the
 # trace, so a trace names the app build it measured even when analysed away
 # from the device. No package filter: an unknown config field would make an
@@ -31,12 +33,15 @@ data_sources: {{ config {{ name: "android.packages_list" }} }}
 duration_ms: {dur}
 """
 
-# The app's error records (SwagErrors, tag SwagPerfError) and crash reports
-# (AndroidRuntime's FATAL EXCEPTION, native crash dumps in the crash buffer).
-# Filtered to those tags, so the log adds kilobytes, not the whole logcat.
+# The app's error records (SwagErrors, tag SwagPerfError), crash reports
+# (AndroidRuntime's FATAL EXCEPTION, native crash dumps in the crash buffer)
+# and the session's probe line (logcat.PROBE_TAG). Filtered to those tags, so
+# the log adds kilobytes, not the whole logcat. Some phones deliver none of it
+# (B-011); logcat.import_into then fills the trace from adb logcat.
 LOG_SOURCE = """data_sources: { config { name: "android.log" android_log_config {
   log_ids: LID_DEFAULT log_ids: LID_CRASH
   filter_tags: "SwagPerfError" filter_tags: "AndroidRuntime" filter_tags: "DEBUG" filter_tags: "libc"
+  filter_tags: "SwagPerfProbe"
 } } }"""
 
 
@@ -408,6 +413,7 @@ def capture(out_path, *, pkg="com.swag.pay", duration_ms=10000, serial=None,
                            input=cfg, text=True, capture_output=True, timeout=35)
     if start.returncode != 0 or not start.stdout.strip():
         raise RuntimeError(f"perfetto failed to start: {(start.stderr or start.stdout)[:500]}")
+    logcat.probe(serial)
 
     if cold:
         time.sleep(launch_after_ms / 1000)
@@ -419,7 +425,17 @@ def capture(out_path, *, pkg="com.swag.pay", duration_ms=10000, serial=None,
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     subprocess.run(base + ["pull", remote, out_path], check=True, capture_output=True)
+    _import_logcat(out_path, serial)
     return out_path
+
+
+def _import_logcat(out_path, serial):
+    """Crash logs the phone's log source didn't deliver (B-011), from adb
+    logcat. Best effort: a failure here never costs the recorded trace."""
+    try:
+        logcat.import_into(out_path, serial=serial)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------- manual mode
@@ -530,6 +546,7 @@ def manual_start(*, pkg="com.swag.pay", serial=None, cold=False):
         input=cfg, text=True, capture_output=True, timeout=40)
     if p.returncode != 0:
         raise RuntimeError(f"perfetto failed to start: {(p.stderr or p.stdout)[:400]}")
+    logcat.probe(serial)
 
     launched = False
     if cold:
@@ -567,6 +584,7 @@ def manual_stop(out_path, *, serial=None):
     if pull.returncode != 0:
         raise RuntimeError(f"failed to pull the trace: {(pull.stderr or pull.stdout)[:300]}")
     subprocess.run(base + ["shell", "rm", "-f", MANUAL_REMOTE], capture_output=True)
+    _import_logcat(out_path, serial)
     return out_path
 
 

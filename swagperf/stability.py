@@ -358,6 +358,13 @@ _SIGNAL_NAME = re.compile(r"\((SIG[A-Z0-9]+)\)")
 _REPORT_GAP_NS = 1_000_000_000
 
 
+def _has_log_lines(tp):
+    try:
+        return bool(_rows(tp, "select 1 as x from android_logs limit 1"))
+    except Exception:
+        return False
+
+
 def _crash_lines(tp):
     """Every crash-log line in the trace, with the pid of the process that
     wrote it. Unscoped on purpose: crash_dump, not the app, writes a native
@@ -461,7 +468,10 @@ def crash(tp, upids, platform, src, pkg=None, wins=None):
         return {"measured": True, "crashed": died, "reason": reason, "count": len(events),
                 "by_signature": _by_signature(events), "events": events}
     cfg = _config(tp)
-    if cfg is not None and 'name: "android.log"' not in cfg:
+    # Measured only if the log reached the trace: a config without the
+    # android.log source, or one whose log delivered no line at all, not
+    # even the session's probe line (B-011), measured no crashes.
+    if cfg is not None and ('name: "android.log"' not in cfg or not _has_log_lines(tp)):
         return {"measured": False, "crashed": False, "reason": None, "count": None,
                 "by_signature": {}, "events": []}
     wins = _screen_windows(tp) if wins is None else wins
