@@ -24,6 +24,19 @@ def busy():
     return _capture_lock.locked()
 
 
+def _add_placeholder(pkg, platform="android", serial=None):
+    """Record an app nobody catalogued as an unlabelled competitor, so its run
+    is attributable, named as the phone shows it (F-031) when the phone says."""
+    from . import capture, catalogue
+    name = pkg
+    if platform == "android":
+        try:
+            name = capture.app_labels([pkg], serial).get(pkg, pkg)
+        except Exception:
+            name = pkg      # a name is a nicety; the run must still record
+    catalogue.add(pkg, name=name, role="competitor", auto=True, platform=platform)
+
+
 def _new(kind, **meta):
     jid = uuid.uuid4().hex[:12]
     with _LOCK:
@@ -130,7 +143,7 @@ def start_capture(pkg, *, cold=True, duration_ms=10000, label=None, ai_summary=F
             if not app:
                 _log(jid, f"{pkg} is not in the catalogue yet; recording it as an "
                           "unlabelled competitor so this run is still attributable.")
-                catalogue.add(pkg, name=pkg, role="competitor", auto=True, platform=platform)
+                _add_placeholder(pkg, platform, device)
 
             meta = _run_metadata(cap, pkg, device, "before capture")
             out = _trace_out(platform, f"{pkg}_{'cold' if cold else 'warm'}_{jid}")
@@ -229,7 +242,7 @@ def start_stress(pkg, *, sessions=5, cold=True, duration_ms=8000, label=None,
                 raise RuntimeError(backends.NO_DEVICE[platform])
             dev_label = info.get("model") or info.get("device")
             if not catalogue.get(pkg, platform):
-                catalogue.add(pkg, name=pkg, role="competitor", auto=True, platform=platform)
+                _add_placeholder(pkg, platform, device)
 
             stress_id = store.stress_create(
                 app_pkg=pkg, device=dev_label, label=label, sessions=sessions,
@@ -346,7 +359,7 @@ def start_manual_stop(*, label=None, app_pkg=None, ai_summary=False, device=None
             m = ex.extract_any(out, app_pkg=app_pkg)
             pkg = m.get("app_pkg") or app_pkg
             if pkg and not catalogue.get(pkg):
-                catalogue.add(pkg, name=pkg, role="competitor", auto=True)
+                _add_placeholder(pkg, "android", device)
 
             # A manual session is driven by hand, so it legitimately may contain
             # no launch at all -- the user may have traced an already-open app.
@@ -432,7 +445,7 @@ def start_audit(pkg, *, iterations=5, duration_ms=10000, label=None, device=None
                 raise RuntimeError("A Perfetto manual session is recording on this device, and "
                                    "Flashlight would break its trace. Stop the session first.")
             if not catalogue.get(pkg):
-                catalogue.add(pkg, name=pkg, role="competitor", auto=True)
+                _add_placeholder(pkg, "android", serial)
             _log(jid, f"device: {info.get('model')} (Android {info.get('release')})")
 
             meta = _run_metadata(cap, pkg, serial, "before audit")

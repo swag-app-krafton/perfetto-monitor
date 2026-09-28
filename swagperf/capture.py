@@ -64,6 +64,57 @@ def installed_packages(serial=None):
                  for l in out.splitlines() if l.strip().startswith("package:"))
 
 
+# App names (F-031): `pm list packages` gives package ids only, so a small
+# helper (android/Labels.java, built to labels.dex) asks Android's own
+# PackageManager for the name each app shows on the phone.
+LABELS_DEX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "android", "labels.dex")
+REMOTE_LABELS_DEX = "/data/local/tmp/swagperf-labels.dex"
+# (serial, package) -> name, or None when the phone gave none. Screens poll
+# the device every 15 s, so the phone is asked again only for a new package.
+_LABELS = {}
+
+
+def parse_labels(text):
+    """`<package>\\t<name>` lines from the helper -> {package: name}. Lines
+    without a tab, blank names and names equal to the package are skipped."""
+    out = {}
+    for line in (text or "").splitlines():
+        pkg, sep, name = line.partition("\t")
+        pkg, name = pkg.strip(), name.strip()
+        if sep and pkg and name and name != pkg:
+            out[pkg] = name
+    return out
+
+
+def _read_labels(serial):
+    """Every app's name, straight from the phone; {} when that fails."""
+    try:
+        subprocess.run(["adb", "-s", serial, "push", LABELS_DEX, REMOTE_LABELS_DEX],
+                       capture_output=True, timeout=30, check=True)
+        out = subprocess.run(["adb", "-s", serial, "shell",
+                              f"CLASSPATH={REMOTE_LABELS_DEX} app_process /system/bin Labels"],
+                             capture_output=True, text=True, timeout=60).stdout
+    except (subprocess.SubprocessError, OSError):
+        return {}
+    return parse_labels(out)
+
+
+def app_labels(pkgs, serial=None):
+    """{package: name} for the packages whose name the phone gave. Asked once
+    per package per server process; a package without one keeps its id."""
+    devs = devices()
+    if not devs:
+        return {}
+    serial = serial or devs[0]
+    if any((serial, p) not in _LABELS for p in pkgs):
+        got = _read_labels(serial)
+        for p in pkgs:
+            _LABELS.setdefault((serial, p), got.get(p))
+        for p, name in got.items():
+            _LABELS[(serial, p)] = name
+    return {p: _LABELS[(serial, p)] for p in pkgs if _LABELS.get((serial, p))}
+
+
 def device_info(serial=None):
     devs = devices()
     if not devs:

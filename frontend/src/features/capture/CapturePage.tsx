@@ -2,11 +2,12 @@ import { useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, startCapture, useDevice, useJob, useRecentJobs } from '@/api/hooks'
 import type { DevicePayload, Run } from '@/api/types'
-import { Banner, Button, Card, ChoiceList, EmptyState, Grid, LogConsole, Progress, Row, SearchInput, Segmented, Stack, Stat, StatGrid, Stepper, Swatch, Switch, Text } from '@/design'
+import { Banner, Button, Card, EmptyState, Grid, LogConsole, Progress, Row, Segmented, Stack, Stat, StatGrid, Stepper, Swatch, Switch, Text } from '@/design'
 import { fmt } from '@/domain/format'
 import { runVerdict } from '@/domain/metrics'
 import { useLaneNavigate, useProfiler } from '@/app/profiler'
 import { platformOf, useUi } from '@/app/store'
+import { AppPicker } from '@/features/shared/AppPicker'
 import { STAGES, stageStates } from './stages'
 import s from './Capture.module.css'
 
@@ -26,7 +27,6 @@ export function CapturePage() {
   const aiSummary = useUi((s) => s.aiSummary)
   const setAiSummary = useUi((s) => s.setAiSummary)
   const recent = useRecentJobs()
-  const [q, setQ] = useState('')
   const [pkg, setPkg] = useState<string | null>(null)
   const [cold, setCold] = useState(true)
   const [duration, setDuration] = useState(10000)
@@ -42,7 +42,6 @@ export function CapturePage() {
   const d = dev.data?.connected ? (dev.data as Connected) : null
   const installed = useMemo(() => (d?.packages ?? []).filter((p) => p.installed), [d])
   const selected = pkg ?? installed.find((p) => p.role === 'own')?.pkg ?? installed[0]?.pkg ?? null
-  const list = installed.filter((p) => !q || `${p.name} ${p.pkg}`.toLowerCase().includes(q.toLowerCase())).slice(0, 80)
   // A Debug iOS build loads its JS from Metro: a different app to measure.
   const debugBuild = ios && installed.find((p) => p.pkg === selected)?.build?.build_type === 'debug'
   const mac = (d?.health ?? {}) as MacState
@@ -142,21 +141,13 @@ export function CapturePage() {
 
         {d && (
           <Card title="Installed packages">
-            <Stack gap={12}>
-              <SearchInput label="Search installed apps" placeholder="Search by name or package id" value={q} onChange={setQ} />
-              <ChoiceList
-                label="Package to profile"
-                maxHeight={360}
-                value={selected}
-                onChange={setPkg}
-                options={list.map((p) => ({
-                  value: p.pkg,
-                  title: `${p.name}${p.role === 'own' ? ' · ours' : ''}`,
-                  description: p.build ? `${p.pkg} · ${p.build.build_type === 'debug' ? 'Debug build, cannot be profiled' : 'Release build'}` : p.pkg,
-                }))}
-                empty="No installed apps match that search."
-              />
-            </Stack>
+            <AppPicker
+              label="Package to profile"
+              apps={installed}
+              value={selected}
+              onChange={setPkg}
+              describe={(p) => (p.build ? `${p.pkg} · ${p.build.build_type === 'debug' ? 'Debug build, cannot be profiled' : 'Release build'}` : p.pkg)}
+            />
           </Card>
         )}
 

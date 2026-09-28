@@ -103,11 +103,16 @@ def _device_payload(platform="android"):
     if not info:
         return {"connected": False, "platform": "android"}
     installed = set(cap.installed_packages())
+    # The names the phone shows (F-031): an app nobody catalogued reads
+    # "PhonePe", not its package id, here and, through the catalogue, on
+    # every run of it. Names in the catalogue win.
+    labels = cap.app_labels(sorted(installed))
+    catalogue.adopt_names(labels)
     known = [a for a in catalogue.load() if a["platform"] == "android"]
     seen = {a["pkg"] for a in known}
     rows = [{**a, "installed": a["pkg"] in installed} for a in known]
     for pkg in sorted(installed - seen):
-        rows.append({"pkg": pkg, "name": pkg, "role": "competitor",
+        rows.append({"pkg": pkg, "name": labels.get(pkg, pkg), "role": "competitor",
                     "instrumented": False, "verified": True, "installed": True,
                     "in_catalogue": False})
     for r in rows:

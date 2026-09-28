@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { keys, manualAbort, manualStart, manualStop, useDevice, useJob, useLiveMarkers, useManualStatus, useRecentJobs } from '@/api/hooks'
 import type { DevicePayload, LiveEvent } from '@/api/types'
-import { Banner, Button, Card, EmptyState, Grid, LogConsole, Row, Segmented, SelectField, Spinner, Stack, StatusPill, Stepper, Swatch, Switch, Text, ToggleChip } from '@/design'
+import { Banner, Button, Card, EmptyState, Grid, LogConsole, Row, Segmented, Spinner, Stack, StatusPill, Stepper, Swatch, Switch, Text, ToggleChip } from '@/design'
 import { useUi } from '@/app/store'
+import { AppPicker } from '@/features/shared/AppPicker'
 import s from './Manual.module.css'
 
 const KINDS: { kind: LiveEvent['kind']; label: string; color: string }[] = [
@@ -171,10 +172,8 @@ export function ManualPage() {
                 Tracing runs as a detached session with no fixed duration: use the app however you need to -- a real payment, a biometric unlock, a sequence no
                 script reproduces -- then stop. Cold force-stops and relaunches the app so the launch is measured too.
               </Text>
+              {installed.length > 0 && <AppPicker label="App to trace" apps={installed} value={target || null} onChange={setPkg} maxHeight={280} />}
               <Row gap={8} wrap>
-                {installed.length > 0 && (
-                  <SelectField label="App" value={target} options={installed.map((p) => ({ value: p.pkg, label: p.name + (p.role === 'own' ? ' · ours' : '') }))} onChange={setPkg} />
-                )}
                 <Segmented label="Start" value={cold ? 'cold' : 'warm'} onChange={(v) => setCold(v === 'cold')} options={[{ value: 'cold', label: 'Cold' }, { value: 'warm', label: 'Warm' }]} />
               </Row>
               <Stack gap={4}>

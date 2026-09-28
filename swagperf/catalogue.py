@@ -123,6 +123,25 @@ def add(pkg, *, name=None, role="competitor", category=None, vendor=None,
     return entry
 
 
+def adopt_names(names, platform="android"):
+    """Give placeholders the name the phone shows (capture.app_labels), so
+    runs of an app nobody catalogued read "PhonePe", not its package id.
+    Only placeholders change: a name a person set, or a built-in, stays. An
+    adopted entry is still a placeholder (`auto`), so it never overrides a
+    built-in. Writes only when something changed; returns how many did."""
+    cur = _read(USER).get("apps", [])
+    n = 0
+    for a in cur:
+        name = names.get(a.get("pkg"))
+        if (name and platform_of(a) == platform and not a.get("_deleted")
+                and _is_placeholder(a) and a.get("name") != name):
+            a["name"], a["auto"] = name, True
+            n += 1
+    if n:
+        save_user(cur)
+    return n
+
+
 def remove(pkg, platform="android"):
     """Tombstone a package so a built-in entry can be hidden too."""
     cur = [a for a in _read(USER).get("apps", []) if _key(a) != (platform, pkg)]
