@@ -1,7 +1,7 @@
 # Crashes & ANRs: ANR detection, a full crash list, and one tab for JS exceptions, ANRs and crashes
 
 - **Tracker:** F-028 (this spec). Serves F-025 (test-flow runs), which gets its own spec afterwards.
-- **Status:** implemented 2026-09-25 in `a3428b4`…`4e7ff5c` (plan: `docs/superpowers/plans/2026-09-25-crashes-anrs-tab.md`). The phone check (Order of work, step 1; TESTING-PLAN CR-07) is still open: the V2514 was disconnected all day.
+- **Status:** implemented 2026-09-25 in `a3428b4`…`4e7ff5c` (plan: `docs/superpowers/plans/2026-09-25-crashes-anrs-tab.md`). Phone check run 2026-09-28: see "Phone check, 2026-09-28" at the end.
 - **Builds on:** F-014 (`swagperf/stability.py`, the Stability page, commit `bacfa81`).
 
 ## What the user asked for
@@ -167,3 +167,17 @@ Everything is built from the existing design system (`frontend/src/design`); T-0
 - **The V2514 may not write the ANR counters.** Vendors change ActivityManager. The phone check finds out before any code; the event-log fallback covers it.
 - **Tombstone format varies by Android version.** The header line (`pid: …, tid: …, name: …  >>> <pkg> <<<`) has been stable for years, but the parser keeps the raw lines, so a change loses structure, not the log.
 - **Trace size.** The ANR counters are a handful of events; crash logs are kilobytes. If the `am_anr` fallback is needed, the events buffer is filtered to one tag.
+
+## Phone check, 2026-09-28
+
+Run on the V2514 (vivo, Android 16, user build, Perfetto v49) with Swag Pay 1.0.0 (debuggable), in one manual session: freeze the main thread and tap twice, `am crash com.swag.pay`, then `kill -SEGV` through `run-as`.
+
+- **ANR: works.** `android_anrs` returned one row: `process_name` `com.swag.pay`, pid 26491, type `INPUT_DISPATCHING_TIMEOUT`, subject "Input dispatching timed out (f80a91d com.swag.pay/com.swag.pay.MainActivity is not responding. Waited 5000ms for MotionEvent).", `anr_dur_ms` null, `default_anr_dur_ms` 5000. `stability.anrs` read it on screen Home. The event-log fallback (the plan's Task 4) isn't needed.
+- **Crashes: no log lines reach the trace.** The trace's config has the `android.log` source, but `android_log_num_total` is 0, and so is a 5 s session with only `android.log` and no filters. `adb logcat` on the phone has every line, in the formats `stability.py` reads:
+  - `E AndroidRuntime: FATAL EXCEPTION: main`, then `Process: com.swag.pay, PID: 28036`;
+  - `F libc: Fatal signal 11 (SIGSEGV), code 0 (SI_USER from pid 28784, uid 10388) in tid 28493 (com.swag.pay), pid 28493 (com.swag.pay)`;
+  - `F DEBUG: pid: 28493, tid: 28493, name: com.swag.pay  >>> com.swag.pay <<<`, written by crash_dump (pid 28792);
+  - `I am_anr: [0,26491,com.swag.pay,552091462,Input dispatching timed out (…)]`.
+
+  Logged as B-011 (P0), with a proposed fix: append the session's logcat window to the trace, plus a canary line that tells "no crash" from "no log".
+
